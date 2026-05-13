@@ -989,6 +989,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
     ab_test: Optional[ABTestManager] = None
     wrapper_ref: Optional[Any] = None  # Reference to wrapper for bot control
     log_buffer: Optional[Any] = None  # Phase 2: LogBuffer for real-time logs
+    notification_manager: Optional[Any] = None  # Phase 3: NotificationManager
 
     def log_message(self, format, *args):
         pass  # Silenciar logs de acesso
@@ -1139,7 +1140,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if w and hasattr(w, 'get_system_status'):
                 self._send_json(w.get_system_status())
             else:
-                self._send_json({"error": "Bot not connected or get_system_status unavailable"}, 500)
+                # Return default system status when bot is not connected
+                self._send_json({
+                    "paused": False,
+                    "running": False,
+                    "systems": {
+                        "rl_engine": {"enabled": False, "available": False},
+                        "humanization": {"enabled": False, "available": False},
+                        "anti_ban": {"enabled": False, "available": False},
+                        "error_recovery": {"enabled": False, "available": False},
+                        "recording": {"enabled": False, "available": False},
+                        "auto_tuner": {"enabled": False, "available": False},
+                        "data_collector": {"enabled": False, "available": False},
+                    }
+                })
         elif path == "/api/bot/queue":
             w = self.wrapper_ref
             if w and w.brawler_queue:
@@ -3220,6 +3234,7 @@ class DashboardServer:
         DashboardHandler.ab_test = self.ab_test
         DashboardHandler.wrapper_ref = self._wrapper_ref
         DashboardHandler.log_buffer = self.log_buffer
+        DashboardHandler.notification_manager = self.notification_manager
 
         try:
             self._server = ThreadingHTTPServer(("0.0.0.0", self.port), DashboardHandler)
