@@ -1,0 +1,26 @@
+# Requirements para treinamento YOLO e SAM2 auto-labeling
+# Brawl Stars Bot - Soberana Omega
+
+# YOLOv8 e Ultralytics
+ultralytics>=8.0.0
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Segment Anything 2 (SAM2)
+# Nota: SAM2 requer PyTorch 2.0+ e pode precisar de build from source
+# Para Windows, recomenda-se usar WSL2 ou Docker
+git+https://github.com/facebookresearch/segment-anything-2.git
+
+# Processamento de imagem
+opencv-python>=4.8.0
+Pillow>=10.0.0
+numpy>=1.24.0
+
+# Visualização e anotação
+matplotlib>=3.7.0
+label-studio>=1.8.0  # Opcional - para anotação manual
+roboflow>=1.1.0  # Opcional - alternativa para anotação
+
+# Utilitários
+tqdm>=4.65.0
+pyyaml>=6.0

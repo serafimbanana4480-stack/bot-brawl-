@@ -1,0 +1,30 @@
+{
+  "yolov8n": {
+    "name": "yolov8n.pt",
+    "path": "d:\\ia ultima\\soberana-omega\\backend\\brawl_bot\\models\\yolov8n.pt",
+    "size_mb": 6.231677055358887,
+    "downloaded_at": "2026-04-12T17:09:13.269179",
+    "checksum": null
+  },
+  "yolov8m": {
+    "name": "yolov8m.pt",
+    "path": "D:\\ia ultima\\soberana-omega\\backend\\brawl_bot\\models\\yolov8m.pt",
+    "size_mb": 49.70324993133545,
+    "downloaded_at": "2026-04-17T02:22:25.847262",
+    "checksum": null
+  },
+  "main_info": {
+    "name": "main_info.pt",
+    "path": "d:\\ia ultima\\soberana-omega\\backend\\brawl_bot\\models\\main_info.pt",
+    "size_mb": 6.231677055358887,
+    "downloaded_at": "2026-04-21T01:38:00.000000",
+    "checksum": null
+  },
+  "brawler_id": {
+    "name": "brawler_id.pt",
+    "path": "d:\\ia ultima\\soberana-omega\\backend\\brawl_bot\\models\\brawler_id.pt",
+    "size_mb": 6.231677055358887,
+    "downloaded_at": "2026-04-21T01:38:00.000000",
+    "checksum": null
+  }
+}

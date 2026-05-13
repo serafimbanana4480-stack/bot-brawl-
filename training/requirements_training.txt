@@ -1,0 +1,33 @@
+# Brawl Stars Bot Training Dependencies
+# Phase 2.6: Advanced AI Pipeline
+
+# Core ML Frameworks
+torch>=2.0.0
+torchvision>=0.15.0
+ultralytics>=8.2.0  # Includes YOLO11 and YOLO-World
+
+# SAM2 (Segment Anything Model 2)
+# Note: SAM2 installation may require specific steps
+# pip install git+https://github.com/facebookresearch/segment-anything-2.git
+
+# Data Labeling
+label-studio>=1.10.0
+label-studio-sdk>=0.0.5
+
+# Model Export and Optimization
+onnx>=1.15.0
+onnxruntime>=1.16.0
+# tensorrt>=10.0.0  # Optional, requires NVIDIA GPU and TensorRT SDK
+
+# Computer Vision
+opencv-python>=4.8.0
+pillow>=10.0.0
+numpy>=1.24.0
+
+# Data Processing
+albumentations>=1.3.0
+scikit-learn>=1.3.0
+
+# Utilities
+pyyaml>=6.0
+tqdm>=4.65.0

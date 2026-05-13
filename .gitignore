@@ -1,0 +1,250 @@
+# ============================================================================
+# .gitignore — Soberana Omega Brawl Stars Bot
+# ============================================================================
+# Comprehensive ignore rules for the project. Organized by category.
+# Last updated: 2025-05
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 1. Python
+# ----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+*.egg
+*.egg-info/
+*.eggs/
+dist/
+build/
+eggs/
+sdist/
+develop-eggs/
+.installed.cfg
+
+# Python bytecode
+*.pyc
+*.pyo
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Environments
+.env
+.env.*
+!.env.example
+
+# ----------------------------------------------------------------------------
+# 2. Virtual Environments
+# ----------------------------------------------------------------------------
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ----------------------------------------------------------------------------
+# 3. IDE / Editors
+# ----------------------------------------------------------------------------
+# VS Code
+.vscode/
+*.code-workspace
+
+# JetBrains (PyCharm, IntelliJ)
+.idea/
+*.iml
+*.iws
+*.ipr
+.idea_modules/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+.*.sw[a-z]
+Session.vim
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+auto-save-list
+tramp
+
+# ----------------------------------------------------------------------------
+# 4. OS Files
+# ----------------------------------------------------------------------------
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+nul
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# ----------------------------------------------------------------------------
+# 5. Project-Specific
+# ----------------------------------------------------------------------------
+
+# --- YOLO Models (large binary files — use Git LFS or external storage) ---
+models/**/*.pt
+models/**/*.pth
+models/**/*.onnx
+models/**/*.engine
+models/**/*.tflite
+models/**/*.mlmodel
+*.pt
+*.pth
+!models/README.md
+!models/.gitkeep
+
+# --- Data files (runtime / generated — not source code) ---
+data/**/*.json
+data/**/*.pkl
+data/**/*.db
+data/**/*.sqlite
+data/**/*.csv
+!data/.gitkeep
+!data/README.md
+
+# --- Screenshots (runtime captures — not source assets) ---
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.webp
+# Exceptions: keep source assets that are part of the codebase
+!images/**
+!assets/**
+!docs/images/**
+!dataset/images/**
+!README*.png
+!README*.jpg
+
+# --- Log files ---
+logs/
+*.log
+log/
+
+# --- Training artifacts ---
+runs/
+training/datasets/
+training/label_studio/
+training_reports/
+dataset/
+
+# --- Session / state files ---
+*.session
+*.state
+session_state.json
+
+# --- Config files with secrets (keep template only) ---
+config.json
+config.local.json
+!config.example.json
+!config.template.json
+
+# --- Planning directory (internal dev notes) ---
+.planning/
+
+# --- PyLA workspace directories ---
+pylaai_real/
+pylaai_workspace/
+
+# --- Emulator / device specific ---
+lobby.toml
+
+# --- Installation reports (generated) ---
+installation_report.json
+verify_installation_report.json
+
+# ----------------------------------------------------------------------------
+# 6. Test Artifacts
+# ----------------------------------------------------------------------------
+test_output/
+htmlcov/
+test_reports/
+
+# Old test log files in project root
+bot_*.txt
+_check_output.txt
+
+# ----------------------------------------------------------------------------
+# 7. Build / Distribution
+# ----------------------------------------------------------------------------
+*.whl
+*.tar.gz
+*.zip
+*.rar
+*.7z
+
+# Compiled executables
+*.exe
+*.dll
+*.so
+*.dylib
+
+# ----------------------------------------------------------------------------
+# 8. Debug / Temp Files
+# ----------------------------------------------------------------------------
+
+# --- Debug screenshots ---
+ss_*.png
+debug_*.png
+debug_*.jpg
+live_*.png
+
+# --- Temporary directories ---
+tmp/
+tmp2/
+tmp3/
+
+# --- Miscellaneous temp files ---
+*.tmp
+*.bak
+*.orig
+*.rej
+*.patch
+*.diff
+
+# --- MLflow / experiment tracking ---
+mlruns/
+mlartifacts/
+
+# --- Jupyter notebooks checkpoints ---
+.ipynb_checkpoints/
+
+# ============================================================================
+# END OF .gitignore
+# ============================================================================
