@@ -264,3 +264,27 @@ def _ensure_soberana_shim() -> None:
 
 
 _ensure_soberana_shim()
+
+
+# ---------------------------------------------------------------------------
+# Step 5: Integration test marker — skip unless --run-integration flag
+# ---------------------------------------------------------------------------
+import os
+import pytest as _pytest
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--run-integration", action="store_true", default=False,
+        help="Run integration tests that require a real emulator")
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "integration: requires real emulator (skip unless --run-integration)")
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--run-integration"):
+        return
+    skip_integration = _pytest.mark.skip(reason="needs --run-integration option to run")
+    for item in items:
+        if "integration" in item.keywords:
+            item.add_marker(skip_integration)

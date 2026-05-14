@@ -129,6 +129,127 @@ except ImportError:
     DebugIntegration = None
     DebugMode = None
 
+# Phase 10: Advanced Core Modules
+try:
+    from .core.central_coordinator import CentralCoordinator
+    HAS_CENTRAL_COORDINATOR = True
+except ImportError:
+    HAS_CENTRAL_COORDINATOR = False
+    CentralCoordinator = None
+
+try:
+    from .core.world_model import WorldModel
+    HAS_WORLD_MODEL = True
+except ImportError:
+    HAS_WORLD_MODEL = False
+    WorldModel = None
+
+try:
+    from .core.occupancy_grid import OccupancyGrid
+    HAS_OCCUPANCY_GRID = True
+except ImportError:
+    HAS_OCCUPANCY_GRID = False
+    OccupancyGrid = None
+
+try:
+    from .core.pressure_map import PressureMap
+    HAS_PRESSURE_MAP = True
+except ImportError:
+    HAS_PRESSURE_MAP = False
+    PressureMap = None
+
+try:
+    from .core.lobby_fsm import HierarchicalFSM as LobbyFSM
+    HAS_LOBBY_FSM = True
+except ImportError:
+    HAS_LOBBY_FSM = False
+    LobbyFSM = None
+
+try:
+    from .core.async_pipeline import AsyncPipeline
+    HAS_ASYNC_PIPELINE = True
+except ImportError:
+    HAS_ASYNC_PIPELINE = False
+    AsyncPipeline = None
+
+try:
+    from .core.adaptive_screenshot import AdaptiveScreenshotCache
+    HAS_ADAPTIVE_SCREENSHOT = True
+except ImportError:
+    HAS_ADAPTIVE_SCREENSHOT = False
+    AdaptiveScreenshotCache = None
+
+try:
+    from .core.behavioral_profile import BehavioralProfile
+    HAS_BEHAVIORAL_PROFILE = True
+except ImportError:
+    HAS_BEHAVIORAL_PROFILE = False
+    BehavioralProfile = None
+
+try:
+    from .core.input_optimizer import InputOptimizer
+    HAS_INPUT_OPTIMIZER = True
+except ImportError:
+    HAS_INPUT_OPTIMIZER = False
+    InputOptimizer = None
+
+try:
+    from .core.replay_analyzer import ReplayFailureAnalyzer as ReplayAnalyzer
+    HAS_REPLAY_ANALYZER = True
+except ImportError:
+    HAS_REPLAY_ANALYZER = False
+    ReplayAnalyzer = None
+
+try:
+    from .core.tactical_bridge import TacticalBridge
+    HAS_TACTICAL_BRIDGE = True
+except ImportError:
+    HAS_TACTICAL_BRIDGE = False
+    TacticalBridge = None
+
+try:
+    from .core.cover_system import CoverSystem
+    HAS_COVER_SYSTEM = True
+except ImportError:
+    HAS_COVER_SYSTEM = False
+    CoverSystem = None
+
+# Phase 10: Advanced Decision Modules
+try:
+    from .decision.utility_ai import UtilityAI
+    HAS_UTILITY_AI = True
+except ImportError:
+    HAS_UTILITY_AI = False
+    UtilityAI = None
+
+try:
+    from .decision.sticky_target import StickyTarget
+    HAS_STICKY_TARGET = True
+except ImportError:
+    HAS_STICKY_TARGET = False
+    StickyTarget = None
+
+try:
+    from .decision.intent_system import IntentSystem
+    HAS_INTENT_SYSTEM = True
+except ImportError:
+    HAS_INTENT_SYSTEM = False
+    IntentSystem = None
+
+try:
+    from .decision.enemy_intention import EnemyIntentionPredictor
+    HAS_ENEMY_INTENTION = True
+except ImportError:
+    HAS_ENEMY_INTENTION = False
+    EnemyIntentionPredictor = None
+
+try:
+    from .decision.meta_awareness import MetaAwareness
+    HAS_META_AWARENESS = True
+except ImportError:
+    HAS_META_AWARENESS = False
+    MetaAwareness = None
+
 logger = logging.getLogger(__name__)
 
 # Default install path
@@ -330,6 +451,144 @@ class PylaAIEnhanced:
             except Exception as e:
                 logger.warning(f"[WRAPPER] Debug Visualizer indisponível: {e}")
 
+        # Phase 10: Advanced Core Modules
+        self.central_coordinator: Optional[Any] = None
+        if HAS_CENTRAL_COORDINATOR:
+            try:
+                self.central_coordinator = CentralCoordinator()
+                logger.info("[WRAPPER] Central Coordinator inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] Central Coordinator indisponível: {e}")
+
+        self.world_model: Optional[Any] = None
+        if HAS_WORLD_MODEL:
+            try:
+                self.world_model = WorldModel()
+                logger.info("[WRAPPER] World Model inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] World Model indisponível: {e}")
+
+        self.occupancy_grid: Optional[Any] = None
+        if HAS_OCCUPANCY_GRID:
+            try:
+                self.occupancy_grid = OccupancyGrid()
+                logger.info("[WRAPPER] Occupancy Grid inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] Occupancy Grid indisponível: {e}")
+
+        self.pressure_map: Optional[Any] = None
+        if HAS_PRESSURE_MAP:
+            try:
+                self.pressure_map = PressureMap()
+                logger.info("[WRAPPER] Pressure Map inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] Pressure Map indisponível: {e}")
+
+        self.lobby_fsm: Optional[Any] = None
+        if HAS_LOBBY_FSM:
+            try:
+                self.lobby_fsm = LobbyFSM()
+                logger.info("[WRAPPER] Lobby FSM inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] Lobby FSM indisponível: {e}")
+
+        self.async_pipeline: Optional[Any] = None
+        if HAS_ASYNC_PIPELINE:
+            try:
+                self.async_pipeline = AsyncPipeline()
+                logger.info("[WRAPPER] Async Pipeline inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] Async Pipeline indisponível: {e}")
+
+        self.adaptive_screenshot_cache: Optional[Any] = None
+        if HAS_ADAPTIVE_SCREENSHOT:
+            try:
+                self.adaptive_screenshot_cache = AdaptiveScreenshotCache()
+                logger.info("[WRAPPER] Adaptive Screenshot Cache inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] Adaptive Screenshot Cache indisponível: {e}")
+
+        self.behavioral_profile: Optional[Any] = None
+        if HAS_BEHAVIORAL_PROFILE:
+            try:
+                self.behavioral_profile = BehavioralProfile()
+                logger.info("[WRAPPER] Behavioral Profile inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] Behavioral Profile indisponível: {e}")
+
+        self.input_optimizer: Optional[Any] = None
+        if HAS_INPUT_OPTIMIZER:
+            try:
+                self.input_optimizer = InputOptimizer()
+                logger.info("[WRAPPER] Input Optimizer inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] Input Optimizer indisponível: {e}")
+
+        self.replay_analyzer: Optional[Any] = None
+        if HAS_REPLAY_ANALYZER:
+            try:
+                self.replay_analyzer = ReplayAnalyzer()
+                logger.info("[WRAPPER] Replay Analyzer inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] Replay Analyzer indisponível: {e}")
+
+        self.tactical_bridge: Optional[Any] = None
+        if HAS_TACTICAL_BRIDGE:
+            try:
+                self.tactical_bridge = TacticalBridge()
+                logger.info("[WRAPPER] Tactical Bridge inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] Tactical Bridge indisponível: {e}")
+
+        self.cover_system: Optional[Any] = None
+        if HAS_COVER_SYSTEM:
+            try:
+                self.cover_system = CoverSystem()
+                logger.info("[WRAPPER] Cover System inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] Cover System indisponível: {e}")
+
+        # Phase 10: Advanced Decision Modules
+        self.utility_ai: Optional[Any] = None
+        if HAS_UTILITY_AI:
+            try:
+                self.utility_ai = UtilityAI()
+                logger.info("[WRAPPER] Utility AI inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] Utility AI indisponível: {e}")
+
+        self.sticky_target: Optional[Any] = None
+        if HAS_STICKY_TARGET:
+            try:
+                self.sticky_target = StickyTarget()
+                logger.info("[WRAPPER] Sticky Target inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] Sticky Target indisponível: {e}")
+
+        self.intent_system: Optional[Any] = None
+        if HAS_INTENT_SYSTEM:
+            try:
+                self.intent_system = IntentSystem()
+                logger.info("[WRAPPER] Intent System inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] Intent System indisponível: {e}")
+
+        self.enemy_intention: Optional[Any] = None
+        if HAS_ENEMY_INTENTION:
+            try:
+                self.enemy_intention = EnemyIntentionPredictor()
+                logger.info("[WRAPPER] Enemy Intention Predictor inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] Enemy Intention Predictor indisponível: {e}")
+
+        self.meta_awareness: Optional[Any] = None
+        if HAS_META_AWARENESS:
+            try:
+                self.meta_awareness = MetaAwareness()
+                logger.info("[WRAPPER] Meta Awareness inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] Meta Awareness indisponível: {e}")
+
         # EmulatorController integration (Fix Error #10)
         self.emulator_controller = None
 
@@ -516,18 +775,40 @@ class PylaAIEnhanced:
         # Try BrawlStarsBot trained model first (Player, Bush, Enemy, Cubebox)
         brawlstars_path = trained_models.get("brawlstars_yolov8")
         if brawlstars_path and brawlstars_path.exists():
-            try:
-                real_model = YOLO(str(brawlstars_path))
-                self.detect_main = Detect(
-                    model=real_model,
-                    classes={0: "Player", 1: "Bush", 2: "Enemy", 3: "Cubebox"},
-                    conf=0.03
-                )
-                self.detect_enemies = self.detect_main
-                logger.info(f"Loaded BrawlStarsBot TRAINED model: {brawlstars_path.name} (classes: Player, Bush, Enemy, Cubebox)")
-                model_loaded = True
-            except Exception as e:
-                logger.error(f"Failed to load BrawlStarsBot model {brawlstars_path}: {e}")
+            for attempt in range(1, 4):
+                try:
+                    real_model = YOLO(str(brawlstars_path))
+                    # Verify model has expected classes
+                    expected_classes = {"Player", "Bush", "Enemy", "Cubebox"}
+                    actual_classes = set(real_model.names.values()) if hasattr(real_model, "names") else set()
+                    if expected_classes.issubset(actual_classes):
+                        self.detect_main = Detect(
+                            model=real_model,
+                            classes={0: "Player", 1: "Bush", 2: "Enemy", 3: "Cubebox"},
+                            conf=0.25
+                        )
+                        self.detect_enemies = self.detect_main
+                        logger.info(f"[MODEL] Loaded BrawlStarsBot TRAINED model: {brawlstars_path.name} (classes: {actual_classes}, attempt={attempt})")
+                        model_loaded = True
+                        break
+                    else:
+                        missing = expected_classes - actual_classes
+                        logger.warning(f"[MODEL] BrawlStarsBot model missing classes {missing}, got: {actual_classes}")
+                        # Still use it but log warning
+                        self.detect_main = Detect(
+                            model=real_model,
+                            classes={0: "Player", 1: "Bush", 2: "Enemy", 3: "Cubebox"},
+                            conf=0.25
+                        )
+                        self.detect_enemies = self.detect_main
+                        model_loaded = True
+                        break
+                except Exception as e:
+                    logger.error(f"[MODEL] Failed to load BrawlStarsBot model {brawlstars_path} (attempt {attempt}/3): {e}")
+                    if attempt < 3:
+                        time.sleep(0.5)
+                    else:
+                        logger.error("[MODEL] BrawlStarsBot model failed after all retries")
 
         # Try PylaAI trained models if BrawlStarsBot failed
         if not model_loaded:
@@ -1148,8 +1429,139 @@ class PylaAIEnhanced:
         """Register a function to be called during graceful shutdown."""
         self._shutdown_hooks.append(hook)
 
+    def _cleanup_resources(self):
+        """Systematically stop all subsystems in dependency order.
+
+        Order matters: stop active components first, then data sinks,
+        then UI/monitoring, finally background threads.
+        """
+        # --- Phase 1: Stop active gameplay components ---
+        if self.state_manager:
+            logger.debug("[CLEANUP] Parando state_manager")
+            try:
+                self.state_manager.stop()
+            except Exception as e:
+                logger.warning(f"[CLEANUP] Falha ao parar state_manager: {e}")
+
+        if self.state_manager and self.state_manager.screen_automation:
+            logger.debug("[CLEANUP] Parando screen_automation")
+            try:
+                self.state_manager.screen_automation.stop()
+            except Exception as e:
+                logger.debug(f"[CLEANUP] Falha ao parar screen_automation: {e}")
+
+        if self.play_logic:
+            logger.debug("[CLEANUP] Parando play_logic")
+            try:
+                if hasattr(self.play_logic, 'stop'):
+                    self.play_logic.stop()
+            except Exception as e:
+                logger.debug(f"[CLEANUP] Falha ao parar play_logic: {e}")
+
+        # --- Phase 2: Flush data sinks ---
+        if self.data_collector is not None:
+            try:
+                self.data_collector.flush()
+                logger.info("[CLEANUP] Data collector flushed")
+            except Exception as e:
+                logger.warning(f"[CLEANUP] Falha ao flush data_collector: {e}")
+
+        if self.online_learner is not None:
+            try:
+                self.online_learner.save()
+                stats = self.online_learner.get_stats()
+                logger.info(f"[CLEANUP] OnlineLearner salvo: {stats}")
+            except Exception as e:
+                logger.warning(f"[CLEANUP] Falha ao salvar OnlineLearner: {e}")
+
+        if self.reward_bridge is not None:
+            try:
+                summary = self.reward_bridge.get_session_summary()
+                logger.info(f"[CLEANUP] Reward session summary: {summary}")
+                self.reward_bridge.reset()
+            except Exception as e:
+                logger.warning(f"[CLEANUP] Falha ao reset reward_bridge: {e}")
+
+        # Save brawler selector stats
+        if self.brawler_selector is not None:
+            try:
+                self.brawler_selector._save_stats()
+                logger.info("[CLEANUP] Brawler selector stats saved")
+            except Exception as e:
+                logger.warning(f"[CLEANUP] Falha ao salvar brawler_selector: {e}")
+
+        # Export match history on shutdown
+        if self.match_controller is not None:
+            try:
+                self.match_controller.history.save()
+                logger.info("[CLEANUP] Match history saved")
+            except Exception as e:
+                logger.warning(f"[CLEANUP] Falha ao salvar match_history: {e}")
+
+        # --- Phase 3: Stop UI / monitoring components ---
+        if self.diagnostic_overlay:
+            logger.debug("[CLEANUP] Parando diagnostic overlay")
+            try:
+                self.diagnostic_overlay.stop()
+            except Exception as e:
+                logger.debug(f"[CLEANUP] Falha ao parar diagnostic_overlay: {e}")
+
+        if self.debug_visualizer:
+            try:
+                self.debug_visualizer.stop()
+                logger.info("[CLEANUP] Debug Visualizer parado")
+            except Exception as e:
+                logger.debug(f"[CLEANUP] Falha ao parar debug visualizer: {e}")
+
+        if self.dashboard:
+            try:
+                self.dashboard.stop()
+                logger.info("[CLEANUP] Dashboard server parado")
+            except Exception as e:
+                logger.debug(f"[CLEANUP] Falha ao parar dashboard: {e}")
+
+        # --- Phase 4: Stop observability / anti-ban ---
+        if self.observability:
+            try:
+                if hasattr(self.observability, 'stop'):
+                    self.observability.stop()
+                logger.info("[CLEANUP] Observability collector parado")
+            except Exception as e:
+                logger.debug(f"[CLEANUP] Falha ao parar observability: {e}")
+
+        if self.anti_ban:
+            try:
+                if hasattr(self.anti_ban, 'stop'):
+                    self.anti_ban.stop()
+                logger.info("[CLEANUP] Anti-ban system parado")
+            except Exception as e:
+                logger.debug(f"[CLEANUP] Falha ao parar anti_ban: {e}")
+
+        # --- Phase 5: Stop state recovery ---
+        if self.state_recovery:
+            try:
+                self.state_recovery.cancel_recovery()
+                logger.info("[CLEANUP] State Recovery cancelado")
+            except Exception as e:
+                logger.debug(f"[CLEANUP] Falha ao cancelar state recovery: {e}")
+
+        # --- Phase 6: Stop recording ---
+        if self.recording_enabled and self.gameplay_recorder:
+            logger.debug("[CLEANUP] Parando gameplay recording")
+            try:
+                self.stop_recording()
+            except Exception as e:
+                logger.debug(f"[CLEANUP] Falha ao parar recording: {e}")
+
+        # --- Phase 7: Anti-detection window randomization ---
+        if self.emulator_controller:
+            try:
+                self.emulator_controller.randomize_window_periodically(interval=0)
+            except Exception as e:
+                logger.debug(f"[CLEANUP] Falha ao randomizar janela: {e}")
+
     def stop(self):
-        """Para o bot"""
+        """Para o bot com graceful shutdown completo."""
         logger.info("[WRAPPER] Chamando stop()")
         if not self.running:
             logger.debug("[WRAPPER] Bot não está em execução")
@@ -1159,101 +1571,30 @@ class PylaAIEnhanced:
         self.running = False
         self.stop_event.set()
 
-        # Run shutdown hooks
+        # Run user-registered shutdown hooks first
         for hook in self._shutdown_hooks:
             try:
                 hook()
             except Exception as e:
                 logger.warning(f"[WRAPPER] Shutdown hook failed: {e}")
 
-        if self.state_manager:
-            logger.debug("[WRAPPER] Parando state_manager")
-            self.state_manager.stop()
+        # Systematic resource cleanup
+        self._cleanup_resources()
 
-        # Stop screen automation (BrawlStarsBot integration)
-        if self.state_manager and self.state_manager.screen_automation:
-            logger.debug("[WRAPPER] Parando screen_automation")
-            try:
-                self.state_manager.screen_automation.stop()
-            except Exception as e:
-                logger.debug(f"[WRAPPER] Falha ao parar screen_automation: {e}")
-
-        # Flush data collector and reward bridge
-        if self.data_collector is not None:
-            try:
-                self.data_collector.flush()
-                logger.info("[WRAPPER] Data collector flushed")
-            except Exception as e:
-                logger.warning(f"[WRAPPER] Falha ao flush data_collector: {e}")
-
-        # NOVO: Salvar aprendizado online (Q-table + ELO)
-        if self.online_learner is not None:
-            try:
-                self.online_learner.save()
-                stats = self.online_learner.get_stats()
-                logger.info(f"[WRAPPER] OnlineLearner salvo: {stats}")
-            except Exception as e:
-                logger.warning(f"[WRAPPER] Falha ao salvar OnlineLearner: {e}")
-
-        if self.reward_bridge is not None:
-            try:
-                summary = self.reward_bridge.get_session_summary()
-                logger.info(f"[WRAPPER] Reward session summary: {summary}")
-                self.reward_bridge.reset()
-            except Exception as e:
-                logger.warning(f"[WRAPPER] Falha ao reset reward_bridge: {e}")
-
-        # Wait for threads
+        # Wait for threads with reasonable timeouts
         logger.debug("[WRAPPER] Aguardando threads terminarem")
         if self.state_thread and self.state_thread.is_alive():
-            self.state_thread.join(timeout=2)
-            logger.debug("[WRAPPER] Thread state-manager terminou")
+            self.state_thread.join(timeout=5)
+            if self.state_thread.is_alive():
+                logger.warning("[WRAPPER] Thread state-manager não terminou em 5s")
+            else:
+                logger.debug("[WRAPPER] Thread state-manager terminou")
         if self.monitor_thread and self.monitor_thread.is_alive():
-            self.monitor_thread.join(timeout=2)
-            logger.debug("[WRAPPER] Thread safety-monitor terminou")
-
-        if self.diagnostic_overlay:
-            logger.debug("[WRAPPER] Parando diagnostic overlay")
-            try:
-                self.diagnostic_overlay.stop()
-            except Exception as e:
-                logger.debug(f"[WRAPPER] Falha ao parar diagnostic_overlay: {e}")
-
-        # Randomize window on stop for anti-detection
-        if self.emulator_controller:
-            try:
-                self.emulator_controller.randomize_window_periodically(interval=0)
-            except Exception as e:
-                logger.debug(f"[WRAPPER] Falha ao randomizar janela no stop: {e}")
-
-        # Stop dashboard server
-        if self.dashboard:
-            try:
-                self.dashboard.stop()
-                logger.info("[WRAPPER] Dashboard server parado")
-            except Exception as e:
-                logger.debug(f"[WRAPPER] Falha ao parar dashboard: {e}")
-
-        # Phase 9: Stop debug visualizer
-        if self.debug_visualizer:
-            try:
-                self.debug_visualizer.stop()
-                logger.info("[WRAPPER] Debug Visualizer parado")
-            except Exception as e:
-                logger.debug(f"[WRAPPER] Falha ao parar debug visualizer: {e}")
-
-        # Phase 9: Cancel state recovery if active
-        if self.state_recovery:
-            try:
-                self.state_recovery.cancel_recovery()
-                logger.info("[WRAPPER] State Recovery cancelado")
-            except Exception as e:
-                logger.debug(f"[WRAPPER] Falha ao cancelar state recovery: {e}")
-
-        # Stop gameplay recording if enabled
-        if self.recording_enabled and self.gameplay_recorder:
-            logger.debug("[WRAPPER] Parando gameplay recording")
-            self.stop_recording()
+            self.monitor_thread.join(timeout=5)
+            if self.monitor_thread.is_alive():
+                logger.warning("[WRAPPER] Thread safety-monitor não terminou em 5s")
+            else:
+                logger.debug("[WRAPPER] Thread safety-monitor terminou")
 
         logger.info("[WRAPPER] PylaAI Enhanced parado com sucesso!")
         return True

@@ -68,6 +68,14 @@ def test_get_status_exposes_diagnostics_snapshot():
     bot.detect_main = object()
     bot.play_logic = DummyPlayLogic()
     bot.diagnostic_mode = True
+    bot.error_recovery = None
+    bot.enable_error_recovery = False
+    bot.auto_calibrator = None
+    bot.state_recovery = None
+    bot.ocr_detector = None
+    bot.debug_visualizer = None
+    bot.rl_engine = None
+    bot.dashboard = None
 
     queue = BrawlerQueue()
     queue.add_brawler(BrawlerConfig(name="Colt"))

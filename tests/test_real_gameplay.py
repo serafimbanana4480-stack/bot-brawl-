@@ -63,21 +63,27 @@ def _build_emulator_config(emu):
 
 
 class TestEmulatorDetection:
-    """Testes para deteccao do emulador."""
+    """Testes para deteccao do emulador. Requer emulador real a correr."""
 
+    @pytest.mark.integration
     def test_detect_emulators(self):
         from emulator_detector import get_emulator_detector
         detector = get_emulator_detector()
         emulators = detector.detect_all()
+        if not emulators:
+            pytest.skip("Nenhum emulador detectado - teste requer emulador real a correr")
         print(f"\n[REAL TEST] Emuladores detectados: {len(emulators)}")
         for emu in emulators:
             print(f"  - name={emu.name}, type={emu.type}, adb_id={emu.adb_id}, window={emu.window_title}")
         assert len(emulators) > 0, "Nenhum emulador detectado! Verifique se o emulador esta aberto."
 
+    @pytest.mark.integration
     def test_bluestacks_or_ldplayer_found(self):
         from emulator_detector import get_emulator_detector
         detector = get_emulator_detector()
         emulators = detector.detect_all()
+        if not emulators:
+            pytest.skip("Nenhum emulador detectado - teste requer emulador real a correr")
         types = [e.type.lower() for e in emulators]
         print(f"\n[REAL TEST] Tipos detectados: {types}")
         assert any(t in ["bluestacks", "ldplayer"] for t in types), \

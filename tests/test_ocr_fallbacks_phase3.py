@@ -22,7 +22,7 @@ class DummyController:
     def tap_scaled(self, x, y):
         self.taps.append((x, y))
 
-    def swipe_scaled(self, x1, y1, x2, y2):
+    def swipe_scaled(self, x1, y1, x2, y2, **kwargs):
         self.swipes.append((x1, y1, x2, y2))
 
 
@@ -89,7 +89,7 @@ def test_lobby_automator_reports_card_position_and_confirms_selection(monkeypatc
 
     monkeypatch.setattr("backend.brawl_bot.pylaai_real.lobby_automator.time.sleep", lambda *_args, **_kwargs: None)
 
-    screenshots = [np.zeros((1080, 1920, 3), dtype=np.uint8), np.zeros((1080, 1920, 3), dtype=np.uint8)]
+    screenshots = [np.zeros((1080, 1920, 3), dtype=np.uint8) for _ in range(10)]
 
     assert lobby.select_brawler("Colt", lambda: screenshots.pop(0)) is True
     assert controller.taps, "Expected a tap on the matched card"
