@@ -79,18 +79,14 @@ def test_fingerprint_randomizer():
 def test_anti_ban_system():
     config = AntiBanConfig(enabled=True, max_matches_per_hour=2, min_break_between_matches_sec=0)
     absys = AntiBanSystem(config)
-    # Forçar schedule a True para o teste
-    import random
-    original_random = random.random
-    random.random = lambda: 0.01  # should_play_now retorna True em qualquer horário (menor que thresholds)
-    try:
-        assert absys.should_start_match() is True
-        absys.record_match_result("win")
-        absys.record_match_result("win")
-        # Após 2 partidas, deve bloquear
-        assert absys.should_start_match() is False
-    finally:
-        random.random = original_random
+    # Forçar todos os schedules a permitir jogo
+    absys.session_schedule.should_play_now = lambda: True
+    absys.schedule_randomizer.should_play_now = lambda: True
+    assert absys.should_start_match() is True
+    absys.record_match_result("win")
+    absys.record_match_result("win")
+    # Após 2 partidas, deve bloquear
+    assert absys.should_start_match() is False
     status = absys.get_status()
     assert status["enabled"] is True
     assert status["matches_this_hour"] == 2

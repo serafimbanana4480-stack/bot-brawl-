@@ -93,8 +93,11 @@ def test_play_logic_records_window_and_action_snapshot():
     import numpy as np
     frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
 
-    assert logic.play_round(frame) is True
+    result = logic.play_round(frame)
     snapshot = logic.get_last_combat_snapshot()
+    if result is not True:
+        print(f"DEBUG: play_round returned {result}, snapshot={snapshot}")
+    assert result is True
     assert snapshot["state"] == "combat_ok"
     assert snapshot["window_active"] is True
     assert snapshot["attack_taken"] is True

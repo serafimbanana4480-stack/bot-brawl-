@@ -48,6 +48,7 @@ class DiagnosticOverlay:
         return False
 
     def stop(self) -> None:
+        """Stop the diagnostic overlay (no-op for base class)."""
         pass
 
 

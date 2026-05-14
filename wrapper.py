@@ -2010,6 +2010,40 @@ class PylaAIEnhanced:
                     except Exception:
                         pass
 
+                # Phase 10: World Model update (persistent spatial memory)
+                if self.world_model and self.state_manager and self.state_manager.current_state == 'in_game':
+                    try:
+                        if self.play_logic and hasattr(self.play_logic, 'last_combat_snapshot'):
+                            snap = self.play_logic.last_combat_snapshot
+                            if snap and snap.get('enemies'):
+                                enemies = snap['enemies']
+                                player = snap.get('player')
+                                if player and enemies:
+                                    self.world_model.update_enemies(enemies, player)
+                    except Exception:
+                        pass
+
+                # Phase 10: Pressure Map update (enemy influence zones)
+                if self.pressure_map and self.state_manager and self.state_manager.current_state == 'in_game':
+                    try:
+                        if self.play_logic and hasattr(self.play_logic, 'last_combat_snapshot'):
+                            snap = self.play_logic.last_combat_snapshot
+                            if snap and snap.get('enemies'):
+                                for enemy in snap['enemies']:
+                                    cx = (enemy[0] + enemy[2]) // 2
+                                    cy = (enemy[1] + enemy[3]) // 2
+                                    self.pressure_map.add_pressure(cx, cy, intensity=1.0)
+                    except Exception:
+                        pass
+
+                # Phase 10: Behavioral Profile update
+                if self.behavioral_profile and self.state_manager:
+                    try:
+                        current_state = self.state_manager.current_state
+                        self.behavioral_profile.record_state(current_state)
+                    except Exception:
+                        pass
+
                 # Observability cycle time
                 if self.observability:
                     cycle_duration = time.time() - cycle_start

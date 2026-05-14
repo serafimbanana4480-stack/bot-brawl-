@@ -161,10 +161,36 @@ AI-powered Brawl Stars bot with real-time computer vision (YOLO), adaptive comba
 
 ## Known Limitations
 
-- No wall/obstacle detection yet (Phase 1 of PLANO_GIGANTE_MELHORIAS.md)
-- YOLO inference is still sequential (Phase 2 for parallel pipeline)
+- ~~No wall/obstacle detection yet~~ ✅ Implemented in `vision/game_feature_extractor.py`
+- ~~YOLO inference is still sequential~~ ✅ AsyncPipeline initialized (integration ongoing)
 - OCR for map names not implemented yet
-- Q-Learning uses heuristic rewards (not real game rewards) since HP/damage extraction from screen is not yet implemented
+- ~~Q-Learning uses heuristic rewards~~ ✅ HP extraction implemented in `GameFeatureExtractor`
+
+## Phase 10 Modules (New)
+
+### Core (12)
+- `core/central_coordinator.py` — conflict resolution between subsystems
+- `core/world_model.py` — persistent spatial/temporal memory
+- `core/occupancy_grid.py` — spatial grid for map awareness
+- `core/pressure_map.py` — enemy influence zones
+- `core/lobby_fsm.py` — hierarchical lobby state machine + repetition guard
+- `core/async_pipeline.py` — parallel inference/tracking/decision pipeline
+- `core/adaptive_screenshot.py` — adaptive screenshot cache (30-600ms TTL)
+- `core/behavioral_profile.py` — player behavior profiling
+- `core/input_optimizer.py` — input latency optimization
+- `core/replay_analyzer.py` — death cause analysis + suggestions
+- `core/tactical_bridge.py` — bridge between tactical/strategic layers
+- `core/cover_system.py` — advanced bush/wall cover strategy
+
+### Decision (5)
+- `decision/utility_ai.py` — scored action selection (transparent, no training)
+- `decision/sticky_target.py` — target commitment to prevent thrashing
+- `decision/intent_system.py` — persistent strategic goals
+- `decision/enemy_intention.py` — predict enemy behavior patterns
+- `decision/meta_awareness.py` — meta-game awareness
+
+### Vision (1)
+- `vision/game_feature_extractor.py` — wall detection, HP extraction, bush detection, timer detection
 
 ## File Paths
 - Project root: `c:/Users/rodri/Desktop/bot brawl/`

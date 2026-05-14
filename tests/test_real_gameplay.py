@@ -90,8 +90,9 @@ class TestEmulatorDetection:
             "BlueStacks ou LDPlayer nao encontrado!"
 
 
+@pytest.mark.integration
 class TestADBConnection:
-    """Testes para conexao ADB."""
+    """Testes para conexao ADB. Requer emulador real."""
 
     def test_adb_connect(self):
         from emulator_controller import ADBController
@@ -133,8 +134,9 @@ class TestADBConnection:
         print(f"\n[REAL TEST] Screenshot capturado: {len(screenshot)} bytes")
 
 
+@pytest.mark.integration
 class TestScreenshotAnalysis:
-    """Testes para analise de screenshots do jogo."""
+    """Testes para analise de screenshots do jogo. Requer emulador real."""
 
     @pytest.fixture(scope="class")
     def screenshot_bytes(self):
@@ -213,8 +215,9 @@ class TestScreenshotAnalysis:
         assert ratio > 0, "Nenhum pixel verde encontrado"
 
 
+@pytest.mark.integration
 class TestGameStateDetection:
-    """Testes para deteccao do estado do jogo."""
+    """Testes para deteccao do estado do jogo. Requer emulador real."""
 
     def test_window_is_visible(self):
         from emulator_detector import get_emulator_detector
@@ -252,8 +255,9 @@ class TestGameStateDetection:
         assert w > 100 and h > 100, "Janela muito pequena"
 
 
+@pytest.mark.integration
 class TestVisionEngineReal:
-    """Testes para o vision engine com dados reais."""
+    """Testes para o vision engine com dados reais. Requer modelos."""
 
     def test_load_default_model(self):
         from vision_engine import YOLOVisionEngine, VisionConfig
@@ -270,8 +274,9 @@ class TestVisionEngineReal:
         assert isinstance(result, bool)
 
 
+@pytest.mark.integration
 class TestBotIntegrationReal:
-    """Testes de integracao completos com o jogo real."""
+    """Testes de integracao completos com o jogo real. Requer emulador real."""
 
     def test_full_pipeline_readonly(self):
         """Executa o pipeline completo em modo somente leitura."""
