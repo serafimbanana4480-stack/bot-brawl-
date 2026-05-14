@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class NotificationConfig:
+    enabled: bool = True
     webhook_url: str = ""
     webhook_headers: Dict = field(default_factory=dict)
     desktop_enabled: bool = False

@@ -127,16 +127,8 @@ class ScheduleRandomizer:
         return base + timedelta(minutes=variance)
 
     def should_play_now(self) -> bool:
-        """Retorna True com probabilidade que varia ao longo do dia."""
-        hour = datetime.now().hour
-        # Menos provável jogar de madrugada (0-6h)
-        if 0 <= hour < 6:
-            return random.random() < 0.05
-        # Horário comum (10h-22h)
-        if 10 <= hour <= 22:
-            return random.random() < 0.8
-        # Transições
-        return random.random() < 0.3
+        """Retorna True — schedule control disabled for manual override."""
+        return True
 
 
 class ActionObfuscator:

@@ -45,12 +45,13 @@ logger = logging.getLogger(__name__)
 
 # Phase 2: LogBuffer integration
 try:
-    from core.log_buffer import LogBuffer, install_log_buffer
+    from core.log_buffer import LogBuffer, install_log_buffer, get_log_buffer
     HAS_LOGBUFFER = True
 except ImportError:
     HAS_LOGBUFFER = False
     LogBuffer = None
     install_log_buffer = None
+    get_log_buffer = None
 
 # Phase 3: Notifications
 try:
@@ -171,10 +172,15 @@ class DashboardDataBridge:
             sm = w.state_manager
             rl = getattr(w, 'online_learner', None)
 
+            # Fallback brawler from queue if state_manager doesn't have it
+            brawler = sm.current_brawler if sm else None
+            if not brawler and hasattr(w, 'brawler_queue') and w.brawler_queue:
+                current = w.brawler_queue.get_current()
+                brawler = current.name if current else None
             kwargs = {
                 "running": getattr(w, 'running', False),
                 "current_state": sm.current_state if sm else "unknown",
-                "brawler": sm.current_brawler if sm else None,
+                "brawler": brawler,
                 "map_name": getattr(sm, '_current_map', None) if sm else None,
             }
 
@@ -3204,7 +3210,8 @@ class DashboardServer:
         # Phase 2: LogBuffer
         self.log_buffer: Optional[LogBuffer] = None
         if HAS_LOGBUFFER:
-            self.log_buffer = LogBuffer(max_lines=500)
+            # Use singleton so endpoints read the same buffer the handler writes to
+            self.log_buffer = get_log_buffer(max_lines=500)
             try:
                 install_log_buffer("", max_lines=500)
                 logger.info("[DASHBOARD] LogBuffer instalado no root logger")
