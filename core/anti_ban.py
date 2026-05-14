@@ -205,11 +205,20 @@ class AntiBanSystem:
         self.last_match_time: Optional[float] = None
         self.matches_this_hour = 0
         self.hour_start = time.time()
+        
+        # Session schedule with realistic breaks
+        self.session_schedule = SessionSchedule()
+        
+        # Click heatmap for anti-fingerprinting
+        self.click_heatmap = ClickHeatmap(grid_size=50)
 
     def record_action(self, action_type: str, coordinates: Optional[tuple] = None):
         if not self.config.enabled:
             return
         self.pattern_detector.record_action(action_type, coordinates)
+        # Record click in heatmap
+        if coordinates and action_type in ("tap", "click"):
+            self.click_heatmap.record_click(coordinates[0], coordinates[1])
 
     def record_match_result(self, result: str):
         if not self.config.enabled:
@@ -240,6 +249,10 @@ class AntiBanSystem:
         """Verifica se deve iniciar uma nova partida agora."""
         if not self.config.enabled:
             return True
+        # Check session schedule (lunch, dinner, sleep breaks)
+        if not self.session_schedule.should_play_now():
+            logger.info("[ANTI-BAN] Session schedule indica pausa (refeição/sono)")
+            return False
         # Verificar limite de partidas por hora
         if time.time() - self.hour_start > 3600:
             self.hour_start = time.time()
@@ -260,6 +273,42 @@ class AntiBanSystem:
     def get_fingerprint(self) -> Dict:
         return self.fingerprint_randomizer.get_fingerprint()
 
+    def get_click_heatmap_stats(self) -> Dict:
+        """Get click heatmap statistics for anti-fingerprinting analysis."""
+        return self.click_heatmap.get_stats()
+
+    def get_jittered_coordinates(self, x: float, y: float) -> tuple:
+        """Apply heatmap-aware jitter to coordinates to avoid click fingerprinting.
+        
+        If too many clicks are in the same grid cell, adds extra jitter.
+        """
+        fp = self.get_fingerprint()
+        base_jitter = 3  # Default jitter range
+        
+        # Check if this grid cell has too many clicks
+        cell_count = self.click_heatmap.get_cell_count(x, y)
+        if cell_count > 10:
+            # Add extra jitter proportional to click density
+            extra_jitter = min(cell_count - 10, 15)
+            base_jitter += extra_jitter
+            logger.debug(f"[ANTI-BAN] Extra jitter ({extra_jitter}px) for over-clicked area at ({x:.0f}, {y:.0f})")
+        
+        # Apply fingerprint-based jitter direction bias
+        quadrant = fp.get("preferred_quadrant", "top-left")
+        bias_x, bias_y = 0, 0
+        if "top" in quadrant:
+            bias_y = -1
+        else:
+            bias_y = 1
+        if "left" in quadrant:
+            bias_x = -1
+        else:
+            bias_x = 1
+        
+        jx = x + random.randint(-base_jitter, base_jitter) + bias_x * random.randint(0, 2)
+        jy = y + random.randint(-base_jitter, base_jitter) + bias_y * random.randint(0, 2)
+        return (jx, jy)
+
     def get_status(self) -> Dict:
         """Retorna status atual do sistema anti-ban."""
         return {
@@ -269,4 +318,120 @@ class AntiBanSystem:
             "throttle_active": self.check_throttle(),
             "matches_this_hour": self.matches_this_hour,
             "fingerprint": self.get_fingerprint(),
+            "session_schedule": self.session_schedule.get_status(),
+            "click_heatmap": self.click_heatmap.get_stats(),
+        }
+
+
+class SessionSchedule:
+    """Manages realistic session schedule with breaks for meals and sleep."""
+
+    def __init__(self):
+        self.session_start = time.time()
+        self._break_until: Optional[float] = None
+        self._total_play_time = 0.0
+        
+        # Realistic break schedule (hours in day, duration in minutes)
+        self._break_schedule = [
+            {"name": "lunch", "around_hour": 12, "variance_min": 60, "duration_min": (30, 60)},
+            {"name": "dinner", "around_hour": 19, "variance_min": 60, "duration_min": (30, 60)},
+            {"name": "sleep", "around_hour": 23, "variance_min": 60, "duration_min": (420, 540)},  # 7-9 hours
+        ]
+        # Pre-generate today's break times
+        self._today_breaks = self._generate_break_times()
+
+    def _generate_break_times(self) -> List[Dict]:
+        """Generate break times for today with randomization."""
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        breaks = []
+        for brk in self._break_schedule:
+            hour = brk["around_hour"] + random.uniform(
+                -brk["variance_min"] / 60, brk["variance_min"] / 60
+            )
+            break_time = now.replace(hour=int(hour), minute=int((hour % 1) * 60), second=0, microsecond=0)
+            duration_min = random.uniform(*brk["duration_min"])
+            breaks.append({
+                "name": brk["name"],
+                "start": break_time.timestamp(),
+                "end": (break_time + timedelta(minutes=duration_min)).timestamp(),
+            })
+        return breaks
+
+    def should_play_now(self) -> bool:
+        """Check if currently in a break period."""
+        now = time.time()
+        
+        # Check explicit break
+        if self._break_until and now < self._break_until:
+            return False
+        
+        # Check scheduled breaks
+        for brk in self._today_breaks:
+            if brk["start"] <= now <= brk["end"]:
+                logger.info(f"[ANTI-BAN] Scheduled break: {brk['name']}")
+                return False
+        
+        # Regenerate breaks if day changed
+        from datetime import datetime
+        if datetime.now().hour < 6:  # New day
+            self._today_breaks = self._generate_break_times()
+        
+        return True
+
+    def take_break(self, duration_seconds: float):
+        """Force a break for the specified duration."""
+        self._break_until = time.time() + duration_seconds
+        logger.info(f"[ANTI-BAN] Taking break for {duration_seconds:.0f}s")
+
+    def get_status(self) -> Dict:
+        now = time.time()
+        current_break = None
+        for brk in self._today_breaks:
+            if brk["start"] <= now <= brk["end"]:
+                current_break = brk["name"]
+                break
+        return {
+            "on_break": not self.should_play_now(),
+            "current_break": current_break,
+            "forced_break_remaining": max(0, (self._break_until or 0) - now),
+            "session_duration_hours": (now - self.session_start) / 3600,
+        }
+
+
+class ClickHeatmap:
+    """Tracks click positions to detect and prevent click fingerprinting."""
+
+    def __init__(self, grid_size: int = 50):
+        self.grid_size = grid_size
+        self._clicks: Dict[tuple, int] = {}  # (grid_x, grid_y) -> count
+        self._total_clicks = 0
+
+    def record_click(self, x: float, y: float):
+        """Record a click at the given coordinates."""
+        gx = int(x / self.grid_size)
+        gy = int(y / self.grid_size)
+        key = (gx, gy)
+        self._clicks[key] = self._clicks.get(key, 0) + 1
+        self._total_clicks += 1
+
+    def get_cell_count(self, x: float, y: float) -> int:
+        """Get click count for the grid cell containing (x, y)."""
+        gx = int(x / self.grid_size)
+        gy = int(y / self.grid_size)
+        return self._clicks.get((gx, gy), 0)
+
+    def get_stats(self) -> Dict:
+        """Get heatmap statistics."""
+        if not self._clicks:
+            return {"total_clicks": 0, "unique_cells": 0, "max_cell_clicks": 0, "concentration": 0.0}
+        max_clicks = max(self._clicks.values())
+        total = sum(self._clicks.values())
+        concentration = max_clicks / total if total > 0 else 0.0
+        return {
+            "total_clicks": self._total_clicks,
+            "unique_cells": len(self._clicks),
+            "max_cell_clicks": max_clicks,
+            "concentration": f"{concentration:.2%}",
+            "overclicked_cells": sum(1 for v in self._clicks.values() if v > 10),
         }

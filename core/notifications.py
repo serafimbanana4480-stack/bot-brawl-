@@ -6,9 +6,11 @@ Suporta: browser push (via dashboard), webhooks HTTP, desktop notifications.
 """
 
 import json
+import sys
 import time
 import logging
 import threading
+import traceback
 import urllib.request
 from pathlib import Path
 from typing import Dict, List, Optional, Callable
@@ -169,6 +171,55 @@ class NotificationManager:
         if self.config.on_trophy_limit and bot_status.get("safety", {}).get("trophy_limit_reached"):
             self.send("Limite de Trofeus", "O bot atingiu o limite de trofeus configurado", "warning", "trophy_limit")
 
+    def notify_crash(self, error: Exception, component: str = "unknown", extra: Optional[Dict] = None):
+        """Send crash notification with stack trace via webhook and browser.
+
+        Args:
+            error: The exception that caused the crash
+            component: Component where crash occurred
+            extra: Optional extra context data
+        """
+        tb_str = traceback.format_exception(type(error), error, error.__traceback__)
+        tb_text = "".join(tb_str)
+
+        message = f"CRASH in {component}: {type(error).__name__}: {error}"
+        details = {
+            "component": component,
+            "error_type": type(error).__name__,
+            "error_message": str(error),
+            "traceback": tb_text[:2000],
+            "extra": extra or {},
+        }
+
+        self.send(
+            title="Bot Crash Detected",
+            message=message,
+            level="error",
+            category="crash"
+        )
+
+        # Send detailed webhook with traceback if configured
+        if self.config.webhook_url:
+            try:
+                payload = json.dumps({
+                    "event": "crash",
+                    "title": "Bot Crash",
+                    "message": message,
+                    "level": "error",
+                    "details": details,
+                    "timestamp": time.time(),
+                }).encode("utf-8")
+                req = urllib.request.Request(
+                    self.config.webhook_url,
+                    data=payload,
+                    headers={"Content-Type": "application/json", **self.config.webhook_headers},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    pass
+            except Exception as e:
+                logger.debug(f"[NOTIFY] Crash webhook failed: {e}")
+
     def get_history(self, limit: int = 50) -> List[Dict]:
         with self._lock:
             return [
@@ -187,3 +238,47 @@ def get_notification_manager() -> NotificationManager:
     if _global_notification_manager is None:
         _global_notification_manager = NotificationManager()
     return _global_notification_manager
+
+
+def install_crash_handler(manager: Optional[NotificationManager] = None):
+    """Install a sys.excepthook that sends crash notifications with stack traces.
+
+    Chains to any previously installed excepthook so that other handlers
+    (e.g., logging last resort) are not lost.
+
+    Args:
+        manager: NotificationManager instance. If None, uses the global singleton.
+    """
+    nm = manager or get_notification_manager()
+    _previous_excepthook = getattr(sys, 'excepthook', None)
+
+    def _crash_excepthook(exc_type, exc_value, exc_traceback):
+        # Avoid notifying for KeyboardInterrupt (user intended to stop)
+        if issubclass(exc_type, KeyboardInterrupt):
+            if _previous_excepthook:
+                _previous_excepthook(exc_type, exc_value, exc_traceback)
+            return
+
+        # Build truncated traceback string
+        tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+        tb_text = tb_str[:2000]  # Truncate to avoid oversized payloads
+
+        # Send notification
+        try:
+            nm.notify_crash(
+                error=exc_value if exc_value else exc_type("unknown"),
+                component="uncaught_exception",
+                extra={"traceback": tb_text, "exc_type": exc_type.__name__}
+            )
+        except Exception:
+            pass  # Never let the crash handler itself crash
+
+        # Chain to previous handler
+        if _previous_excepthook:
+            try:
+                _previous_excepthook(exc_type, exc_value, exc_traceback)
+            except Exception:
+                pass
+
+    sys.excepthook = _crash_excepthook
+    logger.info("[NOTIFY] Crash excepthook installed")

@@ -219,6 +219,31 @@ class MatchController:
         self.match_start_time = None
         self.is_in_match = False
         logger.debug("[MATCH_CONTROLLER] Estado após reset: is_in_match=False, current_match=None")
+    
+    def auto_reset_if_stale(self, max_match_duration: float = 600.0) -> bool:
+        """Auto-reset match state if it appears stuck (match running too long or orphaned state).
+        
+        Args:
+            max_match_duration: Maximum match duration in seconds before considering stale (default 10 min)
+            
+        Returns:
+            True if match was reset, False if state was fine
+        """
+        if not self.is_in_match or self.current_match is None:
+            return False
+        
+        # Check if match has been running too long
+        if self.match_start_time:
+            elapsed = time.time() - self.match_start_time
+            if elapsed > max_match_duration:
+                logger.warning(
+                    f"[MATCH_CONTROLLER] Match running for {elapsed:.0f}s (max {max_match_duration}s), "
+                    f"auto-resetting stale match state"
+                )
+                self.reset_match()
+                return True
+        
+        return False
 
     def _advance_queue_if_needed(self, match_result: MatchResult) -> None:
         """Avança a fila somente quando o resultado confirma troca."""
@@ -349,6 +374,78 @@ class MatchController:
                 self.brawler_queue.add_brawler(config)
         
         logger.info(f"🎯 Fila de brawlers configurada: {len(self.brawler_queue.brawlers)} brawlers")
+    
+    def export_history_csv(self, output_path: Optional[Path] = None) -> Path:
+        """Export match history to CSV file for analysis.
+        
+        Args:
+            output_path: Optional custom output path. Defaults to install_path/match_history.csv
+            
+        Returns:
+            Path to the exported CSV file
+        """
+        import csv
+        output_path = output_path or self.install_path / "match_history_export.csv"
+        
+        fieldnames = [
+            "match_id", "timestamp", "game_mode", "brawler", "result",
+            "trophies_change", "duration_seconds", "kills", "damage_dealt",
+            "powerups_collected", "star_player"
+        ]
+        
+        try:
+            with open(output_path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                for match in self.history.matches:
+                    writer.writerow(match.to_dict())
+            logger.info(f"[MATCH_CONTROLLER] Exported {len(self.history.matches)} matches to {output_path}")
+        except Exception as e:
+            logger.error(f"[MATCH_CONTROLLER] Failed to export CSV: {e}")
+        
+        return output_path
+    
+    def export_history_json(self, output_path: Optional[Path] = None) -> Path:
+        """Export match history to JSON file with analysis summary.
+        
+        Args:
+            output_path: Optional custom output path. Defaults to install_path/match_history_analysis.json
+            
+        Returns:
+            Path to the exported JSON file
+        """
+        output_path = output_path or self.install_path / "match_history_analysis.json"
+        
+        try:
+            stats = self.history.get_stats()
+            brawler_stats = {}
+            for match in self.history.matches:
+                if match.brawler not in brawler_stats:
+                    brawler_stats[match.brawler] = {"played": 0, "wins": 0, "losses": 0}
+                brawler_stats[match.brawler]["played"] += 1
+                if match.result == "win":
+                    brawler_stats[match.brawler]["wins"] += 1
+                elif match.result == "loss":
+                    brawler_stats[match.brawler]["losses"] += 1
+            
+            # Calculate win rates per brawler
+            for name, s in brawler_stats.items():
+                s["win_rate"] = s["wins"] / s["played"] if s["played"] > 0 else 0.0
+            
+            data = {
+                "export_timestamp": datetime.now().isoformat(),
+                "overall_stats": stats,
+                "brawler_stats": brawler_stats,
+                "recent_matches": [m.to_dict() for m in self.history.matches[-50:]],
+            }
+            
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            logger.info(f"[MATCH_CONTROLLER] Exported analysis to {output_path}")
+        except Exception as e:
+            logger.error(f"[MATCH_CONTROLLER] Failed to export JSON: {e}")
+        
+        return output_path
 
 
 class AutoPicker:

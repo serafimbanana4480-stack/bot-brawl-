@@ -869,3 +869,80 @@ class AdvancedSafetySystem(SafetySystem):
         })
         
         return base_report
+
+
+class ProgressiveSlowdown:
+    """Simulates fatigue by progressively slowing down bot actions over session duration.
+    
+    As the session progresses, delays increase, APM decreases, and reaction time
+    increases - mimicking a real player getting tired.
+    """
+
+    def __init__(
+        self,
+        session_hours_full_speed: float = 1.0,  # First hour at full speed
+        session_hours_max_fatigue: float = 4.0,  # Max fatigue after 4 hours
+        max_delay_multiplier: float = 2.5,  # At max fatigue, delays are 2.5x
+        recovery_rate_per_hour_break: float = 0.5,  # 30min break recovers 25%
+    ):
+        self.session_start = time.time()
+        self.last_break_time = time.time()
+        self.fatigue_level = 0.0  # 0.0 = fresh, 1.0 = max fatigue
+        self.session_hours_full_speed = session_hours_full_speed
+        self.session_hours_max_fatigue = session_hours_max_fatigue
+        self.max_delay_multiplier = max_delay_multiplier
+        self.recovery_rate_per_hour_break = recovery_rate_per_hour_break
+
+    def update(self) -> float:
+        """Update fatigue level based on session duration. Returns current fatigue (0-1)."""
+        now = time.time()
+        elapsed_hours = (now - self.session_start) / 3600.0
+        
+        if elapsed_hours <= self.session_hours_full_speed:
+            self.fatigue_level = 0.0
+        elif elapsed_hours >= self.session_hours_max_fatigue:
+            self.fatigue_level = 1.0
+        else:
+            # Linear interpolation between full speed and max fatigue
+            progress = (elapsed_hours - self.session_hours_full_speed) / (
+                self.session_hours_max_fatigue - self.session_hours_full_speed
+            )
+            self.fatigue_level = min(1.0, progress)
+        
+        return self.fatigue_level
+
+    def recover(self, break_duration_seconds: float):
+        """Recover fatigue after a break."""
+        recovery = self.recovery_rate_per_hour_break * (break_duration_seconds / 3600.0)
+        self.fatigue_level = max(0.0, self.fatigue_level - recovery)
+        self.last_break_time = time.time()
+        logger.info(f"[FATIGUE] Recovered {recovery:.2f} fatigue, now at {self.fatigue_level:.2f}")
+
+    def get_delay_multiplier(self) -> float:
+        """Get current delay multiplier based on fatigue (1.0 = normal, higher = slower)."""
+        self.update()
+        return 1.0 + (self.max_delay_multiplier - 1.0) * self.fatigue_level
+
+    def get_apm_multiplier(self) -> float:
+        """Get current APM multiplier based on fatigue (1.0 = normal, lower = fewer actions)."""
+        self.update()
+        return 1.0 - 0.5 * self.fatigue_level  # At max fatigue, APM is 50% of normal
+
+    def get_reaction_delay(self, base_delay: float) -> float:
+        """Get reaction delay adjusted for fatigue."""
+        return base_delay * self.get_delay_multiplier()
+
+    def should_take_break(self) -> bool:
+        """Check if bot should take a break due to fatigue."""
+        self.update()
+        return self.fatigue_level > 0.7
+
+    def get_status(self) -> Dict:
+        self.update()
+        return {
+            "fatigue_level": f"{self.fatigue_level:.2f}",
+            "delay_multiplier": f"{self.get_delay_multiplier():.2f}",
+            "apm_multiplier": f"{self.get_apm_multiplier():.2f}",
+            "elapsed_hours": f"{(time.time() - self.session_start) / 3600:.1f}",
+            "should_break": self.should_take_break(),
+        }

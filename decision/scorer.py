@@ -1,12 +1,56 @@
 """
 Scoring system for target prioritization and action evaluation.
 Implements various scoring algorithms for optimal decision making.
+
+Improvements:
+- Brawler-specific scoring weights (snipers prefer distance, assassins prefer proximity)
+- Ammo-aware scoring (don't attack without ammo, prioritize reload when empty)
 """
 
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 from dataclasses import dataclass
 import math
 import random
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Brawler role definitions for scoring weights
+BRAWLER_ROLES = {
+    # Assassins - prefer close range, high aggression
+    "assassin": {"distance_weight": 0.35, "health_weight": 0.25, "aggression_bonus": 0.3, "optimal_range": 150},
+    # Snipers - prefer long range, low risk
+    "sniper": {"distance_weight": 0.15, "health_weight": 0.30, "aggression_bonus": -0.1, "optimal_range": 400},
+    # Fighters - balanced, medium range
+    "fighter": {"distance_weight": 0.25, "health_weight": 0.30, "aggression_bonus": 0.1, "optimal_range": 250},
+    # Tanks - close range, high health tolerance
+    "tank": {"distance_weight": 0.30, "health_weight": 0.15, "aggression_bonus": 0.2, "optimal_range": 200},
+    # Support - avoid combat, prioritize safety
+    "support": {"distance_weight": 0.10, "health_weight": 0.20, "aggression_bonus": -0.3, "optimal_range": 350},
+    # Controller - area denial, medium range
+    "controller": {"distance_weight": 0.20, "health_weight": 0.25, "aggression_bonus": 0.0, "optimal_range": 300},
+}
+
+# Map brawler names to roles
+BRAWLER_ROLE_MAP = {
+    # Assassins
+    "Mortis": "assassin", "Crow": "assassin", "Leon": "assassin", "Stu": "assassin",
+    "Fang": "assassin", "Edgar": "assassin", "Meg": "assassin",
+    # Snipers
+    "Piper": "sniper", "Brock": "sniper", "Colt": "sniper", "Rico": "sniper",
+    "8-Bit": "sniper", "Nani": "sniper", "Belle": "sniper",
+    # Fighters
+    "Shelly": "fighter", "Dynamike": "fighter", "Tick": "fighter", "Barley": "fighter",
+    "El Primo": "fighter", "Bull": "fighter", "Darryl": "fighter",
+    # Tanks
+    "Rosa": "tank", "Jacky": "tank", "Frank": "tank", "Bibi": "tank",
+    # Support
+    "Poco": "support", "Pam": "support", "Max": "support", "Byron": "support",
+    "Gene": "support", "Sandy": "support",
+    # Controller
+    "Sprout": "controller", "Tara": "controller", "Emz": "controller", "Gale": "controller",
+    "Surge": "controller", "Ash": "controller",
+}
 
 
 @dataclass
@@ -32,6 +76,8 @@ class TargetScorer:
     """
     Scores potential targets based on multiple factors.
     Used to prioritize which enemy to attack first.
+    
+    Supports brawler-specific scoring weights and ammo-aware decisions.
     """
     
     def __init__(
@@ -39,12 +85,39 @@ class TargetScorer:
         optimal_range: float = 150.0,
         max_range: float = 500.0,
         low_health_threshold: float = 0.4,
-        danger_distance: float = 300.0
+        danger_distance: float = 300.0,
+        brawler_name: Optional[str] = None,
+        current_ammo: int = 3,
+        max_ammo: int = 3,
     ):
         self.optimal_range = optimal_range
         self.max_range = max_range
         self.low_health_threshold = low_health_threshold
         self.danger_distance = danger_distance
+        self.current_ammo = current_ammo
+        self.max_ammo = max_ammo
+        
+        # Set brawler role and weights
+        self.brawler_name = brawler_name
+        self.brawler_role = BRAWLER_ROLE_MAP.get(brawler_name, "fighter") if brawler_name else "fighter"
+        self.role_weights = BRAWLER_ROLES.get(self.brawler_role, BRAWLER_ROLES["fighter"])
+        
+        # Override optimal range based on brawler role
+        if brawler_name:
+            self.optimal_range = self.role_weights["optimal_range"]
+    
+    def set_ammo(self, current: int, maximum: int = 3):
+        """Update current ammo state."""
+        self.current_ammo = current
+        self.max_ammo = maximum
+    
+    def has_ammo(self) -> bool:
+        """Check if player has ammo to attack."""
+        return self.current_ammo > 0
+    
+    def should_reload(self) -> bool:
+        """Check if player should prioritize reloading over attacking."""
+        return self.current_ammo <= 0 or (self.current_ammo == 1 and self.max_ammo >= 3)
         
     def score_target(
         self,
@@ -110,14 +183,31 @@ class TargetScorer:
             player_position, target, walls
         )
         
-        # Combined score with weights
+        # Combined score with weights (brawler-specific)
+        dist_w = self.role_weights["distance_weight"]
+        hp_w = self.role_weights["health_weight"]
+        threat_w = 0.20
+        vuln_w = 0.10
+        pos_w = 0.15 - dist_w  # Adjust positioning weight
+        
         total_score = (
-            health_score * 0.30 +
-            distance_score * 0.25 +
-            threat_score * 0.20 +
-            vulnerability_score * 0.10 +
-            positioning_score * 0.15
+            health_score * hp_w +
+            distance_score * dist_w +
+            threat_score * threat_w +
+            vulnerability_score * vuln_w +
+            positioning_score * max(0.05, pos_w)
         ) * kill_pressure
+        
+        # Apply brawler aggression bonus
+        aggression_bonus = self.role_weights.get("aggression_bonus", 0.0)
+        total_score += aggression_bonus * 0.1
+        
+        # Ammo penalty: if no ammo, drastically reduce attack score
+        if not self.has_ammo():
+            total_score *= 0.1  # 90% reduction when out of ammo
+            reasoning = "NO AMMO - reload first"
+        elif self.current_ammo == 1 and self.max_ammo >= 3:
+            total_score *= 0.6  # 40% reduction when low on ammo
         
         # Add randomization (non-deterministic behavior)
         total_score *= random.uniform(0.95, 1.05)

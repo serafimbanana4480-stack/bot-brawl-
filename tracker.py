@@ -173,7 +173,11 @@ class MultiObjectTracker:
         return confirmed_tracks
 
     def _associate_detections_to_tracks(self, detections: List[Tuple[List[int], float]]) -> Tuple[List[Tuple[int, int]], List[int], List[int]]:
-        """Associa detecções a tracks usando IoU (Intersection over Union)"""
+        """Associa detecções a tracks usando IoU com Hungarian algorithm.
+        
+        Uses scipy.optimize.linear_sum_assignment for optimal matching
+        when available, falls back to greedy matching otherwise.
+        """
         if len(self.tracks) == 0:
             return [], list(range(len(detections))), []
 
@@ -188,33 +192,55 @@ class MultiObjectTracker:
             for det_idx, (det_bbox, _) in enumerate(detections):
                 iou_matrix[track_idx, det_idx] = self._iou(track_bbox, det_bbox)
 
-        # Greedy matching (simplificado vs Hungarian algorithm)
-        matched = []
-        unmatched_detections = list(range(len(detections)))
-        unmatched_tracks = list(range(len(self.tracks)))
-
         # Threshold de IoU para associação
         iou_threshold = 0.3
 
-        while True:
-            # Encontrar par com maior IoU
-            max_iou = 0
-            best_pair = None
+        # Try Hungarian algorithm for optimal matching
+        try:
+            from scipy.optimize import linear_sum_assignment
+            # Convert IoU to cost (minimize cost = maximize IoU)
+            cost_matrix = 1.0 - iou_matrix
+            row_indices, col_indices = linear_sum_assignment(cost_matrix)
+            
+            matched = []
+            unmatched_detections = list(range(len(detections)))
+            unmatched_tracks = list(range(len(self.tracks)))
+            
+            for row, col in zip(row_indices, col_indices):
+                if iou_matrix[row, col] >= iou_threshold:
+                    matched.append((row, col))
+                    if row in unmatched_tracks:
+                        unmatched_tracks.remove(row)
+                    if col in unmatched_detections:
+                        unmatched_detections.remove(col)
+            
+            return matched, unmatched_detections, unmatched_tracks
+            
+        except ImportError:
+            # Fallback to greedy matching
+            matched = []
+            unmatched_detections = list(range(len(detections)))
+            unmatched_tracks = list(range(self.tracks))
 
-            for track_idx in unmatched_tracks:
-                for det_idx in unmatched_detections:
-                    if iou_matrix[track_idx, det_idx] > max_iou:
-                        max_iou = iou_matrix[track_idx, det_idx]
-                        best_pair = (track_idx, det_idx)
+            while True:
+                # Encontrar par com maior IoU
+                max_iou = 0
+                best_pair = None
 
-            if best_pair is None or max_iou < iou_threshold:
-                break
+                for track_idx in unmatched_tracks:
+                    for det_idx in unmatched_detections:
+                        if iou_matrix[track_idx, det_idx] > max_iou:
+                            max_iou = iou_matrix[track_idx, det_idx]
+                            best_pair = (track_idx, det_idx)
 
-            matched.append(best_pair)
-            unmatched_tracks.remove(best_pair[0])
-            unmatched_detections.remove(best_pair[1])
+                if best_pair is None or max_iou < iou_threshold:
+                    break
 
-        return matched, unmatched_detections, unmatched_tracks
+                matched.append(best_pair)
+                unmatched_tracks.remove(best_pair[0])
+                unmatched_detections.remove(best_pair[1])
+
+            return matched, unmatched_detections, unmatched_tracks
 
     def _iou(self, bbox1: List[int], bbox2: List[int]) -> float:
         """Calcula Intersection over Union entre duas bboxes"""
@@ -290,6 +316,22 @@ class EnemyTracker(MultiObjectTracker):
                 logger.info("[TRACKER] Advanced movement predictor initialized")
             except Exception as e:
                 logger.warning(f"[TRACKER] Failed to initialize movement predictor: {e}")
+        
+        # Prediction cache to avoid recalculating
+        self._prediction_cache: Dict[int, Tuple[float, float, float]] = {}  # track_id -> (x, y, timestamp)
+        self._cache_ttl = 0.1  # Cache predictions for 100ms
+    
+    def _get_cached_prediction(self, track_id: int) -> Optional[Tuple[float, float]]:
+        """Get cached prediction if still valid."""
+        if track_id in self._prediction_cache:
+            x, y, ts = self._prediction_cache[track_id]
+            if time.time() - ts < self._cache_ttl:
+                return (x, y)
+        return None
+    
+    def _set_cached_prediction(self, track_id: int, x: float, y: float):
+        """Cache a prediction."""
+        self._prediction_cache[track_id] = (x, y, time.time())
 
     def update(self, detections: List[Tuple[List[int], float]]) -> List[Track]:
         """Atualiza tracker e mantém histórico de movimento"""
@@ -323,6 +365,11 @@ class EnemyTracker(MultiObjectTracker):
 
     def predict_position(self, track_id: int, time_ahead: float = 0.25) -> Optional[Tuple[float, float]]:
         """Prediz posição futura de um inimigo usando movimento avançado se disponível"""
+        # Check cache first
+        cached = self._get_cached_prediction(track_id)
+        if cached:
+            return cached
+        
         if track_id not in self.enemy_history:
             return None
 
@@ -341,6 +388,7 @@ class EnemyTracker(MultiObjectTracker):
                 )
                 if prediction and prediction.predicted_position:
                     logger.debug(f"[TRACKER] Using advanced movement predictor for track {track_id}")
+                    self._set_cached_prediction(track_id, *prediction.predicted_position)
                     return prediction.predicted_position
             except Exception as e:
                 logger.warning(f"[TRACKER] Movement predictor failed: {e}")
@@ -371,8 +419,95 @@ class EnemyTracker(MultiObjectTracker):
         # Predição linear
         pred_x = current_x + avg_vx * time_ahead
         pred_y = current_y + avg_vy * time_ahead
-
+        
+        self._set_cached_prediction(track_id, pred_x, pred_y)
         return (pred_x, pred_y)
+    
+    def detect_incoming_projectile(
+        self,
+        player_pos: Tuple[float, float],
+        detection_list: List[Tuple[List[int], float, str]],
+        dodge_threshold: float = 150.0,
+    ) -> Optional[Dict]:
+        """Detect incoming projectiles/bullets heading toward the player and recommend dodge direction.
+        
+        Args:
+            player_pos: Current player position (x, y)
+            detection_list: List of (bbox, confidence, class_name) from YOLO
+            dodge_threshold: Distance threshold in pixels to trigger dodge recommendation
+            
+        Returns:
+            Dict with dodge info or None if no dodge needed
+        """
+        for bbox, confidence, class_name in detection_list:
+            if class_name.lower() not in ("bullet", "projectile"):
+                continue
+            
+            # Get bullet center and size
+            bx1, by1, bx2, by2 = bbox
+            bullet_cx = (bx1 + bx2) / 2
+            bullet_cy = (by1 + by2) / 2
+            
+            # Calculate distance to player
+            dx = player_pos[0] - bullet_cx
+            dy = player_pos[1] - bullet_cy
+            distance = (dx**2 + dy**2)**0.5
+            
+            if distance < dodge_threshold:
+                # Determine dodge direction (perpendicular to bullet trajectory)
+                # Use bullet velocity if tracked, otherwise estimate from bbox direction
+                bullet_track = None
+                for track in self.tracks:
+                    tcx = (track.bbox[0] + track.bbox[2]) / 2
+                    tcy = (track.bbox[1] + track.bbox[3]) / 2
+                    if abs(tcx - bullet_cx) < 30 and abs(tcy - bullet_cy) < 30:
+                        bullet_track = track
+                        break
+                
+                if bullet_track and bullet_track.velocity != (0.0, 0.0):
+                    vx, vy = bullet_track.velocity
+                    # Dodge perpendicular to bullet velocity
+                    speed = (vx**2 + vy**2)**0.5
+                    if speed > 0:
+                        # Perpendicular direction (rotate 90 degrees)
+                        perp_x = -vy / speed
+                        perp_y = vx / speed
+                        # Choose the perpendicular direction that moves away from bullet
+                        dot = perp_x * dx + perp_y * dy
+                        if dot < 0:
+                            perp_x, perp_y = -perp_x, -perp_y
+                        dodge_distance = 100  # pixels
+                        return {
+                            "should_dodge": True,
+                            "dodge_direction": (perp_x, perp_y),
+                            "dodge_target": (
+                                player_pos[0] + perp_x * dodge_distance,
+                                player_pos[1] + perp_y * dodge_distance,
+                            ),
+                            "bullet_distance": distance,
+                            "bullet_class": class_name,
+                        }
+                else:
+                    # Simple dodge: move perpendicular to line from bullet to player
+                    if distance > 0:
+                        nx = dx / distance
+                        ny = dy / distance
+                        # Perpendicular
+                        perp_x = -ny
+                        perp_y = nx
+                        dodge_distance = 100
+                        return {
+                            "should_dodge": True,
+                            "dodge_direction": (perp_x, perp_y),
+                            "dodge_target": (
+                                player_pos[0] + perp_x * dodge_distance,
+                                player_pos[1] + perp_y * dodge_distance,
+                            ),
+                            "bullet_distance": distance,
+                            "bullet_class": class_name,
+                        }
+        
+        return None
 
     def get_velocity(self, track_id: int) -> Optional[Tuple[float, float]]:
         """Retorna velocidade atual de um inimigo"""

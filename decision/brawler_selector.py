@@ -103,7 +103,40 @@ class BrawlerSelector:
     
     Balances exploration (trying new brawlers) with exploitation
     (using known good brawlers).
+    
+    Features:
+    - Counter-pick logic: select brawlers that counter the meta
+    - Map-specific recommendations
+    - Performance tracking per brawler
     """
+    
+    # Counter-pick table: brawler -> list of brawlers it counters
+    COUNTER_PICKS = {
+        "Shelly": ["El Primo", "Bull", "Rosa", "Jacky", "Bibi"],
+        "Colt": ["Rosa", "Jacky", "Pam", "8-Bit", "Frank"],
+        "Brock": ["Rosa", "Jacky", "Pam", "Barley", "Dynamike"],
+        "Rico": ["Rosa", "Jacky", "Pam", "Frank", "8-Bit"],
+        "Piper": ["Brock", "Colt", "Rico", "Nani", "Belle"],
+        "Crow": ["Shelly", "El Primo", "Bull", "Spike", "Tick"],
+        "Leon": ["Piper", "Brock", "Colt", "Rico", "Tick"],
+        "Mortis": ["Piper", "Brock", "Colt", "Tick", "Barley"],
+        "El Primo": ["Piper", "Brock", "Colt", "Tick", "Barley"],
+        "Rosa": ["Shelly", "Bull", "El Primo", "Mortis", "Edgar"],
+        "Gene": ["Mortis", "Leon", "Crow", "Edgar", "Stu"],
+        "Tara": ["Crow", "Leon", "Mortis", "Edgar", "Sandy"],
+        "Sprout": ["El Primo", "Bull", "Rosa", "Jacky", "Bibi"],
+        "Poco": ["El Primo", "Bull", "Rosa", "Jacky", "Bibi"],
+        "Pam": ["Crow", "Leon", "Spike", "Tick", "Barley"],
+        "Sandy": ["Crow", "Leon", "Mortis", "Edgar", "Stu"],
+        "Max": ["Mortis", "Leon", "Crow", "Edgar", "Stu"],
+        "Emz": ["El Primo", "Bull", "Rosa", "Jacky", "Bibi"],
+        "Jacky": ["Colt", "Brock", "Rico", "Piper", "Nani"],
+        "Gale": ["El Primo", "Bull", "Rosa", "Jacky", "Mortis"],
+        "Surge": ["Shelly", "Bull", "El Primo", "Rosa", "Jacky"],
+        "Fang": ["Piper", "Brock", "Colt", "Tick", "Barley"],
+        "Stu": ["Piper", "Brock", "Colt", "Rico", "Tick"],
+        "Ash": ["Crow", "Leon", "Spike", "Tick", "Barley"],
+    }
     
     def __init__(
         self,
@@ -201,14 +234,16 @@ class BrawlerSelector:
         available_brawlers: List[str],
         map_name: Optional[str] = None,
         force_explore: bool = False,
+        enemy_brawlers: Optional[List[str]] = None,
     ) -> str:
         """
-        Select a brawler using Thompson Sampling.
+        Select a brawler using Thompson Sampling with counter-pick logic.
         
         Args:
             available_brawlers: List of brawler names to choose from
             map_name: Optional current map name
             force_explore: Force exploration (ignore performance)
+            enemy_brawlers: Optional list of enemy brawler names for counter-picking
             
         Returns:
             Selected brawler name
@@ -230,6 +265,13 @@ class BrawlerSelector:
         if not available_stats:
             # Fallback to first available
             return available_brawlers[0]
+        
+        # Counter-pick: if we know enemy brawlers, prefer brawlers that counter them
+        if enemy_brawlers and not force_explore:
+            counter_pick = self._select_counter_pick(available_brawlers, enemy_brawlers)
+            if counter_pick:
+                logger.info(f"Counter-pick: Selected {counter_pick} against {enemy_brawlers}")
+                return counter_pick
         
         # Force exploration or random chance
         if force_explore or random.random() < self.exploration_rate:
@@ -293,6 +335,61 @@ class BrawlerSelector:
             best = max(map_win_rates.items(), key=lambda x: x[1])
             if best[1] > 0.5:  # Only use if win rate > 50%
                 return best[0]
+        
+        return None
+    
+    def _select_counter_pick(
+        self,
+        available_brawlers: List[str],
+        enemy_brawlers: List[str],
+    ) -> Optional[str]:
+        """Select a brawler that counters the enemy team composition.
+        
+        Scores each available brawler by how many enemy brawlers it counters.
+        Weighted by historical win rate against those brawlers.
+        
+        Args:
+            available_brawlers: Brawlers we can choose from
+            enemy_brawlers: Enemy brawler names
+            
+        Returns:
+            Best counter-pick brawler name, or None if no good counter found
+        """
+        if not enemy_brawlers:
+            return None
+        
+        counter_scores: Dict[str, float] = {}
+        
+        for brawler in available_brawlers:
+            countered = self.COUNTER_PICKS.get(brawler, [])
+            if not countered:
+                counter_scores[brawler] = 0.0
+                continue
+            
+            # Count how many enemy brawlers this brawler counters
+            score = 0.0
+            for enemy in enemy_brawlers:
+                if enemy in countered:
+                    # Base score for countering
+                    score += 1.0
+                    # Bonus if we have historical win data against this enemy
+                    if brawler in self.brawlers:
+                        stats = self.brawlers[brawler]
+                        enemy_key = f"vs_{enemy}"
+                        vs_wr = stats.map_stats.get(enemy_key, {}).get("win_rate", 0.5)
+                        score += vs_wr * 0.5  # Up to +0.5 bonus for known good matchup
+            
+            counter_scores[brawler] = score
+        
+        # Find best counter pick
+        if not counter_scores:
+            return None
+        
+        best = max(counter_scores.items(), key=lambda x: x[1])
+        
+        # Only return if the counter score is meaningful (counters at least 1 enemy)
+        if best[1] >= 1.0:
+            return best[0]
         
         return None
     

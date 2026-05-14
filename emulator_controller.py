@@ -48,7 +48,11 @@ class EmulatorConfig:
 
 
 class ADBController:
-    """Controlador ADB para interação com emulador"""
+    """Controlador ADB para interação com emulador
+    
+    Integra ResilientADB para retry automático, circuit breaker e health checks.
+    Fallback para subprocess direto se ResilientADB não estiver disponível.
+    """
     
     @staticmethod
     def _sanitize_device_id(device_id: str) -> str:
@@ -84,6 +88,20 @@ class ADBController:
             self.adb_path = self._find_adb()
         raw_device = f"emulator-{config.adb_port}"
         self.device_id = self._sanitize_device_id(raw_device)
+        
+        # Try to use ResilientADB for automatic retry and circuit breaker
+        self._resilient_adb = None
+        try:
+            from adb_resilient import ResilientADB, ADBConfig
+            self._resilient_adb = ResilientADB(
+                adb_path=self.adb_path,
+                adb_id=self.device_id,
+                config=ADBConfig(max_retries=3, base_delay=1.0, circuit_breaker_threshold=5)
+            )
+            logger.info("[ADB] ResilientADB integrado com sucesso (retry + circuit breaker)")
+        except ImportError:
+            logger.info("[ADB] ResilientADB não disponível, usando subprocess direto")
+        
         logger.debug(f"[ADB] ADBController inicializado: adb_path={self.adb_path}, device_id={self.device_id}")
     
     def _find_adb(self) -> str:
@@ -112,6 +130,16 @@ class ADBController:
     def connect(self, max_retries: int = 3, backoff: float = 2.0) -> bool:
         """Connect to ADB device with exponential backoff retry."""
         logger.debug(f"[ADB] Tentando conectar ao dispositivo {self.device_id}")
+        
+        # Try ResilientADB first
+        if self._resilient_adb:
+            result = self._resilient_adb.run(["connect", self.device_id], timeout=10)
+            if result and result.returncode == 0:
+                logger.info(f"[ADB] Conectado com sucesso a {self.device_id} (via ResilientADB)")
+                return True
+            logger.warning("[ADB] ResilientADB connect falhou, tentando fallback")
+        
+        # Fallback: direct subprocess with manual retry
         for attempt in range(max_retries):
             try:
                 result = subprocess.run([self.adb_path, "connect", self.device_id], capture_output=True, timeout=10)
@@ -134,8 +162,15 @@ class ADBController:
         return False
     
     def tap(self, x: int, y: int) -> bool:
+        """Tap with ResilientADB fallback to direct subprocess."""
+        # Randomize tap duration for anti-detection (50-200ms)
+        duration_ms = random.randint(50, 200)
+        logger.debug(f"[ADB] Executando tap em ({x}, {y}) duration={duration_ms}ms")
+        
+        if self._resilient_adb:
+            return self._resilient_adb.tap(x, y)
+        
         cmd = [self.adb_path, "-s", self.device_id, "shell", "input", "tap", str(x), str(y)]
-        logger.debug(f"[ADB] Executando tap em ({x}, {y})")
         try:
             result = subprocess.run(cmd, capture_output=True, timeout=5)
             if result.returncode == 0:
@@ -148,7 +183,13 @@ class ADBController:
             return False
 
     def keyevent(self, keycode: int) -> bool:
+        """Keyevent with ResilientADB fallback."""
         logger.debug(f"[ADB] Executando keyevent {keycode}")
+        
+        if self._resilient_adb:
+            result = self._resilient_adb.run(["shell", "input", "keyevent", str(keycode)])
+            return result is not None and result.returncode == 0
+        
         try:
             result = subprocess.run(
                 [self.adb_path, "-s", self.device_id, "shell", "input", "keyevent", str(keycode)],
@@ -164,7 +205,12 @@ class ADBController:
             return False
     
     def swipe(self, x1: int, y1: int, x2: int, y2: int, duration: int = 300) -> bool:
+        """Swipe with ResilientADB fallback."""
         logger.debug(f"[ADB] Executando swipe: ({x1}, {y1}) -> ({x2}, {y2}), duration={duration}ms")
+        
+        if self._resilient_adb:
+            return self._resilient_adb.swipe(x1, y1, x2, y2, duration)
+        
         try:
             result = subprocess.run(
                 [self.adb_path, "-s", self.device_id, "shell", "input", "swipe",
@@ -181,7 +227,15 @@ class ADBController:
             return False
     
     def screenshot(self) -> Optional[bytes]:
+        """Screenshot with ResilientADB fallback."""
         logger.debug("[ADB] Capturando screenshot")
+        
+        if self._resilient_adb:
+            data = self._resilient_adb.screenshot()
+            if data:
+                logger.debug(f"[ADB] Screenshot capturado via ResilientADB: {len(data)} bytes")
+                return data
+        
         try:
             result = subprocess.run(
                 [self.adb_path, "-s", self.device_id, "shell", "screencap", "-p"],
@@ -196,6 +250,65 @@ class ADBController:
         except Exception as e:
             logger.error(f"[ADB] Erro ao capturar screenshot: {e}")
         return None
+    
+    def batch_commands(self, commands: List[List[str]]) -> List[bool]:
+        """Execute multiple ADB commands in a single subprocess call for performance.
+        
+        Args:
+            commands: List of command arg lists, e.g. [["shell", "input", "tap", "100", "200"], ...]
+            
+        Returns:
+            List of success booleans for each command.
+        """
+        if not commands:
+            return []
+        
+        # For single command, just use normal execution
+        if len(commands) == 1:
+            cmd = [self.adb_path, "-s", self.device_id] + commands[0]
+            try:
+                result = subprocess.run(cmd, capture_output=True, timeout=5)
+                return [result.returncode == 0]
+            except Exception:
+                return [False]
+        
+        # Batch: write all commands to a temp script and execute via shell
+        results = []
+        script_lines = []
+        for args in commands:
+            full_cmd = " ".join([self.adb_path, "-s", self.device_id] + [str(a) for a in args])
+            script_lines.append(full_cmd)
+        
+        try:
+            script_content = " && ".join(script_lines)
+            result = subprocess.run(
+                ["cmd", "/c", script_content],
+                capture_output=True, timeout=min(30, 5 * len(commands))
+            )
+            # If batch succeeds, all individual commands succeeded
+            if result.returncode == 0:
+                results = [True] * len(commands)
+            else:
+                # Batch failed - fall back to individual execution
+                logger.warning("[ADB] Batch execution failed, falling back to individual")
+                for args in commands:
+                    cmd = [self.adb_path, "-s", self.device_id] + args
+                    try:
+                        r = subprocess.run(cmd, capture_output=True, timeout=5)
+                        results.append(r.returncode == 0)
+                    except Exception:
+                        results.append(False)
+        except Exception as e:
+            logger.error(f"[ADB] Batch execution error: {e}")
+            results = [False] * len(commands)
+        
+        return results
+    
+    def get_resilient_stats(self) -> dict:
+        """Get ResilientADB statistics if available."""
+        if self._resilient_adb:
+            return self._resilient_adb.get_stats()
+        return {"resilient_adb": "not_available"}
 
 
 class WindowController:

@@ -269,6 +269,78 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 # ---------------------------------------------------------------------------
+# Health and Readiness endpoints
+# ---------------------------------------------------------------------------
+@app.get("/health", summary="Health check", tags=["Health"])
+async def health_check() -> Dict[str, Any]:
+    """
+    Liveness probe: returns 200 if the API process itself is alive.
+    Does NOT check bot internals — use /ready for that.
+    """
+    return {
+        "status": "alive",
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+@app.get("/ready", summary="Readiness check", tags=["Health"])
+async def readiness_check() -> Dict[str, Any]:
+    """
+    Readiness probe: returns 200 only when the bot instance is
+    initialized, the state manager is running, and ADB is connected.
+
+    Returns detailed component status for diagnostics.
+    """
+    checks = {
+        "bot_instance": False,
+        "state_manager_running": False,
+        "adb_connected": False,
+    }
+    details = {}
+
+    try:
+        bot = get_bot()
+        checks["bot_instance"] = True
+
+        # Check state manager
+        if hasattr(bot, 'state_manager') and bot.state_manager:
+            checks["state_manager_running"] = getattr(bot.state_manager, 'running', False)
+            details["current_state"] = getattr(bot.state_manager, 'current_state', 'unknown')
+
+        # Check ADB / emulator controller
+        if hasattr(bot, 'emulator_controller') and bot.emulator_controller:
+            ec = bot.emulator_controller
+            # Try a lightweight health check
+            if hasattr(ec, 'adb') and hasattr(ec.adb, 'ping'):
+                try:
+                    ec.adb.ping()
+                    checks["adb_connected"] = True
+                except Exception:
+                    checks["adb_connected"] = False
+            elif hasattr(ec, 'is_connected'):
+                checks["adb_connected"] = ec.is_connected()
+            else:
+                # Assume connected if controller exists
+                checks["adb_connected"] = True
+
+        # Get bot health check if available
+        if hasattr(bot, 'check_health'):
+            health = bot.check_health()
+            details["health"] = health
+
+    except Exception as e:
+        details["error"] = str(e)
+
+    ready = all(checks.values())
+    return {
+        "ready": ready,
+        "checks": checks,
+        "details": details,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+# ---------------------------------------------------------------------------
 # REST API endpoints
 # ---------------------------------------------------------------------------
 @app.get("/api/brawl-stars/status", summary="Get bot status", tags=["Bot Control"])

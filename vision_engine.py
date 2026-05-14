@@ -70,6 +70,95 @@ class VisionConfig:
     # Ajustes de performance
     skip_frames: int = 0
     inference_device: str = "auto"
+    
+    # Adaptive frame skip settings
+    adaptive_skip: bool = True
+    adaptive_skip_max: int = 3  # Maximum frames to skip
+    adaptive_skip_target_fps: float = 20.0  # Target FPS for adaptive skip
+
+
+class AdaptiveFrameSkipper:
+    """Dynamically adjusts frame skip rate based on FPS and game context.
+    
+    Skips more frames when FPS is low to reduce inference load.
+    Skips fewer frames when enemies are nearby (need faster reactions).
+    Never skips in critical combat situations.
+    """
+
+    def __init__(self, max_skip: int = 3, target_fps: float = 20.0):
+        self.max_skip = max_skip
+        self.target_fps = target_fps
+        self._current_skip = 0
+        self._frames_since_last_inference = 0
+        self._last_fps = 0.0
+        self._last_enemy_count = 0
+        self._fps_history: List[float] = []
+        self._last_detect_time = time.time()
+
+    def update_fps(self, fps: float):
+        """Update current FPS measurement."""
+        self._last_fps = fps
+        self._fps_history.append(fps)
+        if len(self._fps_history) > 30:
+            self._fps_history = self._fps_history[-30:]
+
+    def update_enemy_count(self, count: int):
+        """Update number of detected enemies."""
+        self._last_enemy_count = count
+
+    def should_process(self) -> bool:
+        """Determine if this frame should be processed.
+        
+        Returns True if inference should run on this frame.
+        Returns False if the frame should be skipped.
+        """
+        self._frames_since_last_inference += 1
+
+        # Calculate current skip rate based on FPS
+        avg_fps = sum(self._fps_history) / max(1, len(self._fps_history)) if self._fps_history else self.target_fps
+
+        if avg_fps >= self.target_fps:
+            # FPS is good, minimal skipping
+            desired_skip = 0
+        elif avg_fps >= self.target_fps * 0.75:
+            # FPS is moderate, skip 1 frame
+            desired_skip = 1
+        elif avg_fps >= self.target_fps * 0.5:
+            # FPS is low, skip 2 frames
+            desired_skip = 2
+        else:
+            # FPS is very low, skip max frames
+            desired_skip = self.max_skip
+
+        # Reduce skipping when enemies are nearby (need faster reactions)
+        if self._last_enemy_count >= 2:
+            desired_skip = max(0, desired_skip - 1)
+        elif self._last_enemy_count >= 1:
+            desired_skip = max(0, desired_skip - 1)
+
+        self._current_skip = min(desired_skip, self.max_skip)
+
+        # Check if we should process this frame
+        if self._current_skip == 0:
+            self._frames_since_last_inference = 0
+            return True
+
+        if self._frames_since_last_inference >= self._current_skip + 1:
+            # Enough frames skipped, process this one
+            self._frames_since_last_inference = 0
+            return True
+
+        return False
+
+    def get_stats(self) -> Dict:
+        """Return current skip statistics."""
+        avg_fps = sum(self._fps_history) / max(1, len(self._fps_history)) if self._fps_history else 0.0
+        return {
+            "current_skip_rate": self._current_skip,
+            "avg_fps": round(avg_fps, 1),
+            "last_enemy_count": self._last_enemy_count,
+            "frames_since_last_inference": self._frames_since_last_inference,
+        }
 
 
 class YOLOVisionEngine:
@@ -99,6 +188,18 @@ class YOLOVisionEngine:
         # Model switcher for YOLO11 + YOLO-World
         self.model_switcher = None
         self.use_model_switcher = False
+
+        # Adaptive frame skipper
+        self._adaptive_skipper: Optional[AdaptiveFrameSkipper] = None
+        if self.config.adaptive_skip:
+            self._adaptive_skipper = AdaptiveFrameSkipper(
+                max_skip=self.config.adaptive_skip_max,
+                target_fps=self.config.adaptive_skip_target_fps,
+            )
+        
+        # Last detection cache for skipped frames
+        self._last_detections: List[Detection] = []
+        self._last_inference_time: float = 0.0
 
     def _get_device(self) -> str:
         if self.config.inference_device == "auto":
@@ -260,11 +361,28 @@ class YOLOVisionEngine:
             return False
 
     def detect(self, screenshot: np.ndarray) -> List[Detection]:
-        """Run inference and return detections with actual class names from model."""
+        """Run inference and return detections with actual class names from model.
+        
+        If adaptive frame skip is enabled, may return cached detections
+        from the last inference when the current frame is skipped.
+        """
         if not self.is_initialized:
             return []
 
+        # Adaptive frame skip: check if we should process this frame
+        if self._adaptive_skipper is not None:
+            # Update FPS from inference timing
+            if self._last_inference_time > 0:
+                elapsed = time.time() - self._last_inference_time
+                if elapsed > 0:
+                    self._adaptive_skipper.update_fps(1.0 / elapsed)
+
+            if not self._adaptive_skipper.should_process():
+                self.frame_count += 1
+                return self._last_detections  # Return cached detections
+
         detections = []
+        self._last_inference_time = time.time()
 
         # Use model switcher if available
         if self.use_model_switcher and self.model_switcher:
@@ -331,5 +449,14 @@ class YOLOVisionEngine:
                         ))
             except Exception as e:
                 logger.error(f"Inference error on {model_name}: {e}")
+
+        # Cache detections for adaptive frame skip
+        self._last_detections = detections
+        self.frame_count += 1
+
+        # Update adaptive skipper with enemy count
+        if self._adaptive_skipper is not None:
+            enemy_count = sum(1 for d in detections if d.class_name in ("enemy", "player"))
+            self._adaptive_skipper.update_enemy_count(enemy_count)
 
         return detections

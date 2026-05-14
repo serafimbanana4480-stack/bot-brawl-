@@ -38,6 +38,63 @@ class MapType(Enum):
     SPAWN_FOCUSED = "spawn_focused"  # Spawn points important
 
 
+class GameMode(Enum):
+    """Brawl Stars game modes."""
+    SHOWDOWN = "showdown"
+    GEM_GRAB = "gem_grab"
+    BRAWL_BALL = "brawl_ball"
+    HEIST = "heist"
+    BOUNTY = "bounty"
+    SIEGE = "siege"
+    HOT_ZONE = "hot_zone"
+    KNOCKOUT = "knockout"
+
+
+# Mode-specific strategy modifiers
+MODE_MODIFIERS = {
+    GameMode.SHOWDOWN: {
+        "aggression": 0.3,  # Low aggression - survival matters
+        "cube_priority": 0.8,  # High cube priority
+        "team_spread": 0.0,  # No team in solo showdown
+        "retreat_threshold": 0.5,  # Retreat when HP < 50%
+    },
+    GameMode.GEM_GRAB: {
+        "aggression": 0.5,
+        "cube_priority": 0.0,
+        "team_spread": 0.5,
+        "retreat_threshold": 0.4,
+        "gem_hold_priority": 0.9,  # Prioritize holding gems
+    },
+    GameMode.BRAWL_BALL: {
+        "aggression": 0.7,  # High aggression
+        "cube_priority": 0.0,
+        "team_spread": 0.3,
+        "retreat_threshold": 0.3,
+        "ball_priority": 0.95,  # Prioritize ball possession
+    },
+    GameMode.HEIST: {
+        "aggression": 0.8,  # Very aggressive - damage safe
+        "cube_priority": 0.0,
+        "team_spread": 0.4,
+        "retreat_threshold": 0.6,  # Don't retreat much
+        "safe_damage_priority": 0.9,  # Prioritize safe damage to safe
+    },
+    GameMode.BOUNTY: {
+        "aggression": 0.2,  # Very careful - deaths are costly
+        "cube_priority": 0.0,
+        "team_spread": 0.6,
+        "retreat_threshold": 0.7,  # Retreat early
+    },
+    GameMode.HOT_ZONE: {
+        "aggression": 0.6,
+        "cube_priority": 0.0,
+        "team_spread": 0.4,
+        "retreat_threshold": 0.4,
+        "zone_control_priority": 0.85,
+    },
+}
+
+
 @dataclass
 class MapStrategy:
     """Strategy for a specific map."""
@@ -217,7 +274,7 @@ class MapStrategyGenerator:
             support_positions=[(0.45, 0.5), (0.55, 0.5)],
             late_game_position=(0.5, 0.5),
             late_game_action="defensive",
-            special_tactics["corner_control", "ambush_points"],
+            special_tactics=["corner_control", "ambush_points"],
         )
     
     def _generate_symmetrical_strategy(self, map_name: str, game_mode: str) -> MapStrategy:
@@ -257,7 +314,7 @@ class MapStrategyGenerator:
             support_positions=[(0.5, 0.5), (0.8, 0.5)],
             late_game_position=(0.7, 0.5),
             late_game_action="aggressive",
-            special_tactics["exploit_asymmetry", "control_advantage_side"],
+            special_tactics=["exploit_asymmetry", "control_advantage_side"],
         )
     
     def _generate_mid_focused_strategy(self, map_name: str, game_mode: str) -> MapStrategy:
@@ -328,7 +385,7 @@ class MapStrategyGenerator:
     
     def get_strategy(self, map_name: str, map_type: MapType, game_mode: str = "showdown") -> MapStrategy:
         """
-        Get strategy for a map.
+        Get strategy for a map, adjusted for game mode.
         
         Args:
             map_name: Name of the map
@@ -336,9 +393,105 @@ class MapStrategyGenerator:
             game_mode: Game mode
             
         Returns:
-            MapStrategy object
+            MapStrategy object (adjusted for game mode if recognized)
         """
-        return self.generate_strategy(map_name, map_type, game_mode)
+        strategy = self.generate_strategy(map_name, map_type, game_mode)
+        
+        # Apply game mode modifiers
+        try:
+            mode = GameMode(game_mode)
+            strategy = self.adjust_strategy_for_mode(strategy, mode)
+        except ValueError:
+            logger.debug(f"Unknown game mode '{game_mode}', using base strategy")
+        
+        return strategy
+
+    def get_mode_modifier(self, game_mode: GameMode) -> Dict:
+        """Get strategy modifier parameters for a game mode.
+        
+        Args:
+            game_mode: GameMode enum value
+            
+        Returns:
+            Dict of modifier values (aggression, cube_priority, etc.)
+            Returns empty dict if mode has no specific modifiers.
+        """
+        return MODE_MODIFIERS.get(game_mode, {})
+
+    def adjust_strategy_for_mode(self, strategy: MapStrategy, game_mode: GameMode) -> MapStrategy:
+        """Adjust an existing strategy based on game mode modifiers.
+        
+        Applies mode-specific parameters like aggression level,
+        retreat threshold, and special priorities (gems, ball, etc.)
+        to an existing base strategy.
+        
+        Args:
+            strategy: Base MapStrategy to adjust
+            game_mode: GameMode enum value
+            
+        Returns:
+            Adjusted MapStrategy (same object, modified in-place)
+        """
+        modifiers = self.get_mode_modifier(game_mode)
+        if not modifiers:
+            return strategy
+
+        # Adjust initial action based on aggression level
+        aggression = modifiers.get("aggression", 0.5)
+        if aggression >= 0.7:
+            strategy.initial_action = "aggressive"
+        elif aggression <= 0.3:
+            strategy.initial_action = "defensive"
+        else:
+            strategy.initial_action = "mid_control"
+
+        # Adjust team spread
+        team_spread = modifiers.get("team_spread", 0.5)
+        strategy.team_spread = team_spread
+
+        # Mode-specific adjustments
+        if game_mode == GameMode.SHOWDOWN:
+            # Showdown: prioritize power cubes
+            cube_timing = modifiers.get("cube_priority", 0.0) > 0.5
+            if cube_timing:
+                strategy.cube_timing = "early"
+            # Late game: play defensively (survival)
+            strategy.late_game_action = "defensive"
+
+        elif game_mode == GameMode.GEM_GRAB:
+            # Gem Grab: center control is critical
+            strategy.initial_position = (0.5, 0.5)  # Center
+            strategy.initial_action = "mid_control"
+            strategy.late_game_action = "defensive"  # Hold gems
+
+        elif game_mode == GameMode.BRAWL_BALL:
+            # Brawl Ball: aggressive, push forward
+            strategy.initial_action = "aggressive"
+            strategy.rotation_pattern = "adaptive"
+            strategy.late_game_action = "aggressive"
+
+        elif game_mode == GameMode.HEIST:
+            # Heist: rush enemy safe
+            strategy.initial_action = "aggressive"
+            strategy.late_game_action = "aggressive"
+
+        elif game_mode == GameMode.BOUNTY:
+            # Bounty: stay alive, long range
+            strategy.initial_action = "defensive"
+            strategy.team_spread = 0.7  # Spread out to avoid team wipes
+            strategy.late_game_action = "defensive"
+
+        elif game_mode == GameMode.HOT_ZONE:
+            # Hot Zone: control zones
+            strategy.initial_position = (0.5, 0.5)
+            strategy.initial_action = "mid_control"
+
+        logger.info(
+            f"[MAP_STRATEGY] Adjusted strategy for {game_mode.value}: "
+            f"action={strategy.initial_action}, spread={strategy.team_spread:.1f}"
+        )
+
+        return strategy
 
 
 def main():

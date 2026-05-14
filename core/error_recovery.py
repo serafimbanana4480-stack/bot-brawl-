@@ -230,6 +230,26 @@ class ErrorRecoverySystem:
             )
         ]
         
+        # ADB failure - auto-reconnect strategy
+        self.recovery_handlers[ErrorType.ADB_FAILURE] = [
+            RecoveryAction(
+                strategy=RecoveryStrategy.RETRY_WITH_DELAY,
+                description="Retry ADB command with exponential backoff",
+                max_attempts=3,
+                delay_between_attempts=2.0
+            ),
+            RecoveryAction(
+                strategy=RecoveryStrategy.FALLBACK,
+                description="Attempt ADB reconnect",
+                handler=self._reconnect_adb
+            ),
+            RecoveryAction(
+                strategy=RecoveryStrategy.RESTART_COMPONENT,
+                description="Restart ADB connection",
+                handler=self._restart_adb_connection
+            )
+        ]
+        
         # State detection failure
         self.recovery_handlers[ErrorType.STATE_DETECTION_FAILURE] = [
             RecoveryAction(
@@ -550,6 +570,66 @@ class ErrorRecoverySystem:
                 return True
             except Exception as e:
                 logger.error(f"[ERROR_RECOVERY] Falha ao reiniciar ADB: {e}")
+        return False
+    
+    def _reconnect_adb(self, wrapper, context, params) -> bool:
+        """Attempt ADB reconnect with exponential backoff and ResilientADB support.
+
+        Tries up to 3 reconnection attempts with increasing delays (2s, 4s, 8s).
+        Resets circuit breaker on ResilientADB if available, then forces a
+        health check to verify the connection is alive.
+        """
+        max_attempts = params.get("max_attempts", 3) if params else 3
+        base_delay = params.get("base_delay", 2.0) if params else 2.0
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                if wrapper and hasattr(wrapper, 'emulator_controller'):
+                    ec = wrapper.emulator_controller
+
+                    # Reset ResilientADB circuit breaker if available
+                    if hasattr(ec, 'adb') and hasattr(ec.adb, '_resilient_adb') and ec.adb._resilient_adb:
+                        ec.adb._resilient_adb._close_circuit()
+                        ec.adb._resilient_adb.state.last_health_ok = False
+                        logger.info(
+                            f"[ERROR_RECOVERY] ResilientADB circuit breaker reset (attempt {attempt}/{max_attempts})"
+                        )
+
+                    # Attempt reconnect
+                    connected = ec.connect()
+                    if connected:
+                        # Verify with a health check ping
+                        if hasattr(ec, 'adb') and hasattr(ec.adb, 'ping'):
+                            try:
+                                ec.adb.ping()
+                            except Exception:
+                                logger.warning("[ERROR_RECOVERY] ADB connected but ping failed, retrying...")
+                                if attempt < max_attempts:
+                                    delay = base_delay * (2 ** (attempt - 1))
+                                    logger.info(f"[ERROR_RECOVERY] Retrying in {delay:.1f}s...")
+                                    time.sleep(delay)
+                                    continue
+
+                        logger.info(f"[ERROR_RECOVERY] ADB reconnect succeeded on attempt {attempt}")
+                        return True
+                    else:
+                        logger.warning(
+                            f"[ERROR_RECOVERY] ADB reconnect attempt {attempt}/{max_attempts} failed"
+                        )
+                else:
+                    logger.warning("[ERROR_RECOVERY] No emulator_controller available for reconnect")
+                    return False
+
+            except Exception as e:
+                logger.error(f"[ERROR_RECOVERY] ADB reconnect attempt {attempt} exception: {e}")
+
+            # Exponential backoff before next attempt
+            if attempt < max_attempts:
+                delay = base_delay * (2 ** (attempt - 1))
+                logger.info(f"[ERROR_RECOVERY] Retrying ADB reconnect in {delay:.1f}s...")
+                time.sleep(delay)
+
+        logger.error(f"[ERROR_RECOVERY] ADB reconnect failed after {max_attempts} attempts")
         return False
     
     def _degrade_vision(self, wrapper, context, params) -> bool:
