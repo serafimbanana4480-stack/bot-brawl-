@@ -45,9 +45,10 @@ class NotificationEvent:
 class NotificationManager:
     """Gerencia notificacoes do bot para multiplos canais."""
 
-    def __init__(self, config_path: Path = Path("data/notifications.json")):
-        self.config_path = Path(config_path)
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, config_path: Optional[Path] = Path("data/notifications.json")):
+        self.config_path = Path(config_path) if config_path else None
+        if self.config_path:
+            self.config_path.parent.mkdir(parents=True, exist_ok=True)
         self.config = NotificationConfig()
         self._load_config()
         self._history: deque = deque(maxlen=100)
@@ -57,17 +58,20 @@ class NotificationManager:
         self._unknown_since = 0.0
 
     def _load_config(self):
-        if self.config_path.exists():
-            try:
-                with open(self.config_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                for k, v in data.items():
-                    if hasattr(self.config, k):
-                        setattr(self.config, k, v)
-            except Exception as e:
-                logger.warning(f"[NOTIFY] Falha ao carregar config: {e}")
+        if not self.config_path or not self.config_path.exists():
+            return
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for k, v in data.items():
+                if hasattr(self.config, k):
+                    setattr(self.config, k, v)
+        except Exception as e:
+            logger.warning(f"[NOTIFY] Falha ao carregar config: {e}")
 
     def save_config(self):
+        if not self.config_path:
+            return
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
                 json.dump(self.config.__dict__, f, indent=2, ensure_ascii=False)
