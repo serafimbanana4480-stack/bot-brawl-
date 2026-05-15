@@ -80,6 +80,19 @@ except ImportError:
     HAS_ENEMY_INTENTION = False
     EnemyIntentionPredictor = None
 
+# Phase 10: Central Coordinator
+try:
+    from core.central_coordinator import (
+        CentralCoordinator, Recommendation, DecisionType, Priority
+    )
+    HAS_COORDINATOR = True
+except ImportError:
+    HAS_COORDINATOR = False
+    CentralCoordinator = None
+    Recommendation = None
+    DecisionType = None
+    Priority = None
+
 # Phase 10: Game Feature Extractor (wall detection, HP extraction)
 try:
     from vision.game_feature_extractor import GameFeatureExtractor
@@ -98,6 +111,7 @@ class PlayLogic:
         emulator_controller=None,
         enemy_tracker=None,
         rl_engine=None,
+        central_coordinator=None,
     ):
         self.detect_main = detect_main
         self.detect_enemies = detect_enemies
@@ -105,6 +119,7 @@ class PlayLogic:
         self.humanization = humanization
         self.emulator_controller = emulator_controller
         self.rl_engine = rl_engine  # NOVO: Q-Learning engine para decisoes inteligentes
+        self.central_coordinator = central_coordinator
 
         # State tracking para predição (deque with maxlen prevents memory leak)
         self.enemy_history: Dict[int, deque] = defaultdict(lambda: deque(maxlen=5))
@@ -165,6 +180,12 @@ class PlayLogic:
                 logger.info("[PLAY] GameFeatureExtractor inicializado")
             except Exception as e:
                 logger.warning(f"[PLAY] GameFeatureExtractor indisponível: {e}")
+
+        # Feature flags para integração Phase 10 (permite rollback rápido)
+        self._enable_utility_ai = True
+        self._utility_ai_threshold = 0.45  # Score mínimo para override da lógica hard-coded
+        self._enable_intent_system = True
+        self._enable_enemy_intention = True
 
         # Parâmetros ajustáveis para auto-tuning
         self.attack_distance = 200  # Distância ideal de ataque (pixels)
@@ -801,73 +822,191 @@ class PlayLogic:
                 self._last_rl_state = rl_state
                 self._last_rl_action = rl_action
 
-            # 0. UtilityAI: consultar decisão de alto nível (Phase 10)
-            utility_decision = None
-            if self._utility_ai and enemies:
+            # 0. IntentSystem: avaliar intenção estratégica persistente (Phase 10)
+            current_intent_value = None
+            if self._enable_intent_system and self._intent_system:
                 try:
-                    from decision.utility_ai import Action
-                    world_state = {
-                        "player_hp": self._combat_strategy._hp_estimate if self._combat_strategy else 1.0,
-                        "enemies_count": len(enemies),
-                        "closest_distance": closest_dist if enemies else 9999,
-                        "ammo_available": True,
-                        "super_ready": self.super_ready,
-                        "power_cubes": len(power_cubes) if power_cubes else 0,
-                        "bushes_nearby": len(bushes) if bushes else 0,
-                        "game_phase": self._game_phase,
+                    intent_context = {
+                        "health": self._combat_strategy._hp_estimate if self._combat_strategy else 1.0,
+                        "enemies_nearby": len(enemies) if enemies else 0,
+                        "pressure": 0.0,
+                        "match_phase": self._game_phase,
+                        "has_super": self.super_ready,
+                        "cube_count": len(power_cubes) if power_cubes else 0,
+                        "alive_allies": 0,
+                        "is_in_bush": any(self._is_in_bush(player, b) for b in bushes) if bushes else False,
+                        "brawler_role": self.current_brawler if self.current_brawler else "damage",
                     }
-                    utility_decision = self._utility_ai.evaluate(world_state)
-                    logger.info(f"[UTILITY_AI] Decisão: {utility_decision}, scores: {utility_decision.best_action if hasattr(utility_decision, "best_action") else None}")
+                    current_intent = self._intent_system.evaluate(intent_context)
+                    current_intent_value = current_intent.value if current_intent else None
+                    logger.info(f"[INTENT] Intenção: {current_intent_value}")
                 except Exception as e:
-                    logger.debug(f"[UTILITY_AI] Erro na consulta: {e}")
+                    logger.debug(f"[INTENT] Erro: {e}")
 
-            # 0.5. IntentSystem: consultar intenção estratégica (Phase 10)
-            current_intent = None
-            if self._intent_system:
+            # 0.5. UtilityAI: decisão scored de alto nível (Phase 10)
+            utility_decision = None
+            utility_override = False
+            if self._enable_utility_ai and self._utility_ai and enemies:
                 try:
-                    current_intent = self._intent_system.evaluate(
-                        hp_ratio=self._combat_strategy._hp_estimate if self._combat_strategy else 1.0,
-                        enemies_count=len(enemies) if enemies else 0,
-                        game_phase=self._game_phase,
-                        power_cubes=len(power_cubes) if power_cubes else 0,
+                    hp = self._combat_strategy._hp_estimate if self._combat_strategy else 1.0
+                    nearest_enemy = min(enemies, key=lambda e: self._distance(player, e))
+                    nearest_dist = self._distance(player, nearest_enemy)
+                    enemy_hp = self._estimate_enemy_hp(nearest_enemy)
+                    nearest_cube = None
+                    nearest_cube_dist = None
+                    if power_cubes:
+                        nearest_cube = min(power_cubes, key=lambda c: self._distance(player, c))
+                        nearest_cube_dist = self._distance(player, nearest_cube)
+                    has_cover = bool(bushes) or bool(extracted_walls)
+                    cover_pos = None
+                    if bushes:
+                        cover_pos = _center(min(bushes, key=lambda b: self._distance(player, b)))
+                    utility_context = {
+                        "health": hp,
+                        "ammo": 3,
+                        "max_ammo": 3,
+                        "super_charged": self.super_ready,
+                        "enemies_nearby": len(enemies),
+                        "nearest_enemy_dist": nearest_dist,
+                        "nearest_enemy_health": enemy_hp,
+                        "player_position": _center(player) if player else (0, 0),
+                        "pressure": 0.0,
+                        "danger": 0.0,
+                        "has_cover_nearby": has_cover,
+                        "cover_position": cover_pos,
+                        "nearest_cube_dist": nearest_cube_dist,
+                        "cube_position": _center(nearest_cube) if nearest_cube else None,
+                        "match_phase": self._game_phase,
+                        "brawler_role": self.current_brawler if self.current_brawler else "damage",
+                        "intent": current_intent_value,
+                    }
+                    utility_decision = self._utility_ai.evaluate(utility_context)
+                    logger.info(
+                        f"[UTILITY_AI] Ação={utility_decision.action.value}, score={utility_decision.score:.2f}, "
+                        f"urgency={utility_decision.urgency:.2f}, reason={utility_decision.reasoning}"
                     )
-                    logger.info(f"[INTENT] Intenção atual: {current_intent}")
+                    if utility_decision.score >= self._utility_ai_threshold:
+                        utility_override = True
+                        logger.info(f"[UTILITY_AI] Override ativado (score={utility_decision.score:.2f})")
                 except Exception as e:
-                    logger.debug(f"[INTENT] Erro na avaliação: {e}")
+                    logger.debug(f"[UTILITY_AI] Erro: {e}")
 
-            # 1. Decisão de Combate Avancado PRIMEIRO (ele pode ditar movimento)
+            # 0.75. CentralCoordinator: submit recommendations and resolve conflicts (Phase 10)
+            coordinator_action = None
+            coordinator_target = None
+            if HAS_COORDINATOR and self.central_coordinator and enemies:
+                try:
+                    # Set current intent
+                    if current_intent_value:
+                        self.central_coordinator.set_intent(current_intent_value)
+
+                    # Submit UtilityAI recommendation
+                    if utility_decision:
+                        self.central_coordinator.submit_recommendation(
+                            Recommendation(
+                                source="utility_ai",
+                                decision_type=DecisionType.ACTION,
+                                action=utility_decision.action.value,
+                                priority=Priority.HIGH if utility_decision.urgency > 0.7 else Priority.MEDIUM,
+                                confidence=min(1.0, max(0.0, utility_decision.score)),
+                                reason=utility_decision.reasoning,
+                                context={"target_position": utility_decision.target_position},
+                            )
+                        )
+
+                    # Submit StickyTarget recommendation
+                    if self._sticky_target and closest_enemy:
+                        self.central_coordinator.submit_recommendation(
+                            Recommendation(
+                                source="sticky_target",
+                                decision_type=DecisionType.TARGET,
+                                action=closest_enemy,
+                                priority=Priority.MEDIUM,
+                                confidence=0.8,
+                                reason="committed_target",
+                            )
+                        )
+
+                    # Submit RL recommendation
+                    if rl_action and rl_confidence > 0.5:
+                        self.central_coordinator.submit_recommendation(
+                            Recommendation(
+                                source="rl_engine",
+                                decision_type=DecisionType.ACTION,
+                                action=rl_action,
+                                priority=Priority.MEDIUM,
+                                confidence=rl_confidence,
+                                reason="q_learning",
+                            )
+                        )
+
+                    # Resolve all recommendations
+                    coordinated = self.central_coordinator.resolve()
+                    action_decision = coordinated.get(DecisionType.ACTION)
+                    if action_decision:
+                        coordinator_action = action_decision.action
+                        logger.info(
+                            f"[COORDINATOR] Ação unificada: {coordinator_action} "
+                            f"(fonte={action_decision.source}, razao={action_decision.reason})"
+                        )
+                        # Check if coordinator overrode UtilityAI (learning opportunity)
+                        if utility_override and action_decision.source != "utility_ai":
+                            logger.info(
+                                f"[COORDINATOR] Override cruzado: UtilityAI -> {action_decision.source}"
+                            )
+                except Exception as e:
+                    logger.debug(f"[COORDINATOR] Erro: {e}")
+
+            # 1. Decisão de Combate: Phase 5 strategy + Phase 10 UtilityAI/Coordinator override
             attack_taken = False
             action = "idle"
             move_target = None
-            if self._combat_strategy and self.emulator_controller:
+            if coordinator_action and HAS_COORDINATOR and self.central_coordinator:
+                # Phase 10: CentralCoordinator has unified decision from multiple subsystems
+                decision = self._map_coordinator_action_to_combat(
+                    coordinator_action, player, enemies, bushes, power_cubes
+                )
+                action = decision.get("action", "idle")
+                logger.info(f"[COORDINATOR] Ação mapeada: {action}, razao: {decision.get('reason')}")
+            elif utility_override and utility_decision:
+                # Phase 10: UtilityAI override with high confidence
+                decision = self._map_utility_action_to_combat(
+                    utility_decision, player, enemies, bushes, power_cubes
+                )
+                action = decision.get("action", "idle")
+                logger.info(f"[UTILITY_AI] Ação mapeada: {action}, razao: {decision.get('reason')}")
+            elif self._combat_strategy and self.emulator_controller:
                 decision = self._combat_strategy.decide_combat_action(
                     player, enemies, bushes, power_cubes
                 )
                 action = decision.get("action", "idle")
                 logger.info(f"[COMBAT_AVANCADO] Decisao: {action}, razao: {decision.get('reason')}")
-
-                if action == "attack":
-                    pred_pos = decision.get("predicted_pos")
-                    if pred_pos:
-                        self._try_smart_attack_with_prediction(player, enemies, pred_pos)
-                    else:
-                        self._try_smart_attack(player, enemies)
-                    attack_taken = True
-                elif action == "kite":
-                    move_target = decision.get("target")
-                    self._try_smart_attack(player, enemies)
-                    attack_taken = True
-                elif action == "cover":
-                    move_target = decision.get("target")
-                elif action == "combo":
-                    self._execute_combo(player, enemies)
-                    attack_taken = True
-                elif action == "move":
-                    move_target = decision.get("target")
-                elif action == "idle":
-                    pass
             else:
-                # Fallback: ataque básico quando não há combat strategy
+                decision = {}
+
+            if action == "attack":
+                pred_pos = decision.get("predicted_pos")
+                if pred_pos:
+                    self._try_smart_attack_with_prediction(player, enemies, pred_pos)
+                else:
+                    self._try_smart_attack(player, enemies)
+                attack_taken = True
+            elif action == "kite":
+                move_target = decision.get("target")
+                self._try_smart_attack(player, enemies)
+                attack_taken = True
+            elif action == "cover":
+                move_target = decision.get("target")
+            elif action == "combo":
+                self._execute_combo(player, enemies)
+                attack_taken = True
+            elif action == "move":
+                move_target = decision.get("target")
+            elif action == "idle":
+                pass
+
+            if not (utility_override or (self._combat_strategy and self.emulator_controller)):
+                # Fallback: ataque básico quando não há combat strategy nem UtilityAI override
                 if enemies and self.emulator_controller:
                     self._try_smart_attack(player, enemies)
                     attack_taken = True
@@ -1336,3 +1475,169 @@ class PlayLogic:
         except Exception as e:
             logger.error(f"[MOVEMENT] Erro ao executar movimento: key={key}, error={e}")
             logger.error(f"[MOVEMENT] EmulatorController disponível: {self.emulator_controller is not None}")
+
+    # --- Phase 10 helper methods ---
+
+    def _estimate_enemy_hp(self, enemy_bbox):
+        """Heuristic HP estimate from bbox size (smaller = lower HP)."""
+        if not enemy_bbox or len(enemy_bbox) < 4:
+            return 1.0
+        w = enemy_bbox[2] - enemy_bbox[0]
+        h = enemy_bbox[3] - enemy_bbox[1]
+        area = w * h
+        # Normal brawler area ~5000-15000 px, low HP shrinks ~20%
+        if area < 4000:
+            return 0.25
+        elif area < 6000:
+            return 0.5
+        elif area < 10000:
+            return 0.75
+        return 1.0
+
+    def _is_in_bush(self, player_bbox, bush_bbox):
+        """Check if player bbox intersects with bush bbox."""
+        if not player_bbox or not bush_bbox or len(player_bbox) < 4 or len(bush_bbox) < 4:
+            return False
+        px1, py1, px2, py2 = player_bbox
+        bx1, by1, bx2, by2 = bush_bbox
+        return not (px2 < bx1 or px1 > bx2 or py2 < by1 or py1 > by2)
+
+    def _map_utility_action_to_combat(self, action_score, player, enemies, bushes, power_cubes):
+        """Map UtilityAI ActionScore to combat action dict used by play_round."""
+        from decision.utility_ai import Action
+        action = action_score.action
+        target_pos = action_score.target_position
+        player_c = _center(player) if player else (0, 0)
+
+        if action == Action.ATTACK:
+            # Use leading shot prediction if available
+            pred_pos = None
+            if enemies:
+                closest = min(enemies, key=lambda e: self._distance(player, e))
+                pred_pos = self._predict_position(closest)
+            return {
+                "action": "attack",
+                "predicted_pos": pred_pos,
+                "reason": f"utility_attack_{action_score.reasoning}",
+            }
+        elif action == Action.RETREAT:
+            # Kite away from nearest enemy
+            if enemies:
+                closest = min(enemies, key=lambda e: self._distance(player, e))
+                ec = _center(closest)
+                # Move away from enemy (vector from enemy to player, extended)
+                dx = player_c[0] - ec[0]
+                dy = player_c[1] - ec[1]
+                dist = math.sqrt(dx*dx + dy*dy) or 1
+                retreat_dist = 200
+                retreat_pos = (int(player_c[0] + dx/dist * retreat_dist), int(player_c[1] + dy/dist * retreat_dist))
+                return {"action": "kite", "target": retreat_pos, "reason": "utility_retreat"}
+            return {"action": "idle", "reason": "utility_retreat_no_enemy"}
+        elif action == Action.COLLECT_CUBE:
+            if power_cubes:
+                target = min(power_cubes, key=lambda c: self._distance(player, c))
+                return {"action": "move", "target": _center(target), "reason": "utility_collect_cube"}
+            return {"action": "idle", "reason": "utility_no_cube"}
+        elif action == Action.TAKE_COVER:
+            if bushes:
+                target = min(bushes, key=lambda b: self._distance(player, b))
+                return {"action": "cover", "target": _center(target), "reason": "utility_take_cover"}
+            return {"action": "idle", "reason": "utility_no_cover"}
+        elif action == Action.HOLD_POSITION:
+            return {"action": "idle", "reason": "utility_hold_position"}
+        elif action == Action.HEAL_UP:
+            # Find safest bush or just idle
+            if bushes:
+                target = min(bushes, key=lambda b: self._distance(player, b))
+                return {"action": "cover", "target": _center(target), "reason": "utility_heal_up"}
+            return {"action": "idle", "reason": "utility_heal_no_cover"}
+        elif action == Action.AMBUSH:
+            if bushes:
+                target = min(bushes, key=lambda b: self._distance(player, b))
+                return {"action": "cover", "target": _center(target), "reason": "utility_ambush"}
+            return {"action": "idle", "reason": "utility_ambush_no_bush"}
+        elif action == Action.CHASE:
+            if enemies:
+                target = min(enemies, key=lambda e: self._distance(player, e))
+                pred_pos = self._predict_position(target)
+                return {"action": "attack", "predicted_pos": pred_pos, "reason": "utility_chase"}
+            return {"action": "idle", "reason": "utility_chase_no_enemy"}
+        elif action == Action.KITE:
+            # Attack while retreating
+            if enemies:
+                closest = min(enemies, key=lambda e: self._distance(player, e))
+                ec = _center(closest)
+                dx = player_c[0] - ec[0]
+                dy = player_c[1] - ec[1]
+                dist = math.sqrt(dx*dx + dy*dy) or 1
+                retreat_dist = 150
+                retreat_pos = (int(player_c[0] + dx/dist * retreat_dist), int(player_c[1] + dy/dist * retreat_dist))
+                return {"action": "kite", "target": retreat_pos, "reason": "utility_kite"}
+            return {"action": "idle", "reason": "utility_kite_no_enemy"}
+        elif action == Action.USE_SUPER:
+            pred_pos = None
+            if enemies:
+                closest = min(enemies, key=lambda e: self._distance(player, e))
+                pred_pos = self._predict_position(closest)
+            return {
+                "action": "attack",
+                "predicted_pos": pred_pos,
+                "reason": "utility_use_super",
+            }
+        return {"action": "idle", "reason": "utility_unknown"}
+
+    def _map_coordinator_action_to_combat(self, action_str, player, enemies, bushes, power_cubes):
+        """Map CentralCoordinator action string to combat action dict."""
+        player_c = _center(player) if player else (0, 0)
+
+        if action_str == "attack":
+            pred_pos = None
+            if enemies:
+                closest = min(enemies, key=lambda e: self._distance(player, e))
+                pred_pos = self._predict_position(closest)
+            return {"action": "attack", "predicted_pos": pred_pos, "reason": "coordinator_attack"}
+        elif action_str == "retreat":
+            if enemies:
+                closest = min(enemies, key=lambda e: self._distance(player, e))
+                ec = _center(closest)
+                dx = player_c[0] - ec[0]
+                dy = player_c[1] - ec[1]
+                dist = math.sqrt(dx*dx + dy*dy) or 1
+                retreat_pos = (int(player_c[0] + dx/dist * 200), int(player_c[1] + dy/dist * 200))
+                return {"action": "kite", "target": retreat_pos, "reason": "coordinator_retreat"}
+            return {"action": "idle", "reason": "coordinator_retreat_no_enemy"}
+        elif action_str == "collect_cube":
+            if power_cubes:
+                target = min(power_cubes, key=lambda c: self._distance(player, c))
+                return {"action": "move", "target": _center(target), "reason": "coordinator_collect"}
+            return {"action": "idle", "reason": "coordinator_no_cube"}
+        elif action_str in ("take_cover", "heal_up", "ambush"):
+            if bushes:
+                target = min(bushes, key=lambda b: self._distance(player, b))
+                return {"action": "cover", "target": _center(target), "reason": f"coordinator_{action_str}"}
+            return {"action": "idle", "reason": f"coordinator_{action_str}_no_cover"}
+        elif action_str == "hold_position":
+            return {"action": "idle", "reason": "coordinator_hold"}
+        elif action_str == "chase":
+            if enemies:
+                target = min(enemies, key=lambda e: self._distance(player, e))
+                pred_pos = self._predict_position(target)
+                return {"action": "attack", "predicted_pos": pred_pos, "reason": "coordinator_chase"}
+            return {"action": "idle", "reason": "coordinator_chase_no_enemy"}
+        elif action_str == "kite":
+            if enemies:
+                closest = min(enemies, key=lambda e: self._distance(player, e))
+                ec = _center(closest)
+                dx = player_c[0] - ec[0]
+                dy = player_c[1] - ec[1]
+                dist = math.sqrt(dx*dx + dy*dy) or 1
+                retreat_pos = (int(player_c[0] + dx/dist * 150), int(player_c[1] + dy/dist * 150))
+                return {"action": "kite", "target": retreat_pos, "reason": "coordinator_kite"}
+            return {"action": "idle", "reason": "coordinator_kite_no_enemy"}
+        elif action_str == "use_super":
+            pred_pos = None
+            if enemies:
+                closest = min(enemies, key=lambda e: self._distance(player, e))
+                pred_pos = self._predict_position(closest)
+            return {"action": "attack", "predicted_pos": pred_pos, "reason": "coordinator_super"}
+        return {"action": "idle", "reason": "coordinator_unknown"}

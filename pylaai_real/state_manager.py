@@ -28,11 +28,13 @@ logger = logging.getLogger(__name__)
 
 # Phase 10: LobbyFSM for hierarchical lobby state management
 try:
-    from core.lobby_fsm import HierarchicalFSM as LobbyFSM
+    from core.lobby_fsm import HierarchicalFSM as LobbyFSM, TopLevelState, LobbyState
     HAS_LOBBY_FSM = True
 except ImportError:
     HAS_LOBBY_FSM = False
     LobbyFSM = None
+    TopLevelState = None
+    LobbyState = None
 
 try:
     from ..realtime_logs import get_log_manager
@@ -626,7 +628,29 @@ class StateManager:
         logger.info(f"[STATE] Lobby automator disponível: {self.lobby is not None}")
         logger.info(f"[STATE] Emulator controller disponível: {self.emulator_controller is not None}")
         self._diag("lobby_handler_start")
-        
+
+        # Phase 10: LobbyFSM state tracking
+        if self.lobby_fsm and HAS_LOBBY_FSM:
+            try:
+                current_fsm = self.lobby_fsm.get_state()
+                if current_fsm.sub != LobbyState.PLAY_BUTTON:
+                    self.lobby_fsm.transition(
+                        TopLevelState.LOBBY, LobbyState.PLAY_BUTTON,
+                        reason="entered_lobby_handler"
+                    )
+                # Stuck detection: if in PLAY_BUTTON too long, try recovery
+                if self.lobby_fsm.is_stuck():
+                    logger.warning("[STATE] LobbyFSM: stuck in PLAY_BUTTON, forcing state reset")
+                    self.lobby_fsm.transition(
+                        TopLevelState.LOBBY, LobbyState.IDLE,
+                        reason="stuck_recovery"
+                    )
+                    # Try clicking harder or different area
+                    if self.lobby and hasattr(self.lobby, '_force_play_click'):
+                        self.lobby._force_play_click()
+            except Exception as e:
+                logger.debug(f"[STATE] LobbyFSM error: {e}")
+
         if self.screen_automation and hasattr(self.screen_automation, "get_current_state_name"):
             state_name = self.screen_automation.get_current_state_name()
             logger.info(f"[STATE] Screen automation state: {state_name}")
@@ -677,6 +701,24 @@ class StateManager:
         """Na seleção de brawler - seleciona, sai e inicia partida imediatamente"""
         logger.info("[STATE] Na seleção de brawler")
         self._diag("brawler_selection_start")
+
+        # Phase 10: LobbyFSM state tracking
+        if self.lobby_fsm and HAS_LOBBY_FSM:
+            try:
+                current_fsm = self.lobby_fsm.get_state()
+                if current_fsm.sub != LobbyState.BRAWLER_SELECT:
+                    self.lobby_fsm.transition(
+                        TopLevelState.LOBBY, LobbyState.BRAWLER_SELECT,
+                        reason="entered_brawler_selection"
+                    )
+                if self.lobby_fsm.is_stuck():
+                    logger.warning("[STATE] LobbyFSM: stuck in BRAWLER_SELECT, forcing exit")
+                    self.lobby_fsm.transition(
+                        TopLevelState.LOBBY, LobbyState.IDLE,
+                        reason="brawler_stuck_recovery"
+                    )
+            except Exception as e:
+                logger.debug(f"[STATE] LobbyFSM error in brawler selection: {e}")
 
         # Intelligent brawler selection using BrawlerSelector
         if self.brawler_selector and hasattr(self.lobby, "queue") and hasattr(self.lobby.queue, "get_available_names"):

@@ -1168,6 +1168,7 @@ class PylaAIEnhanced:
                 humanization=self.humanization,
                 emulator_controller=self.emulator_controller,  # Pass controller
                 rl_engine=self.online_learner.q_learning if self.online_learner else None,
+                central_coordinator=self.central_coordinator,
             )
 
             # --- Step 5: Create state manager ---
