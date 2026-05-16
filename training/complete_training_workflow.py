@@ -16,7 +16,6 @@ Usage:
 
 import argparse
 import logging
-import shutil
 import sys
 import time
 from pathlib import Path

@@ -13,7 +13,6 @@ Uso:
 """
 
 import argparse
-import json
 import logging
 import shutil
 import sys
@@ -178,7 +177,7 @@ def get_classes(dataset_dir: Path) -> set:
 
 def verify_compatibility(local_dir: Path, roboflow_dir: Path) -> bool:
     """Verify datasets have compatible classes."""
-    local_classes = get_classes(local_dir)
+    _local_classes = get_classes(local_dir)  # reserved for future cross-validation
     robo_classes = get_classes(roboflow_dir)
     required = {0, 2, 3, 5}  # Player, Enemy, Cubebox, Powerup
     
@@ -225,7 +224,7 @@ def verify_dataset(dataset_dir: Path) -> dict:
 
                     with open(label_file, 'r') as f:
                         lines = f.readlines()
-                        if not lines or all(l.strip() == "" for l in lines):
+                        if not lines or all(line.strip() == "" for line in lines):
                             stats["empty_labels"] += 1
 
                         for line in lines:

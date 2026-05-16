@@ -30,7 +30,6 @@ import argparse
 import hashlib
 import json
 import logging
-import os
 import random
 import shutil
 import sys
@@ -769,7 +768,7 @@ def train_yolo(data_yaml: Path,
     # Training with augmentation
     # NOTE: ultralytics appends project/name to create save_dir.
     # We use absolute project path to avoid double-nesting.
-    results = model.train(
+    _results = model.train(
         data=str(data_yaml),
         epochs=epochs,
         batch=batch_size,
