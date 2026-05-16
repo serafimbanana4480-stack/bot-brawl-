@@ -56,15 +56,14 @@ ROBOFLOW_CLASS_NAMES = ["Ball", "Enemy", "Friendly", "Gem", "Hot_Zone", "Me", "P
 KEEP_CLASSES = {0, 2, 3, 5}  # Player, Enemy, Cubebox, Powerup
 
 
-def download_dataset(url: str, output_dir: Path, api_key: str = None) -> bool:
-    """Download dataset do Roboflow."""
-    output_dir.mkdir(parents=True, exist_ok=True)
+def download_dataset(url: str, output_dir: Path, api_key: str) -> bool:
+    """Download dataset do Roboflow (api_key is required)."""
+    if not api_key:
+        logger.error("Roboflow API key is REQUIRED for download")
+        return False
 
-    if api_key:
-        download_url = f"{url}?api_key={api_key}"
-    else:
-        logger.warning("No Roboflow API key - using public URL")
-        download_url = url
+    output_dir.mkdir(parents=True, exist_ok=True)
+    download_url = f"{url}?api_key={api_key}"
 
     zip_path = output_dir / "dataset.zip"
 
@@ -92,15 +91,37 @@ def download_dataset(url: str, output_dir: Path, api_key: str = None) -> bool:
     return True
 
 
-def remap_classes(dataset_dir: Path) -> int:
+def remap_classes(dataset_dir: Path, roboflow_class_names: list = None) -> int:
     """
     Remapeia classes do dataset Roboflow para nosso formato.
-    Remove classes que não nos interessam.
+    Remove classes que nao nos interessam.
+    
+    Args:
+        dataset_dir: Path to the dataset split directory (contains labels/).
+        roboflow_class_names: Optional list of Roboflow class names in index order.
+                              If None, reads from data.yaml in the parent directory.
     """
     labels_dir = dataset_dir / "labels"
     if not labels_dir.exists():
         logger.error(f"Labels directory not found: {labels_dir}")
         return 0
+
+    # Auto-detect Roboflow class names from data.yaml if not provided
+    if roboflow_class_names is None:
+        parent = dataset_dir.parent
+        yaml_path = parent / "data.yaml"
+        if yaml_path.exists():
+            try:
+                import yaml
+                with open(yaml_path) as f:
+                    cfg = yaml.safe_load(f)
+                roboflow_class_names = cfg.get("names", [])
+                logger.info(f"Read {len(roboflow_class_names)} class names from {yaml_path}")
+            except Exception:
+                roboflow_class_names = ROBOFLOW_CLASS_NAMES
+                logger.warning(f"Could not read {yaml_path}, using hardcoded class names")
+        else:
+            roboflow_class_names = ROBOFLOW_CLASS_NAMES
 
     remapped = 0
     removed = 0
@@ -119,8 +140,8 @@ def remap_classes(dataset_dir: Path) -> int:
             bbox = parts[1:]
 
             # Map Roboflow class to our class
-            if cls_id < len(ROBOFLOW_CLASS_NAMES):
-                roboflow_class_name = ROBOFLOW_CLASS_NAMES[cls_id]
+            if cls_id < len(roboflow_class_names):
+                roboflow_class_name = roboflow_class_names[cls_id]
                 new_cls_id = CLASS_MAP.get(roboflow_class_name, -1)
             else:
                 new_cls_id = -1
@@ -231,8 +252,9 @@ def merge_with_local(local_dir: Path, roboflow_dir: Path, output_dir: Path) -> d
         return {}
 
     # Verify minimum dataset size
-    local_images = len(list(local_dir.glob("**/*.png"))) + len(list(local_dir.glob("**/*.jpg")))
-    robo_images = len(list(roboflow_dir.glob("**/*.png"))) + len(list(roboflow_dir.glob("**/*.jpg")))
+    extensions = {".png", ".jpg", ".jpeg"}
+    local_images = sum(1 for f in local_dir.glob("**/*") if f.suffix.lower() in extensions)
+    robo_images = sum(1 for f in roboflow_dir.glob("**/*") if f.suffix.lower() in extensions)
     
     if local_images < 100:
         logger.error(f"Local dataset too small: {local_images} images (minimum: 100)")
@@ -276,10 +298,10 @@ def _copy_split(source_dir: Path, dest_dir: Path, append: bool = False) -> dict:
         if append:
             start_idx = len(list(dst_images.glob("*")))
 
-        for img_file in src_images.glob("*"):
-            if img_file.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
-                continue
-            i = list(src_images.glob("*")).index(img_file)
+        # Collect image files once (avoid O(n^2) re-globbing)
+        image_files = [f for f in sorted(src_images.glob("*"))
+                      if f.suffix.lower() in {".png", ".jpg", ".jpeg"}]
+        for i, img_file in enumerate(image_files):
             new_name = f"robo_{start_idx + i:05d}{img_file.suffix}"
             shutil.copy2(img_file, dst_images / new_name)
 
