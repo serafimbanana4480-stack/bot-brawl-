@@ -21,8 +21,10 @@ from typing import Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 BRAWL_STARS_CLASSES = {
-    "enemy", "teammate", "player", "wall", "bush",
-    "powerup", "box", "bullet", "super_indicator",
+    "player", "enemy", "bush", "cubebox", "wall",
+    "powerup", "bullet", "super",
+    # Legacy/alternative names
+    "teammate", "box", "super_indicator",
     "health_bar", "joystick", "attack_button"
 }
 
