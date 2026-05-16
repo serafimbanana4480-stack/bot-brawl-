@@ -56,8 +56,8 @@ logger = logging.getLogger("enhanced_training")
 # ============================================================
 STANDARD_CLASSES = {
     0: "Player",
-    1: "Enemy",
-    2: "Bush",
+    1: "Bush",
+    2: "Enemy",
     3: "Cubebox",
     4: "Wall",
     5: "Powerup",

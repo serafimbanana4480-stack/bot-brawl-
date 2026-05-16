@@ -35,25 +35,25 @@ ROBOFLOW_URLS = {
 
 # Classe mapping: Roboflow -> nosso formato
 # Roboflow: Ball, Enemy, Friendly, Gem, Hot_Zone, Me, PP, PP_Box, Safe_Enemy, Safe_Friendly
-# Nosso:     Player, Enemy, Bush,  Cubebox, -,       -,   -,     -,    -,        -
+# Nosso:     Player, Bush, Enemy, Cubebox, Wall, Powerup, Bullet, Super
 CLASS_MAP = {
-    "Enemy": 1,       # Enemy -> Enemy
-    "Safe_Enemy": 1, # Safe_Enemy -> Enemy (agrupar)
-    "Friendly": 0,   # Friendly -> Player
-    "Me": 0,         # Me -> Player
-    "Ball": 3,       # Ball -> Cubebox (aproximado)
-    "Gem": 3,        # Gem -> Cubebox (power cube)
-    "PP": 5,         # PP -> Powerup
-    "PP_Box": 5,     # PP_Box -> Powerup
-    "Hot_Zone": -1,  # Hot_Zone -> skip (não existe no nosso)
-    "Safe_Friendly": 0,  # Safe_Friendly -> Player
+    "Enemy": 2,        # Enemy -> Enemy (index 2)
+    "Safe_Enemy": 2,   # Safe_Enemy -> Enemy
+    "Friendly": 0,     # Friendly -> Player
+    "Me": 0,           # Me -> Player
+    "Safe_Friendly": 0,# Safe_Friendly -> Player
+    "Ball": 3,         # Ball -> Cubebox (aproximado)
+    "Gem": 3,          # Gem -> Cubebox (power cube)
+    "PP": 5,           # PP -> Powerup
+    "PP_Box": 5,       # PP_Box -> Powerup
+    "Hot_Zone": -1,    # Hot_Zone -> skip (nao existe no nosso)
 }
 
 # Roboflow class names in order (from dataset)
 ROBOFLOW_CLASS_NAMES = ["Ball", "Enemy", "Friendly", "Gem", "Hot_Zone", "Me", "PP", "PP_Box", "Safe_Enemy", "Safe_Friendly"]
 
 # Classes que queremos manter
-KEEP_CLASSES = {0, 1, 3, 5}  # Player, Enemy, Cubebox, Powerup
+KEEP_CLASSES = {0, 2, 3, 5}  # Player, Enemy, Cubebox, Powerup
 
 
 def download_dataset(url: str, output_dir: Path, api_key: str = None) -> bool:

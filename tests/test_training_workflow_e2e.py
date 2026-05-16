@@ -202,9 +202,9 @@ class TestClassRemapping:
     def test_class_map_correct(self):
         """CLASS_MAP mapeia classes corretamente."""
         from training.download_roboflow_dataset import CLASS_MAP
-        # Enemy classes -> 1
-        assert CLASS_MAP["Enemy"] == 1
-        assert CLASS_MAP["Safe_Enemy"] == 1
+        # Enemy classes -> 2 (index 2 in standard: Player=0, Bush=1, Enemy=2, Cubebox=3)
+        assert CLASS_MAP["Enemy"] == 2
+        assert CLASS_MAP["Safe_Enemy"] == 2
         # Player classes -> 0
         assert CLASS_MAP["Friendly"] == 0
         assert CLASS_MAP["Me"] == 0
@@ -216,7 +216,7 @@ class TestClassRemapping:
         """KEEP_CLASSES contem as classes esperadas."""
         from training.download_roboflow_dataset import KEEP_CLASSES
         assert 0 in KEEP_CLASSES  # Player
-        assert 1 in KEEP_CLASSES  # Enemy
+        assert 2 in KEEP_CLASSES  # Enemy
         assert 3 in KEEP_CLASSES  # Cubebox
         assert 5 in KEEP_CLASSES  # Powerup
 
