@@ -192,7 +192,60 @@ AI-powered Brawl Stars bot with real-time computer vision (YOLO), adaptive comba
 ### Vision (1)
 - `vision/game_feature_extractor.py` — wall detection, HP extraction, bush detection, timer detection
 
+## Training Pipeline (Hybrid Roboflow + Screenshots)
+
+### Architecture
+- `training/download_roboflow_dataset.py` — Download + remap Roboflow dataset (2551 images, 10→4 classes)
+- `training/enhanced_training_pipeline.py` — Full pipeline: capture, curate, auto-label, train, validate
+- `training/complete_training_workflow.py` — Orchestrator: capture → download → merge → validate → train
+- `training/validate_dataset.py` — Dataset integrity checks (structure, class balance, quality, bbox sizes)
+- `training/continuous_training_pipeline.py` — Online learning pipeline
+- `tests/test_training_workflow_e2e.py` — 25 end-to-end tests
+
+### Standard Class Mapping (CANONICAL)
+```
+0: Player     1: Bush       2: Enemy      3: Cubebox
+4: Wall       5: Powerup    6: Bullet     7: Super
+```
+This matches the trained model (`brawlstars_yolov8.pt`) and `wrapper.py`'s `Detect` class.
+`config.json` must use: `["Player", "Bush", "Enemy", "Cubebox", "Wall", "Powerup", "Bullet", "Super"]`
+
+### Roboflow Dataset (Bloxxy)
+- **URL:** https://universe.roboflow.com/bloxxy/brawl-stars-dataset
+- **Version:** 22 (object-detection)
+- **Images:** 2551 (1839 train, 483 val, 229 test)
+- **Original classes:** Ball, Enemy, Friendly, Gem, Hot_Zone, Me, PP, PP_Box, Safe_Enemy, Safe_Friendly
+- **After remap:** Player(0)=5270, Enemy(2)=3623, Cubebox(3)=1183, Powerup(5)=1191 boxes
+- **Missing:** Bush(1), Wall(4), Bullet(6), Super(7) — requires custom screenshots
+
+### Quick Commands
+```bash
+# Setup
+py -3.12 -m venv .venv && .venv/Scripts/pip install torch ultralytics opencv-python pyyaml roboflow pytest pyautogui toml
+
+# Download + remap Roboflow dataset
+.venv/Scripts/python training/download_roboflow_dataset.py --api-key YOUR_KEY --output dataset/roboflow_raw_v2
+
+# Validate dataset
+.venv/Scripts/python training/validate_dataset.py --dataset dataset/roboflow_raw_v2
+
+# Train (CPU)
+.venv/Scripts/python training/enhanced_training_pipeline.py --train-only --epochs 30 --batch 8 --device cpu --dataset dataset/roboflow_raw_v2
+
+# Validate model
+.venv/Scripts/python training/enhanced_training_pipeline.py --validate-only --dataset dataset/roboflow_raw_v2
+
+# Run all tests
+.venv/Scripts/python -m pytest tests/ -v
+
+# Full workflow (requires emulator)
+.venv/Scripts/python training/complete_training_workflow.py --all --api-key YOUR_KEY --epochs 30
+```
+
 ## File Paths
 - Project root: `c:/Users/rodri/Desktop/bot brawl/`
 - Images/templates: `images/` (or path passed to `LobbyAutomator`)
 - Planning docs: `.planning/`
+- Trained models: `models/brawlstars_yolov8.pt`
+- Dataset: `dataset/roboflow_raw_v2/`
+- Training runs: `runs/detect/brawlstars_yolo11/`
