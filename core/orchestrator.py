@@ -1,382 +1,453 @@
 """
-Main orchestrator for Brawl Stars bot.
-Integrates all modules and manages the main execution loop.
+core/orchestrator.py
+
+BotOrchestrator — Hexagonal architecture for Soberana Omega.
+
+The orchestrator knows ONLY about Port interfaces (abstract).
+It does NOT depend on:
+    - YOLO/Ultralytics
+    - ADB/Win32
+    - Q-Learning/NeuralPolicy specifics
+    - Screenshot mechanism
+    - Any safety or telemetry backend
+
+Ports (injected):
+    - vision: VisionPort
+    - input: InputPort
+    - decision: DecisionPort
+    - safety: SafetyPort
+    - telemetry: TelemetryPort
+    - persistence: PersistencePort
+
+Usage (via factory):
+    from core.factory import create_orchestrator
+    bot = create_orchestrator(config)
+    bot.run()          # blocking monitor loop
+    bot.execute_action("pause")
+    status = bot.status()
 """
 
-import time
-import threading
-from pathlib import Path
-from typing import Optional, Dict, Callable
-from dataclasses import dataclass
+from __future__ import annotations
+
+import abc
 import logging
+import threading
+import time
+from dataclasses import dataclass, field
+from enum import Enum, auto
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from ..vision.vision_engine import YOLOv8VisionEngine
-from ..vision.tracker import ByteTracker
-from ..vision.state import StateExtractor, GameState
-
-from ..decision.state_machine import (
-    BrawlStarsStateMachine,
-    BotState,
-    StateContext,
-    create_default_state_machine
+from core.ports import (
+    DecisionContext,
+    DecisionPort,
+    InputAction,
+    InputPort,
+    MetricEvent,
+    PersistencePort,
+    SafetyPort,
+    TelemetryPort,
+    VisionPort,
 )
-from ..decision.rules import RuleEngine, Tactic
-from ..decision.scorer import TargetScorer, create_default_scorers
 
-from ..training.retrain import ContinuousLearner, create_continuous_learner
+logger = logging.getLogger(__name__)
+
+
+class BotState(Enum):
+    """Internal orchestrator state machine."""
+    IDLE = auto()
+    INITIALIZING = auto()
+    CONNECTING = auto()
+    LOBBY = auto()
+    MATCHMAKING = auto()
+    IN_MATCH = auto()
+    PAUSED = auto()
+    ERROR = auto()
+    SHUTTING_DOWN = auto()
 
 
 @dataclass
-class BotConfig:
-    """Configuration for bot orchestration."""
-    # Vision
-    models_dir: Path
-    confidence_threshold: float = 0.5
-    
-    # Decision
-    reaction_delay_min: float = 0.08  # 80ms
-    reaction_delay_max: float = 0.22  # 220ms
-    
-    # Safety
-    max_apm: int = 180
-    trophy_limit: int = 500
-    
-    # Training
-    enable_auto_learning: bool = True
-    dataset_dir: Optional[Path] = None
-    
-    # Performance
-    target_fps: int = 30
-    frame_skip: int = 1
+class BotStatus:
+    """Public status snapshot."""
+    state: str = "idle"
+    fps: float = 0.0
+    cycle_time_ms: float = 0.0
+    vision_latency_ms: float = 0.0
+    decision_confidence: float = 0.0
+    safety_ok: bool = True
+    episode_count: int = 0
+    last_error: str = ""
+    metrics: Dict[str, Any] = field(default_factory=dict)
 
 
-class BrawlStarsOrchestrator:
+class BotOrchestrator:
     """
-    Main orchestrator that integrates all bot systems.
-    Manages the game loop, state transitions, and action execution.
+    Hexagonal orchestrator for the Brawl Stars bot.
+
+    Responsibilities:
+    1. Initialize all ports (graceful degradation if any fail)
+    2. Run the main monitor loop (capture -> perceive -> decide -> act)
+    3. Track state machine (lobby -> match -> combat -> lobby)
+    4. Record telemetry
+    5. Handle pause/resume/shutdown
+    6. Delegate all domain logic to Ports
     """
-    
-    def __init__(self, config: BotConfig):
-        self.config = config
-        self.logger = logging.getLogger("orchestrator")
-        
-        # Initialize components
-        self.vision: Optional[YOLOv8VisionEngine] = None
-        self.tracker: Optional[ByteTracker] = None
-        self.state_extractor: Optional[StateExtractor] = None
-        self.state_machine: Optional[BrawlStarsStateMachine] = None
-        self.rule_engine: Optional[RuleEngine] = None
-        self.target_scorer: Optional[TargetScorer] = None
-        self.learner: Optional[ContinuousLearner] = None
-        
-        # Runtime state
-        self.is_running: bool = False
-        self.current_state: Optional[GameState] = None
-        self.frame_count: int = 0
-        self.last_action_time: float = 0
-        self.actions_this_minute: int = 0
-        self.apm_reset_time: float = 0
-        
-        # Callbacks
-        self.on_state_change: Optional[Callable] = None
-        self.on_action: Optional[Callable] = None
-        self.on_error: Optional[Callable] = None
-        
-        # Threading
-        self._main_loop_thread: Optional[threading.Thread] = None
-        self._stop_event = threading.Event()
-    
+
+    def __init__(
+        self,
+        vision: VisionPort,
+        input_: InputPort,
+        decision: DecisionPort,
+        safety: SafetyPort,
+        telemetry: TelemetryPort,
+        persistence: PersistencePort,
+        config: Optional[Dict[str, Any]] = None,
+    ):
+        self.vision = vision
+        self.input_ = input_
+        self.decision = decision
+        self.safety = safety
+        self.telemetry = telemetry
+        self.persistence = persistence
+        self.config = config or {}
+
+        # State machine
+        self._state = BotState.IDLE
+        self._running = False
+        self._paused = False
+        self._shutdown_requested = False
+        self._lock = threading.Lock()
+
+        # Metrics
+        self._episode_count = 0
+        self._frame_count = 0
+        self._error_count = 0
+        self._last_error = ""
+        self._fps = 0.0
+        self._cycle_time_ms = 0.0
+
+        # Hooks
+        self._shutdown_hooks: List[Callable] = []
+
+        logger.info("[ORCHESTRATOR] Created")
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
     def initialize(self) -> bool:
-        """
-        Initialize all bot components.
-        
-        Returns:
-            True if initialization successful
-        """
-        self.logger.info("Initializing bot orchestrator...")
-        
+        """Initialize all ports with graceful degradation."""
+        self._state = BotState.INITIALIZING
+        success = True
+
+        ports = [
+            ("vision", self.vision),
+            ("input", self.input_),
+            ("decision", self.decision),
+            ("safety", self.safety),
+            ("telemetry", self.telemetry),
+            ("persistence", self.persistence),
+        ]
+
+        for name, port in ports:
+            try:
+                port.initialize()
+                logger.info(f"[ORCHESTRATOR] {name} initialized")
+            except Exception as e:
+                logger.error(f"[ORCHESTRATOR] {name} init failed: {e}")
+                success = False
+
+        if success:
+            self._state = BotState.IDLE
+            self.telemetry.record_event("orchestrator_initialized", {})
+        else:
+            self._state = BotState.ERROR
+            self._last_error = "Some ports failed to initialize"
+
+        return success
+
+    def run(self) -> None:
+        """Blocking main loop."""
+        if self._state == BotState.ERROR:
+            logger.error("[ORCHESTRATOR] Cannot run in ERROR state")
+            return
+
+        self._running = True
+        self._state = BotState.CONNECTING
+        logger.info("[ORCHESTRATOR] Main loop started")
+
+        target_cycle_time = 1.0 / self.config.get("target_fps", 10)
+        last_time = time.time()
+
+        while self._running and not self._shutdown_requested:
+            if self._paused:
+                time.sleep(0.1)
+                continue
+
+            cycle_start = time.time()
+
+            try:
+                self._tick()
+            except Exception as e:
+                self._error_count += 1
+                self._last_error = str(e)
+                logger.error(f"[ORCHESTRATOR] Tick error: {e}")
+                if self._error_count > self.config.get("max_errors", 10):
+                    logger.critical("[ORCHESTRATOR] Too many errors, shutting down")
+                    self._shutdown_requested = True
+
+            # FPS throttling
+            elapsed = time.time() - cycle_start
+            self._cycle_time_ms = elapsed * 1000
+            if elapsed < target_cycle_time:
+                time.sleep(target_cycle_time - elapsed)
+
+            # FPS tracking
+            self._frame_count += 1
+            now = time.time()
+            if now - last_time >= 1.0:
+                self._fps = self._frame_count / (now - last_time)
+                self._frame_count = 0
+                last_time = now
+
+        self._shutdown()
+
+    def stop(self) -> None:
+        """Request graceful shutdown."""
+        logger.info("[ORCHESTRATOR] Stop requested")
+        self._shutdown_requested = True
+        self._running = False
+
+    def pause(self) -> bool:
+        """Pause the main loop."""
+        with self._lock:
+            if self._state not in (BotState.PAUSED, BotState.SHUTTING_DOWN):
+                self._paused = True
+                self._state = BotState.PAUSED
+                self.telemetry.record_event("orchestrator_paused", {})
+                return True
+        return False
+
+    def resume(self) -> bool:
+        """Resume the main loop."""
+        with self._lock:
+            if self._state == BotState.PAUSED:
+                self._paused = False
+                self._state = BotState.IDLE
+                self.telemetry.record_event("orchestrator_resumed", {})
+                return True
+        return False
+
+    # ------------------------------------------------------------------
+    # Main tick (the core loop)
+    # ------------------------------------------------------------------
+
+    def _tick(self) -> None:
+        """One iteration: perceive -> decide -> act -> learn."""
         try:
-            # Vision system
-            self.logger.info("Initializing vision system...")
-            self.vision = YOLOv8VisionEngine(
-                confidence_threshold=self.config.confidence_threshold
-            )
-            if not self.vision.load_models(self.config.models_dir):
-                self.logger.error("Failed to load vision models")
-                return False
-            
-            # Tracking
-            self.tracker = ByteTracker(max_age=30, min_hits=3)
-            
-            # State extraction
-            self.state_extractor = StateExtractor()
-            
-            # Decision system
-            self.state_machine = create_default_state_machine()
-            self._setup_state_handlers()
-            
-            # Rules and scoring
-            self.rule_engine = RuleEngine()
-            self.target_scorer, _, _ = create_default_scorers()
-            
-            # Auto-learning
-            if self.config.enable_auto_learning and self.config.dataset_dir:
-                self.learner = create_continuous_learner(
-                    log_dir=self.config.dataset_dir / "logs",
-                    dataset_dir=self.config.dataset_dir,
-                    models_dir=self.config.models_dir
-                )
-            
-            self.logger.info("Initialization complete")
-            return True
-            
+            self._do_tick()
         except Exception as e:
-            self.logger.error(f"Initialization failed: {e}")
-            if self.on_error:
-                self.on_error("initialization", str(e))
-            return False
-    
-    def _setup_state_handlers(self):
-        """Setup handlers for each bot state."""
-        
-        def handle_idle(context: StateContext):
-            """Handle IDLE state - wait and scan."""
-            self.logger.debug("State: IDLE - scanning for enemies")
-            # Slow scan movement
-            # Check for enemies more frequently
-            pass
-        
-        def handle_search(context: StateContext):
-            """Handle SEARCH state - actively look for enemies."""
-            self.logger.debug("State: SEARCH - patrolling")
-            # Patrol towards center or common areas
-            # Check bushes
-            pass
-        
-        def handle_engage(context: StateContext):
-            """Handle ENGAGE state - attack target."""
-            self.logger.debug("State: ENGAGE - attacking")
-            
-            if not context.game_state.enemies:
+            self._error_count += 1
+            self._last_error = str(e)
+            logger.error(f"[ORCHESTRATOR] Tick error: {e}")
+
+    def _do_tick(self) -> None:
+        """Actual tick logic (wrapped by _tick for error handling)."""
+        # 1. PERCEIVE
+        snapshot = self.vision.capture_and_perceive()
+        if snapshot is None:
+            self.telemetry.record_metric(MetricEvent("vision_failure", 1.0))
+            return
+
+        self.telemetry.record_metric(MetricEvent("vision_latency_ms", snapshot.latency_ms))
+
+        # 2. SAFETY CHECK (pre-decision)
+        safety_status = self.safety.check_before_action("frame_tick")
+        if not safety_status.can_continue:
+            if safety_status.should_stop:
+                self._shutdown_requested = True
                 return
-            
-            # Rank targets and pick best
-            ranked = self.target_scorer.rank_targets(
-                context.game_state.enemies,
-                context.game_state.player_position,
-                context.game_state.player_health,
-                context.game_state.walls
+            if safety_status.should_pause:
+                self.pause()
+                return
+            # Safety veto without stop/pause - skip this tick
+            return
+
+        # 3. DECIDE
+        context = self._build_decision_context(snapshot)
+        decision = self.decision.decide(context)
+
+        self.telemetry.record_metric(MetricEvent("decision_confidence", decision.confidence))
+        if decision.confidence < 0.3:
+            self.telemetry.record_event("low_confidence_decision", {
+                "action": decision.action_type,
+                "confidence": decision.confidence,
+            })
+
+        # 4. ACT
+        if decision.target_pos:
+            action = InputAction(
+                action_type="tap",
+                x=decision.target_pos[0],
+                y=decision.target_pos[1],
+                duration_ms=100,
             )
-            
-            if ranked:
-                best_target = ranked[0]
-                self.logger.info(f"Targeting enemy {best_target.target_id}: {best_target.reasoning}")
-                
-                # Execute attack
-                self._execute_attack(best_target, context)
-        
-        def handle_retreat(context: StateContext):
-            """Handle RETREAT state - get to safety."""
-            self.logger.debug("State: RETREAT - seeking safety")
-            
-            # Evaluate retreat options
-            decisions = self.rule_engine.evaluate_retreat(context.game_state)
-            
-            if decisions:
-                best = decisions[0]
-                self.logger.info(f"Retreating: {best.reasoning}")
-                self._execute_retreat(best, context)
-        
-        def handle_recover(context: StateContext):
-            """Handle RECOVER state - heal and reposition."""
-            self.logger.debug("State: RECOVER - healing")
-            
-            # Evaluate recovery options
-            decisions = self.rule_engine.evaluate_recovery(context.game_state)
-            
-            if decisions:
-                best = decisions[0]
-                self.logger.info(f"Recovering: {best.reasoning}")
-                self._execute_recovery(best, context)
-        
-        # Register handlers
-        self.state_machine.register_handler(BotState.IDLE, handle_idle)
-        self.state_machine.register_handler(BotState.SEARCH, handle_search)
-        self.state_machine.register_handler(BotState.ENGAGE, handle_engage)
-        self.state_machine.register_handler(BotState.RETREAT, handle_retreat)
-        self.state_machine.register_handler(BotState.RECOVER, handle_recover)
-    
-    def _execute_attack(self, target_score, context: StateContext):
-        """Execute attack on target."""
-        # Find the actual enemy object
-        enemy = None
-        for e in context.game_state.enemies:
-            if e.track_id == target_score.target_id:
-                enemy = e
-                break
-        
-        if not enemy:
-            return
-        
-        # Aim at enemy
-        # Fire if in range
-        # Use abilities optimally
-        
-        if self.on_action:
-            self.on_action("attack", enemy)
-    
-    def _execute_retreat(self, decision, context: StateContext):
-        """Execute retreat maneuver."""
-        if decision.target_position:
-            # Move to safe position
-            # Fire back if enemies pursuing
-            pass
-        
-        if self.on_action:
-            self.on_action("retreat", decision)
-    
-    def _execute_recovery(self, decision, context: StateContext):
-        """Execute recovery action."""
-        if decision.target_position:
-            # Move to recovery spot
-            pass
-        
-        if self.on_action:
-            self.on_action("recover", decision)
-    
-    def _check_apm_limit(self) -> bool:
-        """Check if APM limit reached."""
-        current_time = time.time()
-        
-        # Reset counter every minute
-        if current_time - self.apm_reset_time >= 60:
-            self.actions_this_minute = 0
-            self.apm_reset_time = current_time
-        
-        return self.actions_this_minute < self.config.max_apm
-    
-    def _apply_reaction_delay(self):
-        """Apply human-like reaction delay."""
-        delay = self._humanized_delay()
-        time.sleep(delay)
-    
-    def _humanized_delay(self) -> float:
-        """Generate human-like reaction delay."""
-        import random
-        
-        # Normal distribution around 150ms with variance
-        base_delay = random.gauss(0.15, 0.04)
-        
-        # Clamp to configured range
-        return max(
-            self.config.reaction_delay_min,
-            min(self.config.reaction_delay_max, base_delay)
-        )
-    
-    def process_frame(self, frame) -> Optional[GameState]:
-        """
-        Process a single game frame.
-        
-        Args:
-            frame: Screenshot/image from game
-            
-        Returns:
-            Updated GameState or None
-        """
-        self.frame_count += 1
-        
-        # Skip frames if needed
-        if self.frame_count % (self.config.frame_skip + 1) != 0:
-            return self.current_state
-        
-        # Run vision inference
-        detections = self.vision.detect(frame)
-        
-        # Update tracking
-        tracks = self.tracker.update(detections)
-        
-        # Extract state
-        self.current_state = self.state_extractor.extract_state(tracks)
-        
-        # Update state machine
-        if self.current_state:
-            context = StateContext(
-                game_state=self.current_state,
-                bot_instance=self
-            )
-            
-            new_state = self.state_machine.update(context)
-            
-            if new_state != self.state_machine.current_state:
-                if self.on_state_change:
-                    self.on_state_change(self.state_machine.current_state, new_state)
-            
-            # Execute state handler
-            self.state_machine.execute(context)
-        
-        return self.current_state
-    
-    def start(self):
-        """Start the bot orchestrator."""
-        if self.is_running:
-            return
-        
-        self.logger.info("Starting bot orchestrator...")
-        self.is_running = True
-        self._stop_event.clear()
-        
-        # Start auto-learning if enabled
-        if self.learner:
-            self.learner.start()
-        
-        self.logger.info("Bot orchestrator running")
-    
-    def stop(self):
-        """Stop the bot orchestrator."""
-        if not self.is_running:
-            return
-        
-        self.logger.info("Stopping bot orchestrator...")
-        self.is_running = False
-        self._stop_event.set()
-        
-        # Stop auto-learning
-        if self.learner:
-            self.learner.stop()
-        
-        self.logger.info("Bot orchestrator stopped")
-    
-    def get_status(self) -> Dict:
-        """Get current bot status."""
-        return {
-            "running": self.is_running,
-            "current_state": self.state_machine.current_state.name if self.state_machine else None,
-            "frame_count": self.frame_count,
-            "apm": self.actions_this_minute,
-            "game_state": self.state_extractor.get_state_summary(self.current_state) if self.state_extractor and self.current_state else None
+            success = self.input_.execute(action)
+            self.safety.record_action(decision.action_type)
+            if not success:
+                self.telemetry.record_metric(MetricEvent("input_failure", 1.0))
+
+        # 5. LEARN (online RL)
+        reward = self._compute_reward(snapshot, decision)
+        self.decision.learn(context, decision, reward)
+
+        # 6. STATE MACHINE UPDATE
+        self._update_state_machine(snapshot.game_phase)
+
+        # 7. PERSISTENCE (periodic)
+        if self._frame_count % 300 == 0:  # every ~30s at 10 FPS
+            self._save_checkpoint()
+
+    # ------------------------------------------------------------------
+    # State Machine
+    # ------------------------------------------------------------------
+
+    def _update_state_machine(self, game_phase: str) -> None:
+        transitions = {
+            (BotState.IDLE, "lobby"): BotState.LOBBY,
+            (BotState.CONNECTING, "lobby"): BotState.LOBBY,
+            (BotState.LOBBY, "in_game"): BotState.IN_MATCH,
+            (BotState.LOBBY, "match_loading"): BotState.MATCHMAKING,
+            (BotState.MATCHMAKING, "in_game"): BotState.IN_MATCH,
+            (BotState.IN_MATCH, "lobby"): BotState.LOBBY,
+            (BotState.IN_MATCH, "victory"): BotState.LOBBY,
+            (BotState.IN_MATCH, "defeat"): BotState.LOBBY,
         }
 
+        new_state = transitions.get((self._state, game_phase))
+        if new_state and new_state != self._state:
+            old = self._state.name
+            self._state = new_state
+            logger.info(f"[ORCHESTRATOR] State: {old} -> {new_state.name} (phase={game_phase})")
+            self.telemetry.record_event("state_transition", {
+                "from": old,
+                "to": new_state.name,
+                "game_phase": game_phase,
+            })
 
-def create_bot_orchestrator(
-    models_dir: str,
-    dataset_dir: Optional[str] = None,
-    **kwargs
-) -> BrawlStarsOrchestrator:
-    """
-    Factory function to create bot orchestrator.
-    
-    Args:
-        models_dir: Directory with YOLO models
-        dataset_dir: Directory for auto-learning data
-        **kwargs: Additional config options
-        
-    Returns:
-        Configured BrawlStarsOrchestrator
-    """
-    config = BotConfig(
-        models_dir=Path(models_dir),
-        dataset_dir=Path(dataset_dir) if dataset_dir else None,
-        **kwargs
-    )
-    
-    return BrawlStarsOrchestrator(config)
+            if new_state == BotState.IN_MATCH:
+                self._episode_count += 1
+                self.decision.start_episode(
+                    brawler=self.config.get("brawler", "default"),
+                    map_name=self.config.get("map", None),
+                )
+            elif self._state == BotState.LOBBY and old == "IN_MATCH":
+                self.decision.end_episode(result="unknown")
+
+    # ------------------------------------------------------------------
+    # Context builders
+    # ------------------------------------------------------------------
+
+    def _build_decision_context(self, snapshot) -> DecisionContext:
+        enemies = [
+            {"x": obj.center[0], "y": obj.center[1], "hp_ratio": obj.hp_ratio or 1.0}
+            for obj in snapshot.detected_objects
+            if obj.class_name == "enemy"
+        ]
+        return DecisionContext(
+            player_hp=snapshot.hud.hp_ratio,
+            player_pos=snapshot.player_pos,
+            enemies=enemies,
+            detected_objects=snapshot.detected_objects,
+            hud_state=snapshot.hud,
+            game_phase=snapshot.game_phase,
+            match_time_remaining=snapshot.hud.match_time,
+        )
+
+    def _compute_reward(self, snapshot, decision) -> float:
+        """Heuristic reward for online learning."""
+        reward = 0.0
+        # Survival
+        reward += snapshot.hud.hp_ratio * 0.1
+        # Combat
+        if decision.action_type in ("attack", "super"):
+            reward += 0.5
+        # Objective
+        if snapshot.game_phase in ("victory",):
+            reward += 10.0
+        elif snapshot.game_phase in ("defeat",):
+            reward -= 5.0
+        return reward
+
+    # ------------------------------------------------------------------
+    # Status / Introspection
+    # ------------------------------------------------------------------
+
+    def status(self) -> BotStatus:
+        return BotStatus(
+            state=self._state.name.lower(),
+            fps=self._fps,
+            cycle_time_ms=self._cycle_time_ms,
+            vision_latency_ms=self.vision.health_check().get("last_latency_ms", 0.0),
+            decision_confidence=self.decision.health_check().get("last_confidence", 0.0),
+            safety_ok=self.safety.health_check().get("can_continue", True),
+            episode_count=self._episode_count,
+            last_error=self._last_error,
+            metrics={
+                "error_count": self._error_count,
+                "frame_count": self._frame_count,
+            },
+        )
+
+    def execute_action(self, action_name: str, **kwargs) -> bool:
+        """Execute a manual action (pause, resume, tap, etc.)."""
+        if action_name == "pause":
+            return self.pause()
+        elif action_name == "resume":
+            return self.resume()
+        elif action_name == "stop":
+            self.stop()
+            return True
+        elif action_name == "tap":
+            x, y = kwargs.get("x", 0.5), kwargs.get("y", 0.5)
+            return self.input_.tap(x, y)
+        elif action_name == "status":
+            return True
+        else:
+            logger.warning(f"[ORCHESTRATOR] Unknown action: {action_name}")
+            return False
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def _save_checkpoint(self) -> None:
+        state = {
+            "episode_count": self._episode_count,
+            "error_count": self._error_count,
+            "config": self.config,
+            "timestamp": time.time(),
+        }
+        self.persistence.save_state(state, label=f"auto_{int(time.time())}")
+
+    def _shutdown(self) -> None:
+        self._state = BotState.SHUTTING_DOWN
+        logger.info("[ORCHESTRATOR] Shutting down...")
+
+        for hook in self._shutdown_hooks:
+            try:
+                hook()
+            except Exception as e:
+                logger.warning(f"[ORCHESTRATOR] Shutdown hook error: {e}")
+
+        for port in [self.vision, self.input_, self.decision, self.safety, self.telemetry, self.persistence]:
+            try:
+                port.shutdown()
+            except Exception:
+                pass
+
+        self.telemetry.record_event("orchestrator_shutdown", {})
+        self.telemetry.flush()
+        logger.info("[ORCHESTRATOR] Shutdown complete")
+
+    def register_shutdown_hook(self, hook: Callable) -> None:
+        self._shutdown_hooks.append(hook)

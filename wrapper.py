@@ -261,6 +261,16 @@ except ImportError:
     V2Integrator = None
     V2IntegrationConfig = None
 
+# Phase 2: Ports & Adapters Orchestrator
+try:
+    from core.factory import create_orchestrator
+    from core.orchestrator import BotOrchestrator
+    HAS_ORCHESTRATOR = True
+except ImportError:
+    HAS_ORCHESTRATOR = False
+    create_orchestrator = None  # type: ignore[misc,assignment]
+    BotOrchestrator = None  # type: ignore[misc,assignment]
+
 logger = logging.getLogger(__name__)
 
 # Default install path
@@ -682,6 +692,28 @@ class PylaAIEnhanced:
         # Auto-retraining system
         self.performance_monitor = None
         self.retrain_orchestrator = None
+
+        # Phase 2: Ports & Adapters Orchestrator (opt-in via config)
+        self.orchestrator: Optional[Any] = None
+        self.orchestrator_thread: Optional[threading.Thread] = None
+        self.use_orchestrator = bool(self.central_config.get("use_orchestrator", False))
+        if self.use_orchestrator and HAS_ORCHESTRATOR:
+            try:
+                logger.info("[WRAPPER] Creating BotOrchestrator via factory...")
+                self.orchestrator = create_orchestrator(
+                    install_path=self.install_path,
+                    config=self.central_config,
+                    safety_config=safety_config,
+                    humanization_config=humanization_config,
+                )
+                logger.info("[WRAPPER] BotOrchestrator created (will be initialized on start)")
+            except Exception as e:
+                logger.error(f"[WRAPPER] Failed to create BotOrchestrator: {e}")
+                self.orchestrator = None
+                self.use_orchestrator = False
+        elif self.use_orchestrator:
+            logger.warning("[WRAPPER] use_orchestrator=True but orchestrator not available (missing imports)")
+            self.use_orchestrator = False
 
     @property
     def running(self) -> bool:
@@ -1383,6 +1415,17 @@ class PylaAIEnhanced:
         self.running = True
         self.stop_event.clear()
 
+        # Phase 2: If orchestrator mode is enabled, initialize and run it
+        if self.use_orchestrator and self.orchestrator:
+            logger.info("[WRAPPER] Starting in ORCHESTRATOR mode (Ports & Adapters)")
+            try:
+                self.orchestrator.initialize()
+                logger.info("[WRAPPER] BotOrchestrator initialized")
+            except Exception as e:
+                logger.error(f"[WRAPPER] BotOrchestrator initialization failed: {e}")
+                self.use_orchestrator = False
+
+        # Overlay (both modes)
         if self.overlay_enabled and self.diagnostic_overlay is None:
             logger.debug("[WRAPPER] Iniciando diagnostic overlay")
             try:
@@ -1393,14 +1436,29 @@ class PylaAIEnhanced:
                 logger.warning(f"[WRAPPER] Diagnostic overlay indisponível: {e}")
                 self.diagnostic_overlay = None
 
-        # State manager thread
-        logger.debug("[WRAPPER] Iniciando thread state-manager")
-        self.state_thread = threading.Thread(
-            target=self.state_manager.run,
-            daemon=True,
-            name="state-manager"
-        )
-        self.state_thread.start()
+        if self.use_orchestrator and self.orchestrator:
+            self.orchestrator_thread = threading.Thread(
+                target=self._orchestrator_loop,
+                daemon=True,
+                name="orchestrator"
+            )
+            self.orchestrator_thread.start()
+            logger.info("[WRAPPER] Orchestrator thread started")
+            # Skip legacy state-manager thread when orchestrator is active
+            # Monitor thread still runs for safety checks
+        else:
+            # Legacy mode: start state-manager thread
+            logger.info("[WRAPPER] Starting in LEGACY mode (state_manager.run)")
+            if self.state_manager:
+                logger.debug("[WRAPPER] Iniciando thread state-manager")
+                self.state_thread = threading.Thread(
+                    target=self.state_manager.run,
+                    daemon=True,
+                    name="state-manager"
+                )
+                self.state_thread.start()
+            else:
+                logger.warning("[WRAPPER] state_manager not available, cannot start legacy mode")
 
         # Monitor thread (safety)
         logger.debug("[WRAPPER] Iniciando thread safety-monitor")
@@ -1652,6 +1710,12 @@ class PylaAIEnhanced:
 
         # Wait for threads with reasonable timeouts
         logger.debug("[WRAPPER] Aguardando threads terminarem")
+        if self.orchestrator_thread and self.orchestrator_thread.is_alive():
+            self.orchestrator_thread.join(timeout=5)
+            if self.orchestrator_thread.is_alive():
+                logger.warning("[WRAPPER] Thread orchestrator não terminou em 5s")
+            else:
+                logger.debug("[WRAPPER] Thread orchestrator terminou")
         if self.state_thread and self.state_thread.is_alive():
             self.state_thread.join(timeout=5)
             if self.state_thread.is_alive():
@@ -2252,6 +2316,21 @@ class PylaAIEnhanced:
                         logger.debug(f"[WRAPPER] Error recovery handler failed: {e}")
                 time.sleep(random.uniform(0.5, 1.0))
 
+    def _orchestrator_loop(self):
+        """Loop wrapper for BotOrchestrator.run() — bridges orchestrator lifecycle."""
+        logger.info("[WRAPPER] Orchestrator loop started")
+        try:
+            # run() blocks until shutdown or too many errors
+            self.orchestrator.run()
+        except Exception as e:
+            logger.error(f"[WRAPPER] Orchestrator loop crashed: {e}")
+        finally:
+            logger.info("[WRAPPER] Orchestrator loop ended")
+            # Trigger wrapper shutdown if orchestrator stopped unexpectedly
+            if self.running:
+                logger.warning("[WRAPPER] Orchestrator stopped but wrapper still running — shutting down")
+                self.stop()
+
     def _take_break(self, duration: float):
         """Executa pausa obrigatoria"""
         self.stop()
@@ -2386,6 +2465,11 @@ class PylaAIEnhanced:
                 "combat": combat_snapshot,
             },
             "tracker_stats": tracker_stats,
+            # Phase 2: Orchestrator status
+            "orchestrator": {
+                "enabled": getattr(self, "use_orchestrator", False),
+                "state": self.orchestrator.get_status() if getattr(self, "orchestrator", None) else None,
+            },
             # Phase 9: Error Recovery stats
             "error_recovery": self.error_recovery.get_stats() if self.error_recovery else {"enabled": False},
             # Phase 9: State Recovery stats
