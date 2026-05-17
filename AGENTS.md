@@ -594,7 +594,11 @@ c:/Users/rodri/Desktop/bot brawl/
 │   ├── input_optimizer.py             # Input latency optimization
 │   ├── replay_analyzer.py            # Death cause analysis
 │   ├── tactical_bridge.py             # Tactical/strategic bridge
-│   └── cover_system.py                # Cover/wall strategy
+│   ├── cover_system.py                # Cover/wall strategy
+│   ├── telemetry_bridge.py            # V2Integrator -> Dashboard real-time bridge (v2.2)
+│   ├── model_registry.py              # Semantic model versioning + warm-start (v2.2)
+│   ├── model_auto_updater.py          # Auto-detect and activate better models (v2.2)
+│   └── positioning_heatmap.py       # Spatial heatmaps for positioning analysis (v2.2)
 │
 ├── decision/
 │   ├── utility_ai.py                   # Scored action selection
@@ -603,7 +607,9 @@ c:/Users/rodri/Desktop/bot brawl/
 │   ├── sticky_target.py               # Target commitment
 │   ├── intent_system.py               # Persistent strategic goals
 │   ├── enemy_intention.py             # Enemy behavior prediction
-│   └── meta_awareness.py              # Meta-game awareness
+│   ├── meta_awareness.py              # Meta-game awareness
+│   ├── combat_decision_bridge.py      # PlayLogic + MultiObjective RL bridge (v2.2)
+│   └── gradient_boosting_decisions.py # Gradient boosting multi-voter decisions (v2.2)
 │
 ├── neural/                             # Neural network & learning (v2.1)
 │   ├── transfer_learning.py           # Transfer learning for maps/brawlers
@@ -613,7 +619,8 @@ c:/Users/rodri/Desktop/bot brawl/
 ├── vision/
 │   ├── ensemble_detector.py           # Model ensemble + voting (v2.1)
 │   ├── self_supervised_pretraining.py  # SimCLR pretraining (v2.1)
-│   └── game_feature_extractor.py       # Wall/HP/bush/timer extraction
+│   ├── game_feature_extractor.py       # Wall/HP/bush/timer extraction
+│   └── detect_ensemble_adapter.py     # Detect API adapter for ensemble (v2.2)
 │
 ├── pylaai_real/
 │   ├── state_manager.py               # Game state machine
@@ -645,14 +652,18 @@ c:/Users/rodri/Desktop/bot brawl/
 │   └── train_8class_model.py           # 8-class YOLO training
 │
 ├── tests/
-│   └── test_training_workflow_e2e.py  # End-to-end tests
+│   ├── test_training_workflow_e2e.py  # End-to-end tests
+│   ├── test_strategic_improvements.py # v2.1 strategic modules unit tests
+│   ├── test_v2_integration.py         # v2.1 integration tests
+│   └── test_integration_bridges.py  # v2.2 bridge/adapter integration tests
 │
 ├── data/
 │   ├── q_table.pkl                    # Q-Learning table
 │   ├── elo_ratings.json               # ELO per brawler+map
 │   ├── checkpoints/                   # State persistence
 │   ├── replays/                       # Replay recordings
-│   └── ab_tests.json                  # A/B test results
+│   ├── ab_tests.json                  # A/B test results
+│   └── enriched/                      # Enriched dataset frames (v2.2)
 │
 ├── models/
 │   └── brawlstars_yolov8.pt           # Trained YOLO model
@@ -979,7 +990,153 @@ Ofuscacao de codigo para distribuicao segura.
 
 ---
 
-## 15. Key Design Decisions
+## 16. Integration Bridges v2.2
+
+Pontes e adapters que conectam os modulos estrategicos v2.1 aos sistemas existentes (Detect, PlayLogic, Dashboard, etc.).
+
+### 16.1 Ensemble Detector Adapter (`vision/detect_ensemble_adapter.py`)
+
+Adapter que expoe a API do `Detect` existente mas usa ensemble por baixo.
+
+| Componente | Classe | Responsabilidade |
+|---|---|---|
+| `vision/detect_ensemble_adapter.py` | `DetectEnsembleAdapter` | API compativel com Detect usando ModelEnsembleDetector |
+
+**API:**
+- `detect_objects(img)` -> `{class_name: [[x1, y1, x2, y2], ...]}`
+- `detect_objects_async(img)` -> non-blocking inference
+- `get_async_result()` -> last result
+- `switch_to_single_mode(name)` -> degrade to single model
+
+**Fallback:** Se ensemble falhar, carrega primeiro modelo como detector simples.
+
+---
+
+### 16.2 Combat Decision Bridge (`decision/combat_decision_bridge.py`)
+
+Conecta MultiObjectiveOptimizer ao PlayLogic de combate.
+
+| Componente | Classe | Responsabilidade |
+|---|---|---|
+| `decision/combat_decision_bridge.py` | `CombatDecisionBridge` | Combina MOO + PlayLogic para decisao final |
+
+**Estrategia:**
+1. MOO retorna acao (70% confianca)
+2. Se divergir do PlayLogic, loga warning
+3. Se MOO falhar, fallback para recomendacao do PlayLogic
+4. Se ambos falharem, aleatorio entre acoes validas
+
+---
+
+### 16.3 Telemetry Bridge (`core/telemetry_bridge.py`)
+
+Ponte thread-safe entre V2Integrator e DashboardDataBridge.
+
+| Componente | Classe | Responsabilidade |
+|---|---|---|
+| `core/telemetry_bridge.py` | `TelemetryBridge` | Coleta dados de todos os modulos v2.1 para o dashboard |
+
+**Dados expostos:**
+- `/api/v2/status` -> estado agregado
+- `/api/v2/degradation` -> modo e config de degradacao
+- `/api/v2/alerts` -> alertas ativos
+- `/api/v2/rate-limiter` -> status da conta
+- `/api/v2/checkpoints` -> estatisticas de checkpoints
+
+**Cache:** 100 snapshots de historico para trend analysis.
+
+---
+
+### 16.4 Model Registry (`core/model_registry.py`)
+
+Versionamento semantico de modelos com warm-start e rollback.
+
+| Componente | Classe | Responsabilidade |
+|---|---|---|
+| `core/model_registry.py` | `ModelRegistry` | Registra, versiona e ativa modelos |
+
+**Features:**
+- Registro automatico com checksum SHA256
+- Auto-versionamento semantico (v1.0.0 -> v1.0.1)
+- Warm-start: carrega melhor checkpoint anterior
+- Rollback: reverte para versao anterior
+- Comparacao de metricas entre versoes
+
+---
+
+### 16.5 Auto-Update de Modelos (`core/model_auto_updater.py`)
+
+Monitoramento automatico de novos modelos.
+
+| Componente | Classe | Responsabilidade |
+|---|---|---|
+| `core/model_auto_updater.py` | `ModelAutoUpdater` | Detecta, avalia e ativa novos modelos automaticamente |
+
+**Fluxo:**
+1. Watchdog detecta novo .pt no diretorio
+2. Registra no ModelRegistry
+3. Compara metricas com versao ativa
+4. Se melhoria > 2%, ativa automaticamente
+5. Monitora performance pos-update; rollback se degradar
+
+---
+
+### 16.6 Gradient Boosting para Decisoes (`decision/gradient_boosting_decisions.py`)
+
+Combina multiplos "weak decision makers" numa decisao final robusta.
+
+| Componente | Classe | Responsabilidade |
+|---|---|---|
+| `decision/gradient_boosting_decisions.py` | `GradientBoostingDecisionSystem` | Votacao ponderada de multiplos subsistemas |
+
+**Votantes:** UtilityAI, MultiObjectiveRL, BrawlerAdaptive, StickyTarget, EnemyIntention, etc.
+
+**Aprendizado:** Pesos adaptam via gradient descent simples baseado em reward.
+
+---
+
+### 16.7 Heatmap de Posicionamento (`core/positioning_heatmap.py`)
+
+Mapa de calor espacial para analise de movimentacao.
+
+| Componente | Classe | Responsabilidade |
+|---|---|---|
+| `core/positioning_heatmap.py` | `PositioningHeatmap` | Acumula tempo de permanencia por celula do mapa |
+
+**Heatmaps:**
+- `bot_heatmap` -> onde o bot passa mais tempo
+- `enemy_heatmap` -> zonas com presenca inimiga
+- `death_heatmap` -> onde o bot morre (zona de risco)
+
+**Aplicacoes:**
+- `compute_danger_zones()` -> identifica zonas de risco
+- `is_in_danger_zone(x, y)` -> evitar posicoes perigosas
+- `get_least_visited_escape(x, y)` -> direcao de escape para zona segura
+- `export_visualization(path)` -> PNG do heatmap para debug
+
+---
+
+### 16.8 Dataset Collector Enriquecido (`data/enriched_collector.py`)
+
+Coleta frames com metadados completos para treinamento BC/CQL/DQN.
+
+| Componente | Classe | Responsabilidade |
+|---|---|---|
+| `data/enriched_collector.py` | `EnrichedDatasetCollector` | Coleta screenshot + estado + eventos + decisao |
+
+**Dados por frame:**
+- Screenshot (JPEG com qualidade configuravel)
+- Estado do jogo (HP, posicao, ammo, super, cubes)
+- Deteccoes (inimigos, cubes, bushes)
+- Decisao tomada + scores
+- Eventos recentes do EventStore
+- Metricas de performance (cycle_ms, inference_ms)
+
+**Formato:** JSONL por partida + metadata JSON.
+
+---
+
+## 17. Key Design Decisions
 
 ### 15.1 Why Q-Learning Instead of Deep RL?
 - Tabular Q-learning is fully interpretable and debuggable
@@ -1006,9 +1163,9 @@ Ofuscacao de codigo para distribuicao segura.
 
 ---
 
-## 16. Development Guidelines
+## 18. Development Guidelines
 
-### 16.1 Adding a New Brawler
+### 18.1 Adding a New Brawler
 
 1. Add projectile speed to `BRAWLER_PHYSICS` in `combat_advanced.py`
 2. Define combo sequences in `BRAWLER_COMBOS`
@@ -1016,7 +1173,7 @@ Ofuscacao de codigo para distribuicao segura.
 4. Add to `BRAWLER_PRECISION` if aim accuracy differs from default
 5. Update `BRAWLER_SUPER_DURATION` if applicable
 
-### 16.2 Adding a New Game State
+### 18.2 Adding a New Game State
 
 1. Add state name to `GAME_STATES` in `state_manager.py`
 2. Create handler method `_handle_<state_name>()`
@@ -1024,7 +1181,7 @@ Ofuscacao de codigo para distribuicao segura.
 4. Add detection logic to `unified_state_detector.py`
 5. Update state diagram in this document
 
-### 16.3 Testing
+### 18.3 Testing
 
 ```bash
 # Import verification
@@ -1037,7 +1194,7 @@ python -m pytest tests/ -v
 python tests/test_training_workflow_e2e.py
 ```
 
-### 16.4 Performance Profiling
+### 18.4 Performance Profiling
 
 Key metrics to monitor:
 - Screenshot capture time (target: <20ms)

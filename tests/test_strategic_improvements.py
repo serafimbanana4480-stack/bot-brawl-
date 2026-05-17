@@ -186,10 +186,16 @@ class TestRateLimiter:
             assert can_play is False
 
     def test_loss_streak_break(self):
-        from core.rate_limiter import IntelligentRateLimiter
+        from core.rate_limiter import IntelligentRateLimiter, AccountProfile
         with tempfile.TemporaryDirectory() as tmpdir:
             limiter = IntelligentRateLimiter(profiles_dir=Path(tmpdir))
-            limiter.register_account("acc_1")
+            # Criar profile com threshold fixo para teste determinístico
+            profile = AccountProfile(
+                account_id="acc_1",
+                loss_streak_break_threshold=3,
+                loss_streak_cooldown_minutes=30,
+            )
+            limiter._profiles["acc_1"] = profile
 
             for _ in range(3):
                 limiter.record_match_end("acc_1", "loss")
