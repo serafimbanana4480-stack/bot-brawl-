@@ -972,9 +972,22 @@ class StateManager:
             # === RL ONLINE: aprender deste frame ===
             if self.rl_engine and self.play and hasattr(self.play, 'last_rl_transition') and self.play.last_rl_transition:
                 try:
-                    state, action, reward, next_state = self.play.last_rl_transition
-                    self.rl_engine.learn_from_frame(state, action, reward, next_state)
-                    logger.debug(f"[STATE] RL frame learned: {action}, r={reward:.2f}")
+                    transition = self.play.last_rl_transition
+                    # v2.3: Suporta tanto tupla (legacy) como dict (NeuralPolicy)
+                    if isinstance(transition, dict):
+                        self.rl_engine.learn_from_frame(
+                            transition["state"],
+                            transition["action"],
+                            transition["reward"],
+                            transition["next_state"],
+                            player_pos=transition.get("player_pos"),
+                            enemies=transition.get("enemies"),
+                            detections=transition.get("detections"),
+                        )
+                    else:
+                        state, action, reward, next_state = transition
+                        self.rl_engine.learn_from_frame(state, action, reward, next_state)
+                    logger.debug(f"[STATE] RL frame learned")
                 except Exception as e:
                     logger.debug(f"[STATE] Falha ao aprender frame RL: {e}")
 

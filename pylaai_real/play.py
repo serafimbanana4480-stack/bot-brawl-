@@ -1055,7 +1055,18 @@ class PlayLogic:
             rl_action = None
             rl_confidence = 0.0
             if rl_state and self.rl_engine:
-                rl_action, rl_confidence = self.rl_engine.get_action(rl_state)
+                # v2.3: Passar dados extras para NeuralPolicy (player_pos, enemies, detections)
+                player_center = (
+                    ((player[0] + player[2]) / 2) / self._get_safe_resolution()[0],
+                    ((player[1] + player[3]) / 2) / self._get_safe_resolution()[1],
+                ) if player else (0.5, 0.5)
+                detections = {"enemy": enemies, "player": [player] if player else []}
+                rl_action, rl_confidence = self.rl_engine.get_action(
+                    rl_state,
+                    player_pos=player_center,
+                    enemies=enemies,
+                    detections=detections,
+                )
                 logger.info(f"[RL] Estado={rl_state}, acao={rl_action}, conf={rl_confidence:.2f}")
                 self._last_rl_state = rl_state
                 self._last_rl_action = rl_action
@@ -1304,7 +1315,21 @@ class PlayLogic:
                     player, enemies,
                     can_attack=True, can_super=self.super_ready,
                 )
-                self.last_rl_transition = (rl_state, rl_action, frame_reward, next_rl_state)
+                # v2.3: Guardar transição com dados extras para NeuralPolicy
+                player_center = (
+                    ((player[0] + player[2]) / 2) / self._get_safe_resolution()[0],
+                    ((player[1] + player[3]) / 2) / self._get_safe_resolution()[1],
+                ) if player else (0.5, 0.5)
+                detections = {"enemy": enemies, "player": [player] if player else []}
+                self.last_rl_transition = {
+                    "state": rl_state,
+                    "action": rl_action,
+                    "reward": frame_reward,
+                    "next_state": next_rl_state,
+                    "player_pos": player_center,
+                    "enemies": enemies,
+                    "detections": detections,
+                }
             else:
                 self.last_rl_transition = None
 

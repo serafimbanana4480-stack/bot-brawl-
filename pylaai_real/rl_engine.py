@@ -5,7 +5,7 @@ Motor de Q-Learning online para decisoes de combate em Brawl Stars.
 
 Design:
 - Estado discreto: combinacao de buckets de HP, inimigos proximos, distancia, ammo
-- Acoes discretas: attack, move_to_enemy, retreat, use_super, collect_cube, idle
+- Acoes discretas: UnifiedAction space (12 actions from core.class_registry)
 - Atualizacao online: a cada frame de combate ou a cada match
 - Exploracao decrescente (epsilon-greedy): comeca explorando, gradualmente explora menos
 - Persistencia: salva tabela Q em pickle para aprendizado acumulado
@@ -14,6 +14,11 @@ Integracao:
 - PlayLogic usa rl_engine.get_action(state) para decidir acoes
 - StateManager chama rl_engine.update() a cada frame e end_episode() no fim
 - RewardBridge fornece rewards por frame e por match
+
+Migration:
+    This version uses UnifiedAction from core.class_registry for consistency
+    with UtilityAI and future neural policy. Legacy RL action names are
+    automatically mapped to UnifiedAction.
 """
 
 import json
@@ -41,9 +46,24 @@ class CombatQLearning:
         distance_bucket: 0=perto(<150px), 1=medio(150-400px), 2=longe(>400px)
         ammo_ok: 0=sem ammo, 1=com ammo
         can_super: 0=nao, 1=sim
+
+    Actions:
+        Now uses UnifiedAction from core.class_registry for consistency.
+        Legacy action names ("attack", "retreat", etc.) are mapped internally.
     """
 
-    ACTIONS = ["attack", "move_to_enemy", "retreat", "use_super", "collect_cube", "idle"]
+    # Import UnifiedAction for consistency with rest of system
+    from core.class_registry import UnifiedAction
+
+    # Legacy RL actions (for backward compatibility with existing Q-tables)
+    LEGACY_ACTIONS = ["attack", "move_to_enemy", "retreat", "use_super", "collect_cube", "idle"]
+
+    # Full UnifiedAction space (new Q-tables should use this)
+    # Note: Q-table keys use action names for pickle compatibility
+    UNIFIED_ACTIONS = [a.name.lower() for a in UnifiedAction]
+
+    # Default to legacy actions for existing Q-tables, but support unified
+    ACTIONS = LEGACY_ACTIONS  # Will be overridden if unified_actions=True
 
     # Hiperparametros Q-Learning
     ALPHA = 0.15           # Taxa de aprendizado
@@ -114,14 +134,14 @@ class CombatQLearning:
         enemies: List,
         can_attack: bool = True,
         can_super: bool = False,
+        player_hp_pct: Optional[float] = None,
     ) -> Tuple[int, int, int, int, int]:
         """Cria estado discreto a partir dos dados brutos de combate."""
         if player_bbox is None:
             return (1, 0, 2, 0, 0)  # Estado neutro/default
 
-        # HP do jogador (heuristica: se nao tiver dados reais, assumir 100%)
-        # TODO: extrair HP real da barra de vida
-        player_hp_pct = 1.0
+        if player_hp_pct is None:
+            player_hp_pct = 1.0
 
         num_enemies = len(enemies)
 
@@ -285,8 +305,11 @@ class CombatQLearning:
                 "version": 1,
                 "saved_at": time.time(),
             }
-            with open(self.save_path, "wb") as f:
+            # FIX #13: Atomic write using temp file + rename (prevents corruption on crash)
+            temp_path = self.save_path.with_suffix('.tmp')
+            with open(temp_path, "wb") as f:
                 pickle.dump(data, f)
+            temp_path.rename(self.save_path)  # Atomic on POSIX, nearly atomic on Windows
             logger.debug(f"[RL] Q-table salva: {self.save_path} ({len(self.q_table)} estados)")
         except Exception as e:
             logger.warning(f"[RL] Falha ao salvar Q-table: {e}")
@@ -313,8 +336,13 @@ class CombatQLearning:
 
 class OnlineLearner:
     """
-    Facade que integra Q-Learning + ELO + RewardBridge.
+    Facade que integra Q-Learning + NeuralPolicy (PPO) + ELO + RewardBridge.
     Eh o ponto unico de entrada para o sistema de aprendizado online.
+
+    Migration v2.3:
+    - Adicionado RLBridge com NeuralPolicy + PPO
+    - use_neural=True ativa policy network profunda (CNN+LSTM+Fusion)
+    - Q-Learning permanece como fallback automatico
     """
 
     def __init__(
@@ -323,9 +351,29 @@ class OnlineLearner:
         elo_save_path: Path = Path("data/elo_ratings.json"),
         reward_bridge=None,
         enabled: bool = True,
+        use_neural: bool = True,
+        neural_schema: str = "core",
     ):
         self.enabled = enabled
         self.reward_bridge = reward_bridge
+
+        # RL Bridge: NeuralPolicy + PPO + Q-Learning fallback
+        self.rl_bridge = None
+        self.use_neural = use_neural
+        if use_neural:
+            try:
+                from neural.rl_bridge import RLBridge
+                self.rl_bridge = RLBridge(
+                    use_neural=True,
+                    schema=neural_schema,
+                    q_learning_fallback=True,
+                )
+                logger.info("[RL] NeuralPolicy + PPO ativados via RLBridge")
+            except Exception as e:
+                logger.warning(f"[RL] RLBridge nao disponivel: {e}. Usando Q-Learning.")
+                self.use_neural = False
+
+        # Legacy Q-Learning (sempre disponivel como fallback)
         self.q_learning = CombatQLearning(save_path=q_save_path)
         self.elo = None  # Lazy import para evitar dependencia circular
         try:
@@ -339,7 +387,7 @@ class OnlineLearner:
         self.episode_reward: float = 0.0
         self.episode_start_time: Optional[float] = None
 
-        logger.info(f"[RL] OnlineLearner inicializado: enabled={enabled}")
+        logger.info(f"[RL] OnlineLearner inicializado: enabled={enabled}, neural={use_neural}")
 
     def start_episode(self, brawler_name: str, map_name: Optional[str] = None):
         """Chamado no inicio de cada partida."""
@@ -348,21 +396,41 @@ class OnlineLearner:
         self.episode_reward = 0.0
         self.episode_start_time = time.time()
         self.q_learning.frame_rewards.clear()
+        if self.rl_bridge is not None:
+            self.rl_bridge.start_episode()
         if self.reward_bridge:
             self.reward_bridge.start_match()
         logger.info(f"[RL] Episodio iniciado: {brawler_name} @ {map_name or 'unknown'}")
 
-    def get_action(self, state: Tuple, default_action: str = "idle") -> Tuple[str, float]:
-        """Obtem acao do Q-Learning. Retorna (acao, confianca)."""
+    def get_action(self, state: Tuple, default_action: str = "idle", **kwargs) -> Tuple[str, float]:
+        """Obtem acao do RL (Neural ou Q-Learning). Retorna (acao, confianca)."""
         if not self.enabled:
             return default_action, 0.0
+
+        # NeuralPolicy path
+        if self.use_neural and self.rl_bridge is not None:
+            try:
+                return self.rl_bridge.get_action(state, **kwargs)
+            except Exception as e:
+                logger.debug(f"[RL] NeuralPolicy falhou: {e}, fallback Q-Learning")
+
+        # Q-Learning fallback
         action, confidence = self.q_learning.get_action(state)
         return action, confidence
 
-    def learn_from_frame(self, state: Tuple, action: str, reward: float, next_state: Tuple):
-        """Atualiza Q-Learning com uma transicao de frame."""
+    def learn_from_frame(self, state: Tuple, action: str, reward: float, next_state: Tuple, **kwargs):
+        """Atualiza RL com uma transicao de frame."""
         if not self.enabled:
             return
+
+        # Neural path
+        if self.use_neural and self.rl_bridge is not None:
+            try:
+                self.rl_bridge.learn_from_frame(state, action, reward, next_state, **kwargs)
+            except Exception as e:
+                logger.debug(f"[RL] Neural learn falhou: {e}")
+
+        # Q-Learning (sempre atualiza para manter fallback fresco)
         self.q_learning.update(state, action, reward, next_state)
         self.q_learning.record_reward(reward)
         self.episode_reward += reward
@@ -388,6 +456,13 @@ class OnlineLearner:
                 final_reward += 2.0
             elif rank >= 8:
                 final_reward -= 3.0
+
+        # Neural path
+        if self.use_neural and self.rl_bridge is not None:
+            try:
+                self.rl_bridge.end_episode(final_reward)
+            except Exception as e:
+                logger.debug(f"[RL] Neural end_episode falhou: {e}")
 
         self.q_learning.end_episode(final_reward)
 
