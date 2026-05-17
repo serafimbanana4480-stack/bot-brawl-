@@ -178,6 +178,7 @@ class PlayLogic:
         self._last_rl_action: Optional[str] = None
         self.last_rl_transition: Optional[Tuple] = None  # (state, action, reward, next_state)
         self.current_game_mode: str = "showdown"
+        self.pve_mode: Optional[str] = None  # None = PvP, ou "training_cave", "robo_rumble", etc.
 
         # NOVO: Sistema de combate avancado (Phase 5)
         self._combat_strategy: Optional[AdvancedCombatStrategy] = None
@@ -350,6 +351,17 @@ class PlayLogic:
             except Exception as e:
                 logger.debug(f"[PLAY] IntentSystem mode update failed: {e}")
         logger.info(f"[PLAY] Game mode definido: {self.current_game_mode}")
+
+    def set_pve_mode(self, pve_type: str):
+        """Define que estamos em modo PvE (bots) para ajustar estrategia."""
+        self.pve_mode = pve_type
+        logger.info(f"[PLAY] Modo PvE ativo: {pve_type}")
+        # Ajustar estrategia para bots (mais agressivo, menos kiting)
+        if self._intent_system and hasattr(self._intent_system, "set_pve_mode"):
+            try:
+                self._intent_system.set_pve_mode(pve_type)
+            except Exception as e:
+                logger.debug(f"[PLAY] IntentSystem PvE mode update failed: {e}")
 
     def get_brawler_strategy(self) -> Dict:
         """Retorna a estratégia atual do brawler"""

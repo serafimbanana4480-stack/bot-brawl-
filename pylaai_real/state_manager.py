@@ -43,12 +43,39 @@ except ImportError:
     TopLevelState = None
     LobbyState = None
 
+# Phase 10: Lobby automation expanded (PlayAgain, TrainingCave, PvE)
+try:
+    from pylaai_real.lobby_automation_expanded import PlayAgainResult, PvEClassification
+    HAS_LOBBY_EXPANDED = True
+except ImportError:
+    HAS_LOBBY_EXPANDED = False
+    PlayAgainResult = None
+    PvEClassification = None
+
 try:
     from ..realtime_logs import get_log_manager
     log_manager = get_log_manager()
 except ImportError:
     log_manager = None
-    logger.warning("[STATE] Log manager não disponível")
+
+try:
+    from .lobby_automation_expanded import (
+        PlayAgainHandler,
+        DailyRewardsCollector,
+        StarrRoadAutomation,
+        ShopAutomation,
+        QuestAutomation,
+        MaintenanceHandler,
+    )
+    LOBBY_EXPANDED_AVAILABLE = True
+except ImportError:
+    LOBBY_EXPANDED_AVAILABLE = False
+    PlayAgainHandler = None
+    DailyRewardsCollector = None
+    StarrRoadAutomation = None
+    ShopAutomation = None
+    QuestAutomation = None
+    MaintenanceHandler = None
 
 
 class StateManager:
@@ -613,7 +640,33 @@ class StateManager:
                     continue
 
                 cycle_start = time.time()
-                
+
+                # === NOVO: Verificar manutencao/update antes de tudo ===
+                if self.lobby and hasattr(self.lobby, 'handle_maintenance') and self.emulator_controller:
+                    try:
+                        screenshot = self.screenshot.take()
+                        if screenshot is not None:
+                            maint_handled = self.lobby.handle_maintenance(screenshot)
+                            if maint_handled:
+                                logger.warning("[STATE] Tela de manutencao/update detectada e tratada. Aguardando...")
+                                time.sleep(5.0)
+                                continue
+                    except Exception as e:
+                        logger.debug(f"[STATE] Erro ao verificar manutencao: {e}")
+
+                # === NOVO: Verificar convites de partidas amistosas ===
+                if self.lobby and hasattr(self.lobby, 'handle_friendly_invite') and self.emulator_controller:
+                    try:
+                        screenshot = self.screenshot.take()
+                        if screenshot is not None:
+                            invite_handled = self.lobby.handle_friendly_invite(screenshot, auto_accept=False)
+                            if invite_handled:
+                                logger.info("[STATE] Convite de partida amistosa recusado (auto_accept=False)")
+                                time.sleep(0.5)
+                                continue
+                    except Exception as e:
+                        logger.debug(f"[STATE] Erro ao verificar convites: {e}")
+
                 # FORCE LOADING TIMEOUT: if in loading for >15s, skip detection and force in_game
                 logger.info(f"[STATE] DEBUG: current={self.current_state}, start_time={self.state_start_time}")
                 if self.current_state == 'loading':
@@ -724,6 +777,60 @@ class StateManager:
         if self.lobby is None:
             logger.warning("[STATE] Lobby automator não disponível, não é possível pressionar play")
             return
+        # === NOVO: Selecionar modo de jogo desejado antes de pressionar Play ===
+        desired_mode = None
+        if self.lobby and hasattr(self.lobby, 'queue') and self.lobby.queue:
+            current = self.lobby.queue.get_current()
+            if current:
+                desired_mode = getattr(current, 'game_mode', None)
+        if desired_mode and hasattr(self.lobby, 'select_game_mode'):
+            try:
+                mode_ok = self.lobby.select_game_mode(desired_mode)
+                if mode_ok:
+                    logger.info(f"[STATE] Modo de jogo selecionado: {desired_mode}")
+                    self._diag(f"game_mode_selected={desired_mode}")
+                else:
+                    logger.warning(f"[STATE] Falha ao selecionar modo {desired_mode}, continuando com slot ativo")
+            except Exception as e:
+                logger.debug(f"[STATE] Erro ao selecionar modo: {e}")
+
+        # === NOVO: Coletar recompensas automaticas no lobby ===
+        if self.lobby and hasattr(self.lobby, 'collect_daily_rewards') and self.emulator_controller:
+            try:
+                screenshot = self.screenshot.take()
+                if screenshot is not None:
+                    collected = self.lobby.collect_daily_rewards(screenshot)
+                    if collected:
+                        logger.info("[STATE] Recompensas diarias coletadas")
+                        self._diag("daily_rewards_collected=true")
+                        time.sleep(0.5)
+            except Exception as e:
+                logger.debug(f"[STATE] Erro ao coletar recompensas diarias: {e}")
+
+        if self.lobby and hasattr(self.lobby, 'collect_starr_road') and self.emulator_controller:
+            try:
+                screenshot = self.screenshot.take()
+                if screenshot is not None:
+                    collected = self.lobby.collect_starr_road(screenshot)
+                    if collected:
+                        logger.info("[STATE] Recompensas Starr Road coletadas")
+                        self._diag("starr_road_collected=true")
+                        time.sleep(0.5)
+            except Exception as e:
+                logger.debug(f"[STATE] Erro ao coletar Starr Road: {e}")
+
+        if self.lobby and hasattr(self.lobby, 'collect_quest_rewards') and self.emulator_controller:
+            try:
+                screenshot = self.screenshot.take()
+                if screenshot is not None:
+                    collected = self.lobby.collect_quest_rewards(screenshot)
+                    if collected:
+                        logger.info("[STATE] Recompensas de missoes coletadas")
+                        self._diag("quest_rewards_collected=true")
+                        time.sleep(0.5)
+            except Exception as e:
+                logger.debug(f"[STATE] Erro ao coletar missoes: {e}")
+
         pressed = self.lobby.press_play()
         self._diag(f"press_play_result={pressed}")
         if not pressed:
@@ -846,6 +953,43 @@ class StateManager:
             logger.warning("[STATE] Lobby automator não disponível após seleção")
             return
         logger.info("[STATE] Forçando início de partida após sair da seleção")
+        # === NOVO: Coletar recompensas automaticas no lobby ===
+        if self.lobby and hasattr(self.lobby, 'collect_daily_rewards') and self.emulator_controller:
+            try:
+                screenshot = self.screenshot.take()
+                if screenshot is not None:
+                    collected = self.lobby.collect_daily_rewards(screenshot)
+                    if collected:
+                        logger.info("[STATE] Recompensas diarias coletadas")
+                        self._diag("daily_rewards_collected=true")
+                        time.sleep(0.5)
+            except Exception as e:
+                logger.debug(f"[STATE] Erro ao coletar recompensas diarias: {e}")
+
+        if self.lobby and hasattr(self.lobby, 'collect_starr_road') and self.emulator_controller:
+            try:
+                screenshot = self.screenshot.take()
+                if screenshot is not None:
+                    collected = self.lobby.collect_starr_road(screenshot)
+                    if collected:
+                        logger.info("[STATE] Recompensas Starr Road coletadas")
+                        self._diag("starr_road_collected=true")
+                        time.sleep(0.5)
+            except Exception as e:
+                logger.debug(f"[STATE] Erro ao coletar Starr Road: {e}")
+
+        if self.lobby and hasattr(self.lobby, 'collect_quest_rewards') and self.emulator_controller:
+            try:
+                screenshot = self.screenshot.take()
+                if screenshot is not None:
+                    collected = self.lobby.collect_quest_rewards(screenshot)
+                    if collected:
+                        logger.info("[STATE] Recompensas de missoes coletadas")
+                        self._diag("quest_rewards_collected=true")
+                        time.sleep(0.5)
+            except Exception as e:
+                logger.debug(f"[STATE] Erro ao coletar missoes: {e}")
+
         pressed = self.lobby.press_play()
         self._diag(f"press_play_after_selection_result={pressed}")
         if not pressed:
@@ -919,10 +1063,22 @@ class StateManager:
         self._diag("connection_lost_handler_done")
 
     def _handle_shop(self):
-        """Na loja - sair"""
+        """Na loja - coletar itens gratuitos e sair"""
         if self.lobby is None:
             logger.warning("[STATE] Lobby automator não disponível, não é possível sair da loja")
             return
+        # === NOVO: Coletar itens gratuitos da loja ===
+        if hasattr(self.lobby, 'collect_shop_items') and self.emulator_controller:
+            try:
+                screenshot = self.screenshot.take()
+                if screenshot is not None:
+                    collected = self.lobby.collect_shop_items(screenshot)
+                    if collected:
+                        logger.info("[STATE] Itens gratuitos da loja coletados")
+                        self._diag("shop_free_items_collected=true")
+                        time.sleep(0.5)
+            except Exception as e:
+                logger.debug(f"[STATE] Erro ao coletar itens da loja: {e}")
         self.lobby.quit_shop()
 
     def _handle_popup(self):
@@ -966,6 +1122,31 @@ class StateManager:
         screenshot = self.screenshot.take()
         if screenshot is not None:
             logger.info(f"[STATE] Screenshot capturado: {screenshot.shape}")
+
+            # === NOVO: Detectar Training Cave e PvE ===
+            if self.lobby and hasattr(self.lobby, 'is_in_training_cave'):
+                try:
+                    in_cave = self.lobby.is_in_training_cave(screenshot)
+                    if in_cave:
+                        logger.info("[STATE] Training Cave detectada - modo de treino ativo")
+                        self._diag("training_cave_active=true")
+                except Exception as e:
+                    logger.debug(f"[STATE] Erro ao detectar Training Cave: {e}")
+
+            if self.lobby and hasattr(self.lobby, 'detect_pve'):
+                try:
+                    pve_result = self.lobby.detect_pve(screenshot=screenshot, game_mode=getattr(self, '_current_map', None))
+                    if pve_result and getattr(pve_result, 'is_pve', False):
+                        pve_type = getattr(pve_result, 'pve_type', 'unknown')
+                        conf = getattr(pve_result, 'confidence', 0.0)
+                        logger.info(f"[STATE] Partida PvE detectada: {pve_type} (conf={conf:.2f})")
+                        self._diag(f"pve_detected={pve_type},confidence={conf:.2f}")
+                        # Notificar play_logic sobre modo PvE para ajustar estrategia
+                        if self.play and hasattr(self.play, 'set_pve_mode'):
+                            self.play.set_pve_mode(pve_type)
+                except Exception as e:
+                    logger.debug(f"[STATE] Erro ao detectar PvE: {e}")
+
             result = self.play.play_round(screenshot)
             logger.info(f"[STATE] Play round resultado: {result}")
 
@@ -1061,7 +1242,30 @@ class StateManager:
                 break
 
             logger.info(f"[STATE] Tentativa {attempts + 1}/{max_attempts} para sair do end screen")
-            
+
+            # === NOVO: PlayAgainHandler inteligente (primeira tentativa) ===
+            if self.lobby and hasattr(self.lobby, 'handle_end_screen_expanded') and attempts == 0:
+                try:
+                    screenshot = self.screenshot.take()
+                    if screenshot is not None:
+                        result = self.lobby.handle_end_screen_expanded(screenshot, window_size=self._get_window_size())
+                        if result and getattr(result, 'success', False):
+                            method = getattr(result, 'method_used', 'unknown')
+                            logger.info(f"[STATE] PlayAgainHandler sucesso via: {method}")
+                            self._diag(f"play_again_handler_success={method}")
+                            if getattr(result, 'clicked_play_again', False):
+                                logger.info("[STATE] Play Again clicado - reentrada rapida no mesmo modo")
+                                time.sleep(2.0)
+                                # Verificar se ja saiu do end screen
+                                verify = self.screenshot.take()
+                                if verify is not None:
+                                    vstate = self.state_finder.get_state(verify)
+                                    if vstate != 'end':
+                                        logger.info("[STATE] Confirmado: saiu do end screen via Play Again")
+                                        break
+                except Exception as e:
+                    logger.debug(f"[STATE] PlayAgainHandler falhou: {e}")
+
             # Verificar screen automation hint primeiro
             current_hint = None
             if self.screen_automation and hasattr(self.screen_automation, "get_current_state_name"):

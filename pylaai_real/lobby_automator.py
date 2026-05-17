@@ -67,6 +67,21 @@ except ImportError:
     LOBBY_NAV_AVAILABLE = False
     logger.warning("[LOBBY] lobby_navigator nao disponivel, usando metodo legado")
 
+try:
+    from .lobby_automation_expanded import (
+        EventSlotNavigator, ModeSelectionResolver,
+        LobbyAutomationExpanded, TrainingCaveResult,
+        PlayAgainResult, PvEClassification,
+    )
+    LOBBY_EXPANDED_AVAILABLE = True
+except ImportError:
+    LOBBY_EXPANDED_AVAILABLE = False
+    LobbyAutomationExpanded = None
+    TrainingCaveResult = None
+    PlayAgainResult = None
+    PvEClassification = None
+    logger.warning("[LOBBY] lobby_automation_expanded nao disponivel")
+
 
 @dataclass
 class BrawlerConfig:
@@ -78,6 +93,7 @@ class BrawlerConfig:
     target_wins: int = 10
     priority: int = 1  # 1-5, maior = mais prioritário
     enabled: bool = True
+    game_mode: Optional[str] = None  # Modo de jogo preferido (showdown, gem_grab, etc.)
 
 
 class BrawlerQueue:
@@ -211,6 +227,7 @@ class BrawlerQueue:
                 'target_wins': b.target_wins,
                 'priority': b.priority,
                 'enabled': b.enabled,
+                'game_mode': b.game_mode,
                 'is_current': i == self.current_index
             }
             for i, b in enumerate(self.brawlers)
@@ -358,6 +375,16 @@ class LobbyAutomator:
             self._event_detector = None
             self._brawler_selector_fast = None
 
+        if LOBBY_EXPANDED_AVAILABLE:
+            logger.info("[LOBBY] Inicializando sistemas expandidos (EventSlotNavigator, ModeSelectionResolver)")
+            self._slot_navigator = EventSlotNavigator(self._images_path)
+            self._mode_resolver = ModeSelectionResolver
+            self._expanded = LobbyAutomationExpanded(self._images_path)
+        else:
+            self._slot_navigator = None
+            self._mode_resolver = None
+            self._expanded = None
+
         logger.debug(f"[LOBBY] LobbyAutomator inicializado: diagnostic_mode={diagnostic_mode}, emulator_controller={'available' if emulator_controller else 'unavailable'}, window={window_w}x{window_h}, nav_v2={LOBBY_NAV_AVAILABLE}")
 
     @property
@@ -407,6 +434,122 @@ class LobbyAutomator:
     def get_diagnostic_report(self) -> Dict[str, object]:
         """Retorna o último snapshot diagnóstico do lobby."""
         return dict(self.last_diagnostic)
+
+    # ------------------------------------------------------------------
+    # Delegacoes para LobbyAutomationExpanded (sistemas expandidos)
+    # ------------------------------------------------------------------
+
+    def handle_end_screen_expanded(self, screenshot, window_size=(1920, 1080)):
+        """Usa PlayAgainHandler inteligente para sair do end screen."""
+        if self._expanded and self.emulator_controller:
+            return self._expanded.handle_end_screen(
+                screenshot=screenshot,
+                emulator_controller=self.emulator_controller,
+                screen_automation=self.screen_automation,
+                window_size=window_size,
+            )
+        return None
+
+    def enter_training_cave(self, screenshot, window_size=(1920, 1080)):
+        """Entra na Training Cave."""
+        if self._expanded and self.emulator_controller:
+            return self._expanded.enter_training_cave(
+                screenshot=screenshot,
+                emulator_controller=self.emulator_controller,
+                window_size=window_size,
+            )
+        return None
+
+    def exit_training_cave(self, window_size=(1920, 1080)):
+        """Sai da Training Cave."""
+        if self._expanded and self.emulator_controller:
+            return self._expanded.exit_training_cave(
+                emulator_controller=self.emulator_controller,
+                window_size=window_size,
+            )
+        return None
+
+    def is_in_training_cave(self, screenshot) -> bool:
+        """Verifica se estamos na Training Cave."""
+        if self._expanded:
+            return self._expanded.is_in_training_cave(screenshot)
+        return False
+
+    def detect_pve(self, screenshot=None, game_mode=None, enemy_detections=None):
+        """Classifica se a partida atual e PvE."""
+        if self._expanded:
+            return self._expanded.detect_pve(
+                screenshot=screenshot,
+                game_mode=game_mode,
+                enemy_detections=enemy_detections,
+            )
+        return None
+
+    def handle_friendly_invite(self, screenshot, auto_accept=False):
+        """Trata convites de partidas amistosas."""
+        if self._expanded and self.emulator_controller:
+            return self._expanded.handle_friendly_invite(
+                screenshot=screenshot,
+                emulator_controller=self.emulator_controller,
+                auto_accept=auto_accept,
+            )
+        return False
+
+    def collect_daily_rewards(self, screenshot, window_size=(1920, 1080)):
+        """Coleta recompensas diarias se disponivel."""
+        if self._expanded and self.emulator_controller:
+            return self._expanded.collect_daily_rewards(
+                screenshot=screenshot,
+                emulator_controller=self.emulator_controller,
+                window_size=window_size,
+            )
+        return False
+
+    def collect_starr_road(self, screenshot, window_size=(1920, 1080)):
+        """Coleta recompensas da Starr Road."""
+        if self._expanded and self.emulator_controller:
+            return self._expanded.collect_starr_road(
+                screenshot=screenshot,
+                emulator_controller=self.emulator_controller,
+                window_size=window_size,
+            )
+        return False
+
+    def collect_quest_rewards(self, screenshot, window_size=(1920, 1080)):
+        """Coleta recompensas de missoes/quests."""
+        if self._expanded and self.emulator_controller:
+            return self._expanded.collect_quest_rewards(
+                screenshot=screenshot,
+                emulator_controller=self.emulator_controller,
+                window_size=window_size,
+            )
+        return False
+
+    def collect_shop_items(self, screenshot, window_size=(1920, 1080)):
+        """Coleta itens gratuitos da loja."""
+        if self._expanded and self.emulator_controller:
+            return self._expanded.collect_shop_items(
+                screenshot=screenshot,
+                emulator_controller=self.emulator_controller,
+                window_size=window_size,
+            )
+        return False
+
+    def handle_maintenance(self, screenshot, window_size=(1920, 1080)):
+        """Trata tela de manutencao/update."""
+        if self._expanded and self.emulator_controller:
+            return self._expanded.handle_maintenance(
+                screenshot=screenshot,
+                emulator_controller=self.emulator_controller,
+                window_size=window_size,
+            )
+        return False
+
+    def detect_maintenance(self, screenshot, window_size=(1920, 1080)):
+        """Deteta se ha tela de manutencao."""
+        if self._expanded:
+            return self._expanded.detect_maintenance(screenshot, window_size)
+        return False, "none"
 
     def _click(self, x: int, y: int):
         """Executa clique via EmulatorController (ADB) ou pyautogui (fallback)"""
@@ -1003,13 +1146,65 @@ class LobbyAutomator:
                 self._update_diagnostic("press_play_all_failed")
 
             self._transition("idle")
-            return True  # Nao bloquear fluxo
+            return True
 
         except Exception as e:
             logger.error(f"[LOBBY] press_play v2 falhou: {e}", exc_info=True)
             self._update_diagnostic("press_play_error", error=str(e))
             self._transition("idle")
             return False
+
+    def select_game_mode(self, desired_mode: str) -> bool:
+        """
+        Navega para o modo de jogo desejado.
+
+        Args:
+            desired_mode: modo desejado (showdown, gem_grab, knockout, etc.)
+
+        Returns:
+            True se o slot correto esta ativo
+        """
+        if not LOBBY_EXPANDED_AVAILABLE or not self._slot_navigator:
+            logger.warning("[LOBBY] EventSlotNavigator nao disponivel, pulando navegacao de modo")
+            return False
+
+        if not self._screenshot_func:
+            logger.warning("[LOBBY] Sem funcao de screenshot, pulando navegacao de modo")
+            return False
+
+        if not desired_mode:
+            logger.info("[LOBBY] Nenhum modo especificado, usando slot ativo")
+            return True
+
+        resolved = self._mode_resolver.resolve(desired_mode)
+        logger.info(f"[LOBBY] Navegando para modo: {desired_mode} -> {resolved}")
+
+        screenshot = self._screenshot_func()
+        if screenshot is None:
+            logger.warning("[LOBBY] Falha ao capturar screenshot para navegacao de modo")
+            return False
+
+        def click_func(x, y):
+            self._click(x, y)
+
+        def swipe_func(x1, y1, x2, y2, duration=0.35):
+            if self.emulator_controller:
+                self.emulator_controller.swipe_scaled(x1, y1, x2, y2, duration=duration)
+
+        success = self._slot_navigator.navigate_to_mode(
+            screenshot=screenshot,
+            desired_mode=resolved,
+            click_func=click_func,
+            swipe_func=swipe_func,
+            max_swipes=3,
+        )
+
+        if success:
+            logger.info(f"[LOBBY] Modo '{resolved}' selecionado com sucesso")
+        else:
+            logger.warning(f"[LOBBY] Falha ao selecionar modo '{resolved}'")
+
+        return success
 
     def _verify_state_changed(self, previous_state: str, timeout: float = 3.0) -> bool:
         """

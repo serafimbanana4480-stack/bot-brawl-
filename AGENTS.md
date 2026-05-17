@@ -105,7 +105,7 @@ A `wrapper.py` monolith (2437 lines) was refactored into a clean Ports & Adapter
 | `pylaai_real/unified_state_detector.py` | `UnifiedStateDetector` | Pixel heuristics + template matching fusion with smoothing/voting |
 | `pylaai_real/screenshot_taker.py` | `ScreenshotTaker` | Win32 screenshot capture (D3D, GDI fallback) |
 
-**Game States:** `unknown`, `lobby`, `brawler_select`, `map_select`, `match_loading`, `in_game`, `in_game_countdown`, `mission`, `tutorial`, `news`, `brawler_unlock`, `season_reset`, `shop`, `settings`
+**Game States:** `unknown`, `lobby`, `brawler_select`, `map_select`, `match_loading`, `in_game`, `in_game_countdown`, `mission`, `tutorial`, `news`, `brawler_unlock`, `season_reset`, `shop`, `settings`, `event_screen`, `starr_drop`, `connection_lost`, `popup`, `end`
 
 ### 3.3 Combat
 
@@ -119,9 +119,63 @@ A `wrapper.py` monolith (2437 lines) was refactored into a clean Ports & Adapter
 
 | File | Class | Responsibility |
 |---|---|---|
-| `pylaai_real/lobby_automator.py` | `LobbyAutomator` | Play button, brawler select, team confirm |
+| `pylaai_real/lobby_automator.py` | `LobbyAutomator` | Main orchestrator; delegates to all subsystems below |
 | `pylaai_real/lobby_navigator.py` | `LobbyNavigatorV2` | Popup detection, smart play button, event detection, fast brawler select |
+| `pylaai_real/lobby_automation_expanded.py` | `LobbyAutomationExpanded` | **NEW v2.3:** Expanded lobby automation (see below) |
 | `core/lobby_fsm.py` | `LobbyFSM` | Hierarchical lobby FSM with repetition guard |
+
+#### 3.4.1 Expanded Lobby Automation (`lobby_automation_expanded.py`)
+
+**Phase 2.3 additions** — complete coverage of lobby interactions:
+
+| Component | Class | Responsibility |
+|---|---|---|
+| `EventSlotNavigator` | `EventSlotNavigator` | Navigate event slots to select desired game mode (Showdown, Gem Grab, etc.) |
+| `PlayAgainHandler` | `PlayAgainHandler` | Click "Play Again" at end screen for fast re-entry (saves 2-3s per match) |
+| `TrainingCaveNavigator` | `TrainingCaveNavigator` | Enter/exit Training Cave for brawler practice |
+| `PvEDetector` | `PvEDetector` | Detect PvE matches (Robo Rumble, Big Game, Boss Fight, Training Cave, Practice) |
+| `FriendlyGameHandler` | `FriendlyGameHandler` | Detect and handle friend invites (accept/decline) |
+| `DailyRewardsCollector` | `DailyRewardsCollector` | Collect daily login rewards and streak bonuses |
+| `StarrRoadAutomation` | `StarrRoadAutomation` | Navigate Starr Road and collect available rewards |
+| `ShopAutomation` | `ShopAutomation` | Collect free daily items from the shop |
+| `QuestAutomation` | `QuestAutomation` | Collect completed quest/mission rewards |
+| `MaintenanceHandler` | `MaintenanceHandler` | Detect and handle maintenance/update required screens |
+
+**Integration flow in `StateManager`:**
+
+```
+Cycle start:
+  1. MaintenanceHandler     -> detect "Update Required" / "Maintenance"
+  2. FriendlyGameHandler    -> decline friend invites (auto_accept=False)
+  3. UnifiedStateDetector   -> detect current game state
+  4. PopupManager           -> close popups (v2)
+
+Handler _handle_lobby:
+  A. DailyRewardsCollector  -> collect login rewards
+  B. StarrRoadAutomation   -> collect Starr Road rewards
+  C. QuestAutomation        -> collect completed quest rewards
+  D. EventSlotNavigator     -> select desired game_mode from brawler queue
+  E. press_play()           -> enter matchmaking
+
+Handler _handle_end_game:
+  1. PlayAgainHandler       -> click Play Again if available
+  2. Fallback clicks        -> generic exit strategy
+
+Handler _handle_in_game:
+  1. PvEDetector            -> classify PvE vs PvP
+  2. TrainingCaveNavigator  -> detect if in Training Cave
+  3. PlayLogic              -> execute combat strategy
+```
+
+**BrawlerConfig now includes `game_mode`** — each brawler in the queue can specify its preferred mode:
+
+```json
+{
+  "name": "colt",
+  "game_mode": "showdown",
+  "target_trophies": 400
+}
+```
 
 ### 3.5 Vision
 
@@ -659,8 +713,9 @@ c:/Users/rodri/Desktop/bot brawl/
 │   ├── play.py                        # Combat engine
 │   ├── movement.py                     # Movement/pathfinding
 │   ├── combat_advanced.py             # Phase 5 advanced combat
-│   ├── lobby_automator.py             # Lobby automation
-│   ├── lobby_navigator.py              # Lobby navigation v2
+│   ├── lobby_automator.py             # Lobby automation (main orchestrator)
+│   ├── lobby_automation_expanded.py   # Expanded lobby automation (v2.3)
+│   ├── lobby_navigator.py             # Lobby navigation v2
 │   ├── detect.py                      # YOLO wrapper
 │   ├── screenshot_taker.py            # Win32 screenshot
 │   └── humanization_utils.py          # Humanization utilities

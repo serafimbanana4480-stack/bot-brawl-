@@ -647,7 +647,8 @@ class PylaAIEnhanced:
                     target_trophies=bcfg.get("target_trophies", 500),
                     target_wins=bcfg.get("target_wins", 10),
                     priority=bcfg.get("priority", 1),
-                    enabled=bcfg.get("enabled", True)
+                    enabled=bcfg.get("enabled", True),
+                    game_mode=bcfg.get("game_mode", None)
                 ))
             logger.info(f"[WRAPPER] {len(queue_config)} brawlers carregados do config.json: {[b.get('name') for b in queue_config]}")
         else:
@@ -658,7 +659,8 @@ class PylaAIEnhanced:
                 target_trophies=400,
                 target_wins=10,
                 priority=1,
-                enabled=True
+                enabled=True,
+                game_mode=None
             ))
             logger.info("[WRAPPER] Brawler 'colt' adicionado à fila (padrão)")
 
@@ -1850,6 +1852,7 @@ class PylaAIEnhanced:
                     target_wins=item.get("target_wins", 10),
                     priority=item.get("priority", 1),
                     enabled=item.get("enabled", True),
+                    game_mode=item.get("game_mode", None),
                 )
                 self.brawler_queue.add_brawler(cfg)
             logger.info(f"[WRAPPER] Fila de brawlers atualizada: {len(queue_data)} brawlers")
@@ -2371,7 +2374,8 @@ class PylaAIEnhanced:
         current_trophies: int = 0,
         target_trophies: int = 350,
         target_wins: int = 10,
-        priority: int = 1
+        priority: int = 1,
+        game_mode: Optional[str] = None,
     ):
         """Adiciona brawler a fila"""
         config = BrawlerConfig(
@@ -2379,7 +2383,8 @@ class PylaAIEnhanced:
             current_trophies=current_trophies,
             target_trophies=target_trophies,
             target_wins=target_wins,
-            priority=priority
+            priority=priority,
+            game_mode=game_mode,
         )
         self.brawler_queue.add_brawler(config)
         logger.info(f"Brawler adicionado: {name}")

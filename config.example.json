@@ -1,0 +1,37 @@
+{
+  "diagnostic_mode": false,
+  "enable_recording": false,
+  "auto_retrain_enabled": false,
+  "training_schema": "core",
+  "brawler_selection_enabled": true,
+  "auto_tuning_enabled": false,
+  "debug_visualizer": false,
+  "dashboard_port": 8765,
+  "emulator": {
+    "window_title": "BlueStacks App Player",
+    "resolution": [
+      1920,
+      1080
+    ]
+  },
+  "brawler_queue": [
+    {
+      "name": "colt",
+      "current_trophies": 0,
+      "target_trophies": 400,
+      "target_wins": 10,
+      "priority": 1,
+      "enabled": true,
+      "game_mode": "showdown"
+    },
+    {
+      "name": "shelly",
+      "current_trophies": 0,
+      "target_trophies": 350,
+      "target_wins": 10,
+      "priority": 2,
+      "enabled": true,
+      "game_mode": "gem_grab"
+    }
+  ]
+}
