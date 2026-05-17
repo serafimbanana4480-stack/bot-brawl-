@@ -12,6 +12,7 @@ This allows the orchestrator to remain independent of:
 
 Adapters:
     - VisionAdapter: wraps Detect + UnifiedStateDetector + ScreenshotTaker
+    - VLMVisionAdapter: wraps VisionAdapter + VLMFallback for anti-UI-change resilience
     - InputAdapter: wraps EmulatorController
     - DecisionAdapter: wraps RLBridge / UtilityAI
     - SafetyAdapter: wraps SafetySystem / AntiBanSystem
@@ -20,6 +21,7 @@ Adapters:
 """
 
 from core.adapters.vision_adapter import VisionAdapter
+from core.adapters.vlm_vision_adapter import VLMVisionAdapter
 from core.adapters.input_adapter import InputAdapter
 from core.adapters.decision_adapter import DecisionAdapter
 from core.adapters.safety_adapter import SafetyAdapter
@@ -28,6 +30,7 @@ from core.adapters.persistence_adapter import PersistenceAdapter
 
 __all__ = [
     "VisionAdapter",
+    "VLMVisionAdapter",
     "InputAdapter",
     "DecisionAdapter",
     "SafetyAdapter",

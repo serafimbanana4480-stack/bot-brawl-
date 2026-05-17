@@ -106,6 +106,31 @@ def create_orchestrator(
         images_path=images_path,
     )
 
+    # Optional: wrap with VLM fallback for anti-UI-change resilience
+    vlm_cfg = config.get("vlm_fallback", {})
+    if vlm_cfg.get("enabled", False):
+        try:
+            from core.vlm_fallback import VLMFallback, VLMConfig
+            from core.adapters.vlm_vision_adapter import VLMVisionAdapter
+
+            vlm_config = VLMConfig(
+                enabled=True,
+                provider=vlm_cfg.get("provider", "openai"),
+                model=vlm_cfg.get("model", "gpt-4o-mini"),
+                api_key=vlm_cfg.get("api_key") or None,
+                api_base=vlm_cfg.get("api_base") or None,
+                timeout_seconds=vlm_cfg.get("timeout_seconds", 3.0),
+                max_calls_per_minute=vlm_cfg.get("max_calls_per_minute", 10),
+                max_calls_per_hour=vlm_cfg.get("max_calls_per_hour", 100),
+                cache_ttl_seconds=vlm_cfg.get("cache_ttl_seconds", 30.0),
+                fallback_threshold=vlm_cfg.get("fallback_threshold", 0.35),
+            )
+            vlm = VLMFallback(config=vlm_config)
+            vision_adapter = VLMVisionAdapter(primary=vision_adapter, vlm=vlm)
+            logger.info("[FACTORY] VLM fallback enabled (provider=%s)", vlm_config.provider)
+        except Exception as e:
+            logger.warning("[FACTORY] VLM fallback initialization failed: %s", e)
+
     # ------------------------------------------------------------------
     # 4. Decision (RLBridge)
     # ------------------------------------------------------------------
