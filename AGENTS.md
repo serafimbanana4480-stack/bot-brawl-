@@ -55,6 +55,37 @@
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+## 2.1 Ports & Adapters Architecture (Phase 2)
+
+A `wrapper.py` monolith (2437 lines) was refactored into a clean Ports & Adapters layer:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           wrapper.py (legacy + orchestrator)                  │
+│  ┌──────────────────────────────────────────────────────────────────────┐    │
+│  │                    BotOrchestrator (core/orchestrator.py)             │    │
+│  │  perceive → decide → act → learn (tick loop)                         │    │
+│  │  FSM: IDLE → LOBBY → IN_MATCH → PAUSED → SHUTDOWN                  │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+│         │           │          │           │          │                      │
+│    ┌────┴────┐ ┌────┴────┐ ┌──┴────┐ ┌────┴────┐ ┌──┴────┐ ┌────┴────┐   │
+│    │ Vision  │ │  Input  │ │Decision│ │ Safety  │ │Telemetry│ │Persist. │   │
+│    │  Port   │ │  Port   │ │  Port  │ │  Port   │ │  Port   │ │  Port   │   │
+│    └────┬────┘ └────┬────┘ └──┬────┘ └────┬────┘ └────┬────┘ └────┬────┘   │
+│    ┌────┴────┐ ┌────┴────┐ ┌──┴────┐ ┌────┴────┐ ┌────┴────┐ ┌────┴────┐   │
+│    │  Vision │ │  Input  │ │Decision│ │ Safety  │ │Telemetry│ │Persist. │   │
+│    │ Adapter │ │ Adapter │ │ Adapter│ │ Adapter │ │ Adapter │ │ Adapter │   │
+│    │(YOLO+   │ │(ADB/    │ │(RLBridge│ │(Safety  │ │(Observ. │ │(State   │   │
+│    │ Screenshot│ │Win32)  │ │+PPO)   │ │System) │ │Collector│ │Persist.)│   │
+│    └─────────┘ └─────────┘ └────────┘ └─────────┘ └─────────┘ └─────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Ports** (`core/ports/`): Abstract interfaces decoupling the orchestrator from concrete implementations.
+**Adapters** (`core/adapters/`): Concrete bridges to existing subsystems (YOLO, ADB, SafetySystem, RLBridge, ObservabilityCollector, StatePersistence).
+**Factory** (`core/factory.py`): Dependency-injection factory wiring ports to adapters.
+**Activation**: Set `"use_orchestrator": true` in `config.json`. Legacy mode remains default.
+
 ---
 
 ## 3. Core Modules
