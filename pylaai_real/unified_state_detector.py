@@ -20,6 +20,11 @@ from typing import Optional, Dict, Tuple, List
 from dataclasses import dataclass, field
 import logging
 
+try:
+    from .ocr_state_detector import OCRStateDetector
+except ImportError:
+    OCRStateDetector = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,6 +52,15 @@ class DynamicCoordinates:
         self.offset_x = offset_x
         self.offset_y = offset_y
         self._compute()
+
+    def update_resolution(self, window_w: int, window_h: int, offset_x: int = 0, offset_y: int = 0):
+        """Atualiza resolução e recalcula todas as coordenadas."""
+        self.w = window_w
+        self.h = window_h
+        self.offset_x = offset_x
+        self.offset_y = offset_y
+        self._compute()
+        logger.info(f"[COORDS] Atualizado: {window_w}x{window_h} offset=({offset_x},{offset_y})")
 
     def _compute(self):
         """Calcula todas as coordenadas baseado na resolução atual."""
@@ -225,7 +239,7 @@ class UnifiedStateDetector:
         'timer': 15,
     }
 
-    def __init__(self, images_path: Path, window_w: int = 1920, window_h: int = 1080):
+    def __init__(self, images_path: Path, window_w: int = 1920, window_h: int = 1080, ocr_detector=None):
         self.images_path = images_path
         self.coords = DynamicCoordinates(window_w, window_h)
         self._template_cache: Dict[str, Optional[np.ndarray]] = {}
@@ -239,6 +253,7 @@ class UnifiedStateDetector:
         self._vote_window = 5  # Usar ultimas 5 detecoes para decidir
         self._min_votes_to_change = 3  # Precisa de 3/5 votos para mudar de estado
         self._current_stable_state = "unknown"
+        self.ocr_detector = ocr_detector if ocr_detector is not None else (OCRStateDetector() if OCRStateDetector else None)
 
         logger.info(f"[UNIFIED_DETECTOR] Inicializado: {window_w}x{window_h}, "
                      f"images_path={images_path}")
@@ -770,6 +785,11 @@ class UnifiedStateDetector:
 
         return detected_state
 
+    def update_resolution(self, window_w: int, window_h: int):
+        """Atualiza resolucao do detector e recalcula coordenadas dinamicas."""
+        self.coords.update_resolution(window_w, window_h)
+        logger.info(f"[UNIFIED_DETECTOR] Resolucao atualizada: {window_w}x{window_h}")
+
     def detect(self, image: np.ndarray, screen_hint: Optional[str] = None) -> DetectedState:
         """
         Detecção unificada: combina pixel matching + template matching + hint + smoothing.
@@ -857,7 +877,19 @@ class UnifiedStateDetector:
             self._record_detection(template_result)
             return template_result
 
-        # Passo 4: Usar hint como ultimo recurso
+        # Passo 4: OCR fallback (visão textual) quando pixel/template falharam
+        ocr_result = self._ocr_to_state(image)
+        if ocr_result and ocr_result.state != "unknown":
+            smoothed = self._smooth_state(ocr_result.state, ocr_result.confidence)
+            if smoothed != ocr_result.state:
+                ocr_result.confidence *= 0.8
+            ocr_result.state = smoothed
+            logger.info(f"[UNIFIED_DETECTOR] OCR fallback: {ocr_result.state} "
+                        f"(conf={ocr_result.confidence:.2f})")
+            self._record_detection(ocr_result)
+            return ocr_result
+
+        # Passo 5: Usar hint como ultimo recurso
         if screen_hint:
             hinted = self._hint_to_state(screen_hint)
             if hinted and hinted.state != "unknown":
@@ -904,6 +936,31 @@ class UnifiedStateDetector:
                 details={"original_hint": hint}
             )
         return None
+
+    def _ocr_to_state(self, image: np.ndarray) -> Optional[DetectedState]:
+        """Usa OCR como fallback quando pixel/template não chegam com confiança suficiente."""
+        if not self.ocr_detector:
+            return None
+
+        try:
+            state_name, confidence = self.ocr_detector.detect_state_from_text(image)
+        except Exception as e:
+            logger.debug(f"[UNIFIED_DETECTOR] OCR fallback falhou: {e}")
+            return None
+
+        if not state_name or state_name == "unknown" or confidence < 0.3:
+            return None
+
+        mapped = self._hint_to_state(state_name)
+        if mapped is None:
+            mapped = DetectedState(state=state_name, confidence=confidence, method="ocr", details={})
+        else:
+            mapped.confidence = max(mapped.confidence, confidence)
+            mapped.method = "ocr"
+
+        if mapped.state in ("victory", "defeat"):
+            mapped.details["ocr_signal"] = state_name
+        return mapped
 
     def _record_detection(self, detection: DetectedState):
         """Guarda histórico de deteções para análise."""

@@ -26,6 +26,13 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+try:
+    from core.resolution_manager import ResolutionManager
+    HAS_RESOLUTION_MANAGER = True
+except ImportError:
+    HAS_RESOLUTION_MANAGER = False
+    ResolutionManager = None  # type: ignore[misc,assignment]
+
 # Phase 10: LobbyFSM for hierarchical lobby state management
 try:
     from core.lobby_fsm import HierarchicalFSM as LobbyFSM, TopLevelState, LobbyState
@@ -64,6 +71,7 @@ class StateManager:
         brawler_selector=None,
         observability=None,
         unified_state_detector=None,  # NOVO: detector unificado
+        ocr_detector=None,  # NOVO: OCR detector para fallback híbrido
         lobby=None,
         rl_engine=None,  # NOVO: motor de RL online
     ):
@@ -88,6 +96,7 @@ class StateManager:
 
         # NOVO: Detector unificado (prioridade sobre state_finder antigo)
         self.unified_detector = unified_state_detector
+        self.ocr_detector = ocr_detector
         if self.unified_detector:
             logger.info("[STATE] Usando UnifiedStateDetector para deteção")
         else:
@@ -113,6 +122,20 @@ class StateManager:
             logger.info("[STATE] AdaptiveScreenshotCache inicializado")
         except ImportError:
             logger.debug("[STATE] AdaptiveScreenshotCache não disponível")
+
+        # Phase 10: State Persistence for recovery
+        self._state_persistence = None
+        try:
+            import sys
+            from pathlib import Path
+            _sp_path = Path(__file__).parent.parent
+            if str(_sp_path) not in sys.path:
+                sys.path.insert(0, str(_sp_path))
+            from state_persistence import StatePersistence
+            self._state_persistence = StatePersistence()
+            logger.info("[STATE] StatePersistence inicializado")
+        except ImportError:
+            logger.debug("[STATE] StatePersistence não disponível")
 
         logger.debug(f"[STATE] StateManager inicializado com movement: {movement is not None}, "
                     f"reward_bridge: {reward_bridge is not None}, data_collector: {data_collector is not None}, "
@@ -162,6 +185,7 @@ class StateManager:
             'lobby': 60,     # 60 seconds max in lobby
             'matchmaking': 60,  # 60 seconds max in matchmaking
             'brawler_selection': 30,  # 30 seconds max in brawler selection
+            'in_game': 180,  # 180 seconds max in game (3 min) - forces end_match with "unknown"
             'end': 45,       # 45 seconds max in end screen
             'unknown': 60,   # 60 seconds max in unknown before forced reset
             'tutorial': 45,  # 45 seconds max in tutorial
@@ -214,13 +238,15 @@ class StateManager:
                     self._last_screenshot = image
                     self._last_screenshot_time = time.time()
                 return image
-            except Exception:
-                pass  # Fallback to standard cache
+            except Exception as e:
+                # FIX #10: screenshot cache failure should be logged as error
+                logger.error(f"[STATE] AdaptiveScreenshotCache failed: {e}")
 
         # Standard cache with fixed TTL
         now = time.time()
         if self._last_screenshot is not None and (now - self._last_screenshot_time) < max_age:
-            return self._last_screenshot
+            # FIX #14: Return copy to prevent caller mutation from corrupting cache
+            return self._last_screenshot.copy()
         image = self.screenshot.take()
         if image is not None:
             self._last_screenshot = image
@@ -239,19 +265,43 @@ class StateManager:
 
         # === VERIFICAR POPUPS (v2) ===
         # Popups atrapalham TODOS os handlers. Verificar e fechar primeiro.
+        # FIX #18: Track consecutive popup detections to prevent infinite sleep loops
+        if not hasattr(self, '_popup_consecutive_count'):
+            self._popup_consecutive_count = 0
+        if not hasattr(self, '_last_popup_type'):
+            self._last_popup_type = None
+
         if self.lobby and hasattr(self.lobby, '_popup_manager') and self.lobby._popup_manager:
             try:
                 import numpy as np
                 if isinstance(image, np.ndarray):
                     popup = self.lobby._popup_manager.detect_popup(image)
                     if popup and popup.confidence > 0.3:
-                        logger.info(f"[STATE] Popup detectado antes de handler: {popup.popup_type}, fechando...")
+                        # Check if this is the same popup as last cycle
+                        same_popup = (popup.popup_type == self._last_popup_type)
+                        if same_popup:
+                            self._popup_consecutive_count += 1
+                        else:
+                            self._popup_consecutive_count = 1
+                            self._last_popup_type = popup.popup_type
+
+                        logger.info(f"[STATE] Popup detectado antes de handler: {popup.popup_type}, "
+                                    f"fechando... (consecutivo #{self._popup_consecutive_count})")
+
                         self.lobby._popup_manager.handle_popup(
                             popup,
                             click_func=self.lobby._click if hasattr(self.lobby, '_click') else lambda x, y: None,
                             key_func=self.lobby._key_press if hasattr(self.lobby, '_key_press') else lambda k: None
                         )
-                        time.sleep(random.uniform(0.3, 0.6))
+
+                        # FIX #18: Only sleep if we haven't been stuck on same popup
+                        if self._popup_consecutive_count <= 2:
+                            time.sleep(random.uniform(0.3, 0.6))
+                        else:
+                            logger.warning(f"[STATE] Popup {popup.popup_type} nao fechou apos "
+                                        f"{self._popup_consecutive_count} tentativas - pulando sleep")
+                            self._popup_consecutive_count = 0  # Reset after warning
+
                         # Se era um popup, ficamos em "unknown" e deixamos o ciclo seguinte resolver
                         if self.current_state != 'in_game':
                             return 'unknown'
@@ -381,6 +431,21 @@ class StateManager:
                         category="state",
                         data={"state": self.current_state, "elapsed_time": elapsed, "timeout": timeout}
                     )
+                # CRITICAL FIX: Force end_match with "unknown" result for in_game timeout
+                # This ensures match statistics are not lost even if state detection fails
+                if self.current_state == 'in_game' and self.match_controller:
+                    logger.warning("[STATE] in_game timeout - forcing end_match with unknown result")
+                    try:
+                        self.match_controller.end_match("unknown")
+                    except Exception as e:
+                        logger.error(f"[STATE] Failed to end match on timeout: {e}")
+                    if self.observability:
+                        self.observability.record_match_result(
+                            brawler=self.current_brawler or "unknown",
+                            map_name=self._current_map or "unknown",
+                            result="unknown",
+                            duration=elapsed
+                        )
                 self.current_state = 'lobby'
                 self.state_start_time = time.time()
                 if self.match_controller:
@@ -442,7 +507,7 @@ class StateManager:
         if self.movement and hasattr(self.movement, 'window_w'):
             w, h = self.movement.window_w, self.movement.window_h
         else:
-            w, h = 1920, 1080
+            w, h = self._get_window_size()
         center_x, center_y = round(w / 2), round(h / 2)
         play_x, play_y = round(w * 0.9419), round(h * 0.8949)
 
@@ -685,10 +750,16 @@ class StateManager:
         if self.match_controller and hasattr(self.lobby, "queue") and hasattr(self.lobby.queue, "get_current"):
             current = self.lobby.queue.get_current()
             if current:
-                if self.match_controller.start_match("unknown", current.name):
+                game_mode = getattr(current, "game_mode", None) or "showdown"
+                if self.match_controller.start_match(game_mode, current.name):
                     self._diag(f"match_controller_start_match={current.name}")
                 # Update current_brawler for dashboard
                 self.current_brawler = current.name
+                if self.play and hasattr(self.play, "set_current_game_mode"):
+                    try:
+                        self.play.set_current_game_mode(game_mode)
+                    except Exception as e:
+                        logger.debug(f"[STATE] Falha ao definir game mode no play logic: {e}")
         # Update current map for dashboard
         if self.movement and hasattr(self.movement, "current_map"):
             self._current_map = self.movement.current_map
@@ -829,8 +900,8 @@ class StateManager:
             try:
                 state_name = self.screen_automation.get_current_state_name()
                 self._diag(f"matchmaking_screen_hint={state_name}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[STATE] Falha ao ler hint de matchmaking: {e}")
         self._diag("matchmaking_handler_done")
 
     def _handle_connection_lost(self):
@@ -984,8 +1055,8 @@ class StateManager:
                 try:
                     current_hint = self.screen_automation.get_current_state_name()
                     logger.info(f"[STATE] Screen automation current hint: {current_hint}")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[STATE] Falha ao ler hint de end screen: {e}")
             
             # Melhorar sincronização: Priorizar screen automation se for confiável
             # Se hint for 'idle', 'lobby', 'play', etc. (não end/loading), assumir que saiu
@@ -1249,17 +1320,27 @@ class StateManager:
 
     def _get_window_size(self) -> tuple:
         """Helper para obter dimensoes da janela de forma segura."""
+        # Priority 1: ResolutionManager (fonte centralizada e atualizada)
+        if HAS_RESOLUTION_MANAGER:
+            try:
+                rm = ResolutionManager()
+                rm.detect()
+                if rm.profile.is_reasonable():
+                    return rm.actual_resolution
+            except Exception as e:
+                logger.debug(f"[STATE] ResolutionManager fallback: {e}")
+        # Priority 2: MovementEngine
         if self.movement and hasattr(self.movement, 'window_w'):
             return (self.movement.window_w, self.movement.window_h)
-        # Fallback: tentar obter do screenshot
+        # Priority 3: Screenshot
         try:
             img = self.screenshot.take()
             if img is not None and hasattr(img, 'shape'):
                 h, w = img.shape[:2]
                 return (w, h)
-        except Exception:
-            pass
-        return (1920, 1080)  # Fallback padrao
+        except Exception as e:
+            logger.error(f"[STATE] _get_window_size failed: {e}")
+        return (1920, 1080)  # Fallback canonico
 
     def _handle_tutorial(self):
         """Tutorial detectado - tentar passar rapidamente clicando na area indicada."""
@@ -1393,8 +1474,8 @@ class StateManager:
                 try:
                     self.emulator_controller.keyevent(4)  # BACK
                     time.sleep(0.4)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[STATE] BACK key failed: {e}")
             # Verificar se ja chegou ao lobby
             if self.current_state == 'lobby':
                 break

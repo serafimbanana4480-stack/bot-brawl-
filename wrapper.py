@@ -15,6 +15,8 @@ import time
 import json
 import threading
 import os
+import sys
+import argparse
 import random
 import signal
 import base64
@@ -50,6 +52,13 @@ from .decision.brawler_selector import BrawlerSelector
 
 # Lazy imports para componentes de ML pipeline (evita circular imports)
 try:
+    from core.resolution_manager import ResolutionManager
+    HAS_RESOLUTION_MANAGER = True
+except ImportError:
+    HAS_RESOLUTION_MANAGER = False
+    ResolutionManager = None  # type: ignore[misc,assignment]
+
+try:
     from core.reward_bridge import RewardBridge
     HAS_REWARD_BRIDGE = True
 except ImportError:
@@ -78,6 +87,13 @@ except ImportError:
     HAS_ANTIBAN = False
     AntiBanSystem = None
     AntiBanConfig = None
+
+try:
+    from .pylaai_real.anti_ban_advanced import AdvancedAntiBanSystem
+    HAS_ADVANCED_ANTIBAN = True
+except ImportError:
+    HAS_ADVANCED_ANTIBAN = False
+    AdvancedAntiBanSystem = None
 
 # Phase 9: Error Recovery, State Recovery, AutoCalibrator, OCR, Debug Visualizer
 try:
@@ -145,13 +161,6 @@ except ImportError:
     WorldModel = None
 
 try:
-    from .core.occupancy_grid import OccupancyGrid
-    HAS_OCCUPANCY_GRID = True
-except ImportError:
-    HAS_OCCUPANCY_GRID = False
-    OccupancyGrid = None
-
-try:
     from .core.pressure_map import PressureMap
     HAS_PRESSURE_MAP = True
 except ImportError:
@@ -166,46 +175,11 @@ except ImportError:
     LobbyFSM = None
 
 try:
-    from .core.async_pipeline import AsyncPipeline
-    HAS_ASYNC_PIPELINE = True
-except ImportError:
-    HAS_ASYNC_PIPELINE = False
-    AsyncPipeline = None
-
-try:
-    from .core.adaptive_screenshot import AdaptiveScreenshotCache
-    HAS_ADAPTIVE_SCREENSHOT = True
-except ImportError:
-    HAS_ADAPTIVE_SCREENSHOT = False
-    AdaptiveScreenshotCache = None
-
-try:
     from .core.behavioral_profile import BehavioralProfile
     HAS_BEHAVIORAL_PROFILE = True
 except ImportError:
     HAS_BEHAVIORAL_PROFILE = False
     BehavioralProfile = None
-
-try:
-    from .core.input_optimizer import InputOptimizer
-    HAS_INPUT_OPTIMIZER = True
-except ImportError:
-    HAS_INPUT_OPTIMIZER = False
-    InputOptimizer = None
-
-try:
-    from .core.replay_analyzer import ReplayFailureAnalyzer as ReplayAnalyzer
-    HAS_REPLAY_ANALYZER = True
-except ImportError:
-    HAS_REPLAY_ANALYZER = False
-    ReplayAnalyzer = None
-
-try:
-    from .core.tactical_bridge import TacticalBridge
-    HAS_TACTICAL_BRIDGE = True
-except ImportError:
-    HAS_TACTICAL_BRIDGE = False
-    TacticalBridge = None
 
 try:
     from .core.cover_system import CoverSystem
@@ -249,6 +223,34 @@ try:
 except ImportError:
     HAS_META_AWARENESS = False
     MetaAwareness = None
+
+# Phase 10: Meta-Learning System
+try:
+    import sys as _sys
+    _path = Path(__file__).parent
+    if str(_path) not in _sys.path:
+        _sys.path.insert(0, str(_path))
+    from meta_learning import MetaLearningSystem
+    HAS_META_LEARNING = True
+except ImportError:
+    HAS_META_LEARNING = False
+    MetaLearningSystem = None
+
+# Phase 10: World Model Integration
+try:
+    from world_model_integration import WorldModelIntegrator
+    HAS_WORLD_MODEL_INTEGRATION = True
+except ImportError:
+    HAS_WORLD_MODEL_INTEGRATION = False
+    WorldModelIntegrator = None
+
+# Phase 10: State Persistence
+try:
+    from state_persistence import StatePersistence
+    HAS_STATE_PERSISTENCE = True
+except ImportError:
+    HAS_STATE_PERSISTENCE = False
+    StatePersistence = None
 
 logger = logging.getLogger(__name__)
 
@@ -323,11 +325,20 @@ class PylaAIEnhanced:
         self.auto_retrain_enabled = bool(self.central_config.get("auto_retrain_enabled", False))
         logger.info(f"[WRAPPER] Auto-retraining: {'enabled' if self.auto_retrain_enabled else 'disabled'}")
 
-        # Safety and humanization systems
+        # Safety and humanization — REQUIRED; failures are fatal
         logger.debug("[WRAPPER] Inicializando SafetySystem")
-        self.safety = SafetySystem(safety_config)
+        try:
+            self.safety = SafetySystem(safety_config)
+        except Exception as e:
+            logger.error(f"[WRAPPER] SafetySystem FATAL: {e}")
+            raise RuntimeError("SafetySystem failed to initialize - unsafe to continue") from e
+
         logger.debug("[WRAPPER] Inicializando HumanizationEngine")
-        self.humanization = HumanizationEngine(humanization_config)
+        try:
+            self.humanization = HumanizationEngine(humanization_config)
+        except Exception as e:
+            logger.error(f"[WRAPPER] HumanizationEngine FATAL: {e}")
+            raise RuntimeError("HumanizationEngine failed to initialize - anti-ban protection unavailable") from e
 
         # Auto-tuner system
         self.auto_tuner: Optional[AutoTuner] = None
@@ -370,7 +381,11 @@ class PylaAIEnhanced:
                 self.reward_bridge = RewardBridge(data_collector=self.data_collector)
                 logger.info("[WRAPPER] Reward bridge inicializado")
             except Exception as e:
-                logger.warning(f"[WRAPPER] Reward bridge indisponível: {e}")
+                # FIX #9: reward_bridge é crítico para Q-Learning - log error em vez de warning
+                if isinstance(e, ImportError):
+                    logger.warning(f"[WRAPPER] RewardBridge indisponível (não instalado): {e}")
+                else:
+                    logger.error(f"[WRAPPER] RewardBridge ERRO (Q-Learning vai usar heurísticas): {e}")
 
         # Observability
         self.observability: Optional[ObservabilityCollector] = None
@@ -391,12 +406,23 @@ class PylaAIEnhanced:
 
         # Anti-ban system
         self.anti_ban: Optional[AntiBanSystem] = None
-        if HAS_ANTIBAN:
+        if HAS_ADVANCED_ANTIBAN:
+            try:
+                self.anti_ban = AdvancedAntiBanSystem({"enabled": True})
+                logger.info("[WRAPPER] Advanced anti-ban system inicializado")
+            except Exception as e:
+                logger.error(f"[WRAPPER] AdvancedAntiBanSystem ERRO: {e}")
+                self.anti_ban = None
+        elif HAS_ANTIBAN:
             try:
                 self.anti_ban = AntiBanSystem()
                 logger.info("[WRAPPER] Anti-ban system inicializado")
             except Exception as e:
-                logger.warning(f"[WRAPPER] Anti-ban system indisponível: {e}")
+                # FIX #9: anti_ban é crítico para evitar ban - log error em vez de warning
+                if isinstance(e, ImportError):
+                    logger.warning(f"[WRAPPER] AntiBanSystem indisponível (não instalado): {e}")
+                else:
+                    logger.error(f"[WRAPPER] AntiBanSystem ERRO: {e}")
 
         # Phase 9: Error Recovery System
         self.error_recovery: Optional[Any] = None
@@ -413,6 +439,35 @@ class PylaAIEnhanced:
             except Exception as e:
                 logger.warning(f"[WRAPPER] Error Recovery System indisponível: {e}")
                 self.enable_error_recovery = False
+
+        # Phase 10: Meta-Learning System
+        self.meta_learning: Optional[Any] = None
+        if HAS_META_LEARNING:
+            try:
+                self.meta_learning = MetaLearningSystem()
+                logger.info("[WRAPPER] Meta-Learning System inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] Meta-Learning System indisponível: {e}")
+
+        # Phase 10: World Model Integrator
+        self.world_model_integrator: Optional[Any] = None
+        if HAS_WORLD_MODEL_INTEGRATION:
+            try:
+                self.world_model_integrator = WorldModelIntegrator(
+                    world_model=self.world_model if HAS_WORLD_MODEL else None
+                )
+                logger.info("[WRAPPER] World Model Integrator inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] World Model Integrator indisponível: {e}")
+
+        # Phase 10: State Persistence
+        self.state_persistence: Optional[Any] = None
+        if HAS_STATE_PERSISTENCE:
+            try:
+                self.state_persistence = StatePersistence()
+                logger.info("[WRAPPER] State Persistence inicializado")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] State Persistence indisponível: {e}")
 
         # Phase 9: State Recovery System (deferred init - needs emulator_controller)
         self.state_recovery: Optional[Any] = None
@@ -458,7 +513,11 @@ class PylaAIEnhanced:
                 self.central_coordinator = CentralCoordinator()
                 logger.info("[WRAPPER] Central Coordinator inicializado")
             except Exception as e:
-                logger.warning(f"[WRAPPER] Central Coordinator indisponível: {e}")
+                # FIX #9: central_coordinator é crítico para decisões - log error em vez de warning
+                if isinstance(e, ImportError):
+                    logger.warning(f"[WRAPPER] CentralCoordinator indisponível (não instalado): {e}")
+                else:
+                    logger.error(f"[WRAPPER] CentralCoordinator ERRO: {e}")
 
         self.world_model: Optional[Any] = None
         if HAS_WORLD_MODEL:
@@ -468,13 +527,10 @@ class PylaAIEnhanced:
             except Exception as e:
                 logger.warning(f"[WRAPPER] World Model indisponível: {e}")
 
-        self.occupancy_grid: Optional[Any] = None
-        if HAS_OCCUPANCY_GRID:
-            try:
-                self.occupancy_grid = OccupancyGrid()
-                logger.info("[WRAPPER] Occupancy Grid inicializado")
-            except Exception as e:
-                logger.warning(f"[WRAPPER] Occupancy Grid indisponível: {e}")
+        # NOTE: occupancy_grid created here is OPRHANED - PlayLogic creates its own
+        # _occupancy_grid internally. This wrapper instance is never used.
+        # Similarly lobby_fsm is created in StateManager internally.
+        # FIX #7: Removed OccupancyGrid from wrapper to avoid duplication.
 
         self.pressure_map: Optional[Any] = None
         if HAS_PRESSURE_MAP:
@@ -485,28 +541,8 @@ class PylaAIEnhanced:
                 logger.warning(f"[WRAPPER] Pressure Map indisponível: {e}")
 
         self.lobby_fsm: Optional[Any] = None
-        if HAS_LOBBY_FSM:
-            try:
-                self.lobby_fsm = LobbyFSM()
-                logger.info("[WRAPPER] Lobby FSM inicializado")
-            except Exception as e:
-                logger.warning(f"[WRAPPER] Lobby FSM indisponível: {e}")
-
-        self.async_pipeline: Optional[Any] = None
-        if HAS_ASYNC_PIPELINE:
-            try:
-                self.async_pipeline = AsyncPipeline()
-                logger.info("[WRAPPER] Async Pipeline inicializado")
-            except Exception as e:
-                logger.warning(f"[WRAPPER] Async Pipeline indisponível: {e}")
-
-        self.adaptive_screenshot_cache: Optional[Any] = None
-        if HAS_ADAPTIVE_SCREENSHOT:
-            try:
-                self.adaptive_screenshot_cache = AdaptiveScreenshotCache()
-                logger.info("[WRAPPER] Adaptive Screenshot Cache inicializado")
-            except Exception as e:
-                logger.warning(f"[WRAPPER] Adaptive Screenshot Cache indisponível: {e}")
+        # NOTE: LobbyFSM is created in StateManager internally.
+        # This wrapper instance is NEVER used - removing from wrapper init.
 
         self.behavioral_profile: Optional[Any] = None
         if HAS_BEHAVIORAL_PROFILE:
@@ -515,30 +551,6 @@ class PylaAIEnhanced:
                 logger.info("[WRAPPER] Behavioral Profile inicializado")
             except Exception as e:
                 logger.warning(f"[WRAPPER] Behavioral Profile indisponível: {e}")
-
-        self.input_optimizer: Optional[Any] = None
-        if HAS_INPUT_OPTIMIZER:
-            try:
-                self.input_optimizer = InputOptimizer()
-                logger.info("[WRAPPER] Input Optimizer inicializado")
-            except Exception as e:
-                logger.warning(f"[WRAPPER] Input Optimizer indisponível: {e}")
-
-        self.replay_analyzer: Optional[Any] = None
-        if HAS_REPLAY_ANALYZER:
-            try:
-                self.replay_analyzer = ReplayAnalyzer()
-                logger.info("[WRAPPER] Replay Analyzer inicializado")
-            except Exception as e:
-                logger.warning(f"[WRAPPER] Replay Analyzer indisponível: {e}")
-
-        self.tactical_bridge: Optional[Any] = None
-        if HAS_TACTICAL_BRIDGE:
-            try:
-                self.tactical_bridge = TacticalBridge()
-                logger.info("[WRAPPER] Tactical Bridge inicializado")
-            except Exception as e:
-                logger.warning(f"[WRAPPER] Tactical Bridge indisponível: {e}")
 
         self.cover_system: Optional[Any] = None
         if HAS_COVER_SYSTEM:
@@ -737,7 +749,11 @@ class PylaAIEnhanced:
                 config.window_title = emu_cfg["window_title"]
 
             logger.debug(f"[WRAPPER] Criando EmulatorController com config: type={config.name}, port={config.adb_port}")
-            self.emulator_controller = EmulatorController(config, safety_system=self.safety)
+            self.emulator_controller = EmulatorController(
+                config,
+                safety_system=self.safety,
+                humanization_system=self.humanization,
+            )
             if self.emulator_controller.connect():
                 logger.info(f"[WRAPPER] EmulatorController conectado via ADB (Port: {config.adb_port}, ID: {self.emulator_controller.adb.device_id})")
                 return True
@@ -749,9 +765,12 @@ class PylaAIEnhanced:
             logger.warning(f"[WRAPPER] EmulatorController não disponível (missing win32gui?): {e}")
             return False
         except Exception as e:
-            logger.warning(f"[WRAPPER] EmulatorController init falhou: {e}")
             self.emulator_controller = None
-            return False
+            logger.error(f"[WRAPPER] EmulatorController init falhou (fatal): {e}", exc_info=True)
+            raise RuntimeError(
+                "EmulatorController failed to initialize; refusing to continue without a working control path. "
+                "Fix ADB/emulator configuration or install missing platform dependencies."
+            ) from e
 
     def _load_trained_models(self) -> bool:
         """Load Brawl Stars trained models, preferring real trained models (BrawlStarsBot integration)."""
@@ -761,6 +780,7 @@ class PylaAIEnhanced:
 
         # Priority: BrawlStarsBot trained model > PylaAI trained > generic models
         trained_models = {
+            "brawlstars_yolov8_8class": self.models_path / "brawlstars_yolov8_8class.pt",
             "brawlstars_yolov8": self.models_path / "brawlstars_yolov8.pt",
             "main_info": self.models_path / "main_info.pt",
             "brawler_id": self.models_path / "brawler_id.pt",
@@ -772,20 +792,32 @@ class PylaAIEnhanced:
 
         model_loaded = False
 
-        # Try BrawlStarsBot trained model first (Player, Bush, Enemy, Cubebox)
-        brawlstars_path = trained_models.get("brawlstars_yolov8")
+        # Try BrawlStarsBot trained model first (prefer 8-class artifact, then legacy 4-class)
+        brawlstars_path = trained_models.get("brawlstars_yolov8_8class") or trained_models.get("brawlstars_yolov8")
         if brawlstars_path and brawlstars_path.exists():
             for attempt in range(1, 4):
                 try:
                     real_model = YOLO(str(brawlstars_path))
-                    # Verify model has expected classes
-                    expected_classes = {"Player", "Bush", "Enemy", "Cubebox"}
+                    # FIX #1.2: Move model to GPU if CUDA is available
+                    try:
+                        import torch
+                        if torch.cuda.is_available():
+                            real_model.to('cuda')
+                            logger.info(f"[MODEL] Model moved to GPU: {torch.cuda.get_device_name(0)}")
+                    except ImportError:
+                        logger.debug("[MODEL] PyTorch/CUDA not available - using CPU")
+                    # Verify model has expected classes using unified class registry
+                    from core.class_registry import get_schema, get_canonical
+                    
+                    schema = "extended" if "8class" in brawlstars_path.name else "core"
+                    expected_classes_raw = get_schema(schema).values()
+                    expected_classes = {get_canonical(name) for name in expected_classes_raw}
                     actual_classes = set(real_model.names.values()) if hasattr(real_model, "names") else set()
                     if expected_classes.issubset(actual_classes):
                         self.detect_main = Detect(
                             model=real_model,
-                            classes={0: "Player", 1: "Bush", 2: "Enemy", 3: "Cubebox"},
-                            conf=0.25
+                            classes=get_schema(schema),
+                            conf=0.40  # FIX: was 0.25 (75% FP) - now 0.40 (60% FP)
                         )
                         self.detect_enemies = self.detect_main
                         logger.info(f"[MODEL] Loaded BrawlStarsBot TRAINED model: {brawlstars_path.name} (classes: {actual_classes}, attempt={attempt})")
@@ -797,8 +829,8 @@ class PylaAIEnhanced:
                         # Still use it but log warning
                         self.detect_main = Detect(
                             model=real_model,
-                            classes={0: "Player", 1: "Bush", 2: "Enemy", 3: "Cubebox"},
-                            conf=0.25
+                            classes=get_schema(schema),
+                            conf=0.40  # FIX: was 0.25 (75% FP) - now 0.40 (60% FP)
                         )
                         self.detect_enemies = self.detect_main
                         model_loaded = True
@@ -1044,39 +1076,38 @@ class PylaAIEnhanced:
             # Get window dimensions for dynamic coordinates
             # IMPORTANT: The resolution must match what the screenshot actually captures,
             # not the ADB internal resolution. Win32 captures the window at its display size.
-            window_w, window_h = 1920, 1080
+            # Initialize ResolutionManager for centralized resolution handling
+            window_title = "auto"
+            if self.emulator_controller and hasattr(self.emulator_controller, 'config'):
+                window_title = self.emulator_controller.config.window_title
+            if HAS_RESOLUTION_MANAGER:
+                self.resolution_manager = ResolutionManager(
+                    window_title=window_title,
+                    on_resolution_change=self._on_resolution_change,
+                )
+                self.resolution_manager.detect()
+                window_w, window_h = self.resolution_manager.actual_resolution
+                logger.info(f"[WRAPPER] ResolutionManager ativo: {window_w}x{window_h} (source={self.resolution_manager.profile.source})")
+            else:
+                self.resolution_manager = None
+                window_w, window_h = 1920, 1080
 
-            # Priority 1: Get resolution from actual screenshot capture
-            if self.screenshot and self.screenshot.window_handle:
-                try:
-                    import win32gui
-                    rect = win32gui.GetWindowRect(self.screenshot.window_handle)
-                    window_w = rect[2] - rect[0]
-                    window_h = rect[3] - rect[1]
-                    logger.info(f"[WRAPPER] Window size (Win32): {window_w}x{window_h}")
-                except Exception:
-                    pass
-
-            # Priority 2: If no screenshot taker, use ADB resolution
-            if not self.screenshot and self.emulator_controller and hasattr(self.emulator_controller, 'config'):
-                try:
-                    window_w, window_h = self.emulator_controller.config.resolution
-                    logger.info(f"[WRAPPER] Window size (ADB): {window_w}x{window_h}")
-                except Exception:
-                    pass
-
-            # Verify by taking a test screenshot and checking its actual size
-            if self.screenshot:
-                try:
-                    test_img = self.screenshot.take()
-                    if test_img is not None:
-                        actual_h, actual_w = test_img.shape[:2]
-                        if actual_w != window_w or actual_h != window_h:
-                            logger.warning(f"[WRAPPER] Screenshot size ({actual_w}x{actual_h}) differs from window size ({window_w}x{window_h}). Using screenshot size.")
+            # Fallback de validacao: se ResolutionManager falhou, tentar detetar via screenshot
+            if self.resolution_manager is None or not self.resolution_manager.profile.is_reasonable():
+                if self.screenshot:
+                    try:
+                        test_img = self.screenshot.take()
+                        if test_img is not None:
+                            actual_h, actual_w = test_img.shape[:2]
                             window_w, window_h = actual_w, actual_h
-                except Exception:
-                    pass
-
+                            logger.warning(f"[WRAPPER] ResolutionManager invalido — usando screenshot size: {window_w}x{window_h}")
+                    except Exception as e:
+                        logger.debug(f"[WRAPPER] Screenshot size fallback failed: {e}")
+            else:
+                logger.info(f"[WRAPPER] Final resolution for coordinates: {window_w}x{window_h}")
+            # [RESOLUTION MANAGER] Codigo legacy de deteccao substituido por ResolutionManager
+            # (mantido comentado para referencia durante migracao)
+            # [RESOLUTION MANAGER] Codigo legacy de deteccao substituido por ResolutionManager
             logger.info(f"[WRAPPER] Final resolution for coordinates: {window_w}x{window_h}")
 
             # Phase 9: Initialize State Recovery System (needs emulator_controller)
@@ -1111,7 +1142,8 @@ class PylaAIEnhanced:
 
             # Initialize UnifiedStateDetector (replaces dual ScreenAutomation + StateFinder)
             self.unified_detector = UnifiedStateDetector(
-                self.images_path, window_w=window_w, window_h=window_h
+                self.images_path, window_w=window_w, window_h=window_h,
+                ocr_detector=self.ocr_detector
             )
             logger.info(f"[WRAPPER] UnifiedStateDetector inicializado ({window_w}x{window_h})")
 
@@ -1166,9 +1198,15 @@ class PylaAIEnhanced:
                 detect_enemies=self.detect_enemies,
                 movement=movement,
                 humanization=self.humanization,
-                emulator_controller=self.emulator_controller,  # Pass controller
+                emulator_controller=self.emulator_controller,
                 rl_engine=self.online_learner.q_learning if self.online_learner else None,
                 central_coordinator=self.central_coordinator,
+                world_model=self.world_model,
+                pressure_map=self.pressure_map,
+                enemy_intention=self.enemy_intention,
+                meta_awareness=self.meta_awareness,
+                cover_system=self.cover_system,
+                world_model_integrator=self.world_model_integrator,
             )
 
             # --- Step 5: Create state manager ---
@@ -1196,8 +1234,8 @@ class PylaAIEnhanced:
                             data = self.controller.get_screenshot()
                             if data:
                                 return np.array(Image.open(io.BytesIO(data)).convert('RGB'))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"[WRAPPER] ADB screenshot fallback failed: {e}")
                         return None
                 
                 # If we don't have a win32_taker yet, create one
@@ -1239,6 +1277,7 @@ class PylaAIEnhanced:
                 brawler_selector=self.brawler_selector,
                 observability=self.observability,
                 unified_state_detector=self.unified_detector,  # NEW: unified detector
+                ocr_detector=self.ocr_detector,  # NEW: OCR fallback
                 rl_engine=self.online_learner,  # NEW: RL online
             )
 
@@ -1498,6 +1537,14 @@ class PylaAIEnhanced:
                 logger.info("[CLEANUP] Match history saved")
             except Exception as e:
                 logger.warning(f"[CLEANUP] Falha ao salvar match_history: {e}")
+
+        # Save behavioral profile
+        if self.behavioral_profile is not None:
+            try:
+                self.behavioral_profile.save()
+                logger.info("[CLEANUP] Behavioral profile saved")
+            except Exception as e:
+                logger.warning(f"[CLEANUP] Falha ao salvar behavioral_profile: {e}")
 
         # --- Phase 3: Stop UI / monitoring components ---
         if self.diagnostic_overlay:
@@ -1786,11 +1833,7 @@ class PylaAIEnhanced:
                 return True
             elif action_name == "force_click_play":
                 if self.lobby and hasattr(self.lobby, '_click'):
-                    # Usar coordenadas dinamicas se disponiveis
-                    w, h = 1920, 1080
-                    if self.play_logic and hasattr(self.play_logic.movement, 'window_w'):
-                        w = self.play_logic.movement.window_w
-                        h = self.play_logic.movement.window_h
+                    w, h = self._get_safe_resolution()
                     play_x, play_y = round(w * 0.9419), round(h * 0.8949)
                     self.lobby._click(play_x, play_y)
                     logger.info("[WRAPPER] Acao manual: clicar Play")
@@ -1798,10 +1841,7 @@ class PylaAIEnhanced:
             elif action_name == "force_attack":
                 if self.play_logic and hasattr(self.play_logic, '_execute_attack'):
                     # Atacar na direcao do centro do ecra
-                    w, h = 1920, 1080
-                    if self.play_logic.movement:
-                        w = getattr(self.play_logic.movement, 'window_w', 1920)
-                        h = getattr(self.play_logic.movement, 'window_h', 1080)
+                    w, h = self._get_safe_resolution()
                     target_x, target_y = round(w * 0.6), round(h * 0.5)
                     self.play_logic._execute_attack((target_x, target_y))
                     logger.info("[WRAPPER] Acao manual: ataque forçado")
@@ -1809,10 +1849,7 @@ class PylaAIEnhanced:
             elif action_name == "force_super":
                 if self.emulator_controller:
                     # Super = tap no centro do ecra (simplificado)
-                    w, h = 1920, 1080
-                    if self.play_logic and self.play_logic.movement:
-                        w = getattr(self.play_logic.movement, 'window_w', 1920)
-                        h = getattr(self.play_logic.movement, 'window_h', 1080)
+                    w, h = self._get_safe_resolution()
                     self.emulator_controller.tap_scaled(round(w/2), round(h/2))
                     logger.info("[WRAPPER] Acao manual: super usado")
                 return True
@@ -1895,6 +1932,42 @@ class PylaAIEnhanced:
     def _on_retrain_failed(self, error: str):
         """Callback when retraining fails."""
         logger.error(f"[WRAPPER] Retraining failed: {error}")
+
+    def _get_safe_resolution(self) -> tuple:
+        """Retorna a resolucao actual de forma segura, com fallback para canónico."""
+        if hasattr(self, 'resolution_manager') and self.resolution_manager is not None:
+            try:
+                return self.resolution_manager.actual_resolution
+            except Exception:
+                pass
+        if self.play_logic and self.play_logic.movement:
+            return (self.play_logic.movement.window_w, self.play_logic.movement.window_h)
+        return (1920, 1080)
+
+    def _on_resolution_change(self, profile):
+        """Callback quando a resolucao do emulador muda."""
+        logger.warning(
+            f"[WRAPPER] Resolucao mudou: {profile.previous_actual} -> {profile.actual_resolution}. "
+            f"Recalibrando coordenadas..."
+        )
+        if hasattr(self, 'movement') and self.movement:
+            try:
+                self.movement.update_window_size(profile.actual_width, profile.actual_height)
+                logger.info(f"[WRAPPER] MovementEngine atualizado para {profile.actual_resolution}")
+            except Exception as e:
+                logger.error(f"[WRAPPER] Falha ao atualizar MovementEngine: {e}")
+        if hasattr(self, 'unified_detector') and self.unified_detector:
+            try:
+                self.unified_detector.update_resolution(profile.actual_width, profile.actual_height)
+                logger.info(f"[WRAPPER] UnifiedStateDetector atualizado para {profile.actual_resolution}")
+            except Exception as e:
+                logger.error(f"[WRAPPER] Falha ao atualizar UnifiedStateDetector: {e}")
+        if hasattr(self, 'auto_calibrator') and self.auto_calibrator:
+            try:
+                self.auto_calibrator.invalidate_cache()
+                logger.info("[WRAPPER] AutoCalibrator cache invalidado")
+            except Exception as e:
+                logger.error(f"[WRAPPER] Falha ao invalidar cache: {e}")
         # Resume bot operations even if retraining failed
         if self.state_manager:
             self.state_manager.resume()
@@ -1969,8 +2042,8 @@ class PylaAIEnhanced:
                 if self.debug_integration:
                     try:
                         self.debug_integration.update()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[WRAPPER] Debug visualizer update failed: {e}")
 
                 safety_check = self.safety.record_action()
 
@@ -2008,8 +2081,8 @@ class PylaAIEnhanced:
                                 self._update_all_coordinates(new_w, new_h)
                         self._last_window_w = new_w
                         self._last_window_h = new_h
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[WRAPPER] Window resize detection failed: {e}")
 
                 # Phase 10: World Model update (persistent spatial memory)
                 if self.world_model and self.state_manager and self.state_manager.current_state == 'in_game':
@@ -2021,8 +2094,9 @@ class PylaAIEnhanced:
                                 player = snap.get('player')
                                 if player and enemies:
                                     self.world_model.update_enemies(enemies, player)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        # FIX #15: WorldModel failures should be logged
+                        logger.warning(f"[WRAPPER] WorldModel.update failed: {e}")
 
                 # Phase 10: Pressure Map update (enemy influence zones)
                 if self.pressure_map and self.state_manager and self.state_manager.current_state == 'in_game':
@@ -2034,16 +2108,18 @@ class PylaAIEnhanced:
                                     cx = (enemy[0] + enemy[2]) // 2
                                     cy = (enemy[1] + enemy[3]) // 2
                                     self.pressure_map.add_pressure(cx, cy, intensity=1.0)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        # FIX #15: PressureMap failures should be logged
+                        logger.warning(f"[WRAPPER] PressureMap.update failed: {e}")
 
                 # Phase 10: Behavioral Profile update
                 if self.behavioral_profile and self.state_manager:
                     try:
                         current_state = self.state_manager.current_state
                         self.behavioral_profile.record_state(current_state)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        # FIX #15: BehavioralProfile failures should be logged
+                        logger.warning(f"[WRAPPER] BehavioralProfile.record_state failed: {e}")
 
                 # Observability cycle time
                 if self.observability:
@@ -2064,8 +2140,8 @@ class PylaAIEnhanced:
                             self.state_recovery.update_state(
                                 self.state_manager.current_state, confidence
                             )
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"[WRAPPER] State recovery update failed: {e}")
 
                 # Dashboard live data update (REAL data, zero mocks)
                 if self.dashboard:
@@ -2093,8 +2169,8 @@ class PylaAIEnhanced:
                                         action=getattr(self.play_logic, '_last_action', 'idle') if self.play_logic else 'idle',
                                         enemies=getattr(self.play_logic, '_last_enemies', 0) if self.play_logic else 0,
                                     )
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"[WRAPPER] Replay frame capture failed: {e}")
                     except Exception as e:
                         logger.debug(f"[WRAPPER] Dashboard update error: {e}")
 
@@ -2105,13 +2181,23 @@ class PylaAIEnhanced:
                         time.sleep(random.uniform(5, 15))
                     if self.anti_ban.check_throttle():
                         logger.warning("[WRAPPER] Anti-ban: throttling ativado, reduzindo eficiência")
-                        # Pode ser estendido para ajustar dificuldade do bot
+                        if hasattr(self.anti_ban, "get_adaptive_pacing"):
+                            throttle_delay = self.anti_ban.get_adaptive_pacing(0.5, "menu_nav")
+                            logger.debug(f"[WRAPPER] Anti-ban pacing adaptativo: {throttle_delay:.2f}s")
+                            time.sleep(throttle_delay)
+                            continue
 
                 # Delay adaptativo: mais rapido em jogo, mais lento fora
                 if self.state_manager and self.state_manager.current_state == 'in_game':
-                    time.sleep(0.3)  # In-game: verificar mais frequentemente
+                    in_game_delay = 0.3
+                    if self.anti_ban and hasattr(self.anti_ban, "get_adaptive_pacing"):
+                        in_game_delay = self.anti_ban.get_adaptive_pacing(0.3, "attack")
+                    time.sleep(in_game_delay)  # In-game: verificar mais frequentemente
                 else:
-                    time.sleep(random.uniform(0.8, 1.2))  # Fora de jogo: intervalo medio
+                    idle_delay = random.uniform(0.8, 1.2)
+                    if self.anti_ban and hasattr(self.anti_ban, "get_adaptive_pacing"):
+                        idle_delay = self.anti_ban.get_adaptive_pacing(idle_delay, "menu_nav")
+                    time.sleep(idle_delay)  # Fora de jogo: intervalo medio
 
             except Exception as e:
                 logger.error(f"Erro no monitor: {e}")
@@ -2124,8 +2210,8 @@ class PylaAIEnhanced:
                         recovered = self.error_recovery.handle_error(context, self)
                         if recovered:
                             logger.info("[WRAPPER] Monitor loop error recovered")
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[WRAPPER] Error recovery handler failed: {e}")
                 time.sleep(random.uniform(0.5, 1.0))
 
     def _take_break(self, duration: float):
@@ -2279,3 +2365,35 @@ class PylaAIEnhanced:
                 "running": self.debug_visualizer.is_running if self.debug_visualizer else False,
             },
         }
+
+
+def main() -> None:
+    """Console entrypoint for ``brawl-bot`` ([project.scripts] in pyproject.toml)."""
+    parser = argparse.ArgumentParser(description="Soberana Omega Brawl Stars Bot")
+    parser.add_argument(
+        "--setup-only",
+        action="store_true",
+        help="Run setup (emulator, models) and exit without starting automation threads",
+    )
+    args = parser.parse_args()
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
+    bot = PylaAIEnhanced()
+    if not bot.setup():
+        logger.error("Setup failed; see logs above.")
+        sys.exit(1)
+    if args.setup_only:
+        logger.info("Setup complete (--setup-only).")
+        return
+    if not bot.start():
+        logger.error("Start failed; see logs above.")
+        sys.exit(1)
+    try:
+        while bot.running:
+            time.sleep(1.0)
+    except KeyboardInterrupt:
+        logger.info("Interrupt received, stopping...")
+    finally:
+        bot.stop()

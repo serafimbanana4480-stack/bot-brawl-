@@ -101,6 +101,38 @@ except ImportError:
     HAS_FEATURE_EXTRACTOR = False
     GameFeatureExtractor = None
 
+# Phase 10: Occupancy Grid (A* pathfinding)
+try:
+    from core.occupancy_grid import OccupancyGrid
+    HAS_OCCUPANCY_GRID = True
+except ImportError:
+    HAS_OCCUPANCY_GRID = False
+    OccupancyGrid = None
+
+# Phase 10: CoverSystem (cover evaluation with raycasting)
+try:
+    from core.cover_system import CoverSystem
+    HAS_COVER_SYSTEM = True
+except ImportError:
+    HAS_COVER_SYSTEM = False
+    CoverSystem = None
+
+# Phase 10: WorldModelIntegrator (bridge detections -> WorldModel)
+try:
+    from world_model_integration import WorldModelIntegrator
+    HAS_WORLD_MODEL_INTEGRATION = True
+except ImportError:
+    HAS_WORLD_MODEL_INTEGRATION = False
+    WorldModelIntegrator = None
+
+# Phase 10: MetaAwareness (matchup-aware combat)
+try:
+    from decision.meta_awareness import MetaAwareness
+    HAS_META_AWARENESS = True
+except ImportError:
+    HAS_META_AWARENESS = False
+    MetaAwareness = None
+
 class PlayLogic:
     def __init__(
         self,
@@ -112,14 +144,26 @@ class PlayLogic:
         enemy_tracker=None,
         rl_engine=None,
         central_coordinator=None,
+        world_model=None,
+        pressure_map=None,
+        enemy_intention=None,
+        meta_awareness=None,
+        cover_system=None,
+        world_model_integrator=None,
     ):
         self.detect_main = detect_main
         self.detect_enemies = detect_enemies
         self.movement = movement
         self.humanization = humanization
         self.emulator_controller = emulator_controller
-        self.rl_engine = rl_engine  # NOVO: Q-Learning engine para decisoes inteligentes
+        self.rl_engine = rl_engine
         self.central_coordinator = central_coordinator
+        self.world_model = world_model
+        self.pressure_map = pressure_map
+        self.enemy_intention = enemy_intention
+        self.meta_awareness = meta_awareness
+        self.cover_system = cover_system
+        self.world_model_integrator = world_model_integrator
 
         # State tracking para predição (deque with maxlen prevents memory leak)
         self.enemy_history: Dict[int, deque] = defaultdict(lambda: deque(maxlen=5))
@@ -133,6 +177,7 @@ class PlayLogic:
         self._last_rl_state: Optional[Tuple] = None
         self._last_rl_action: Optional[str] = None
         self.last_rl_transition: Optional[Tuple] = None  # (state, action, reward, next_state)
+        self.current_game_mode: str = "showdown"
 
         # NOVO: Sistema de combate avancado (Phase 5)
         self._combat_strategy: Optional[AdvancedCombatStrategy] = None
@@ -164,13 +209,19 @@ class PlayLogic:
             except Exception as e:
                 logger.warning(f"[PLAY] IntentSystem indisponível: {e}")
 
-        self._enemy_intention: Optional[Any] = None
-        if HAS_ENEMY_INTENTION:
-            try:
-                self._enemy_intention = EnemyIntentionPredictor()
-                logger.info("[PLAY] EnemyIntentionPredictor inicializado")
-            except Exception as e:
-                logger.warning(f"[PLAY] EnemyIntentionPredictor indisponível: {e}")
+        # Phase 10: MetaAwareness (FIX #8: removed local fallback - wrapper must provide)
+        # If wrapper doesn't pass it, meta_awareness stays None (no duplicate creation)
+        if self.meta_awareness is not None:
+            logger.info("[PLAY] MetaAwareness recebido do wrapper")
+        elif HAS_META_AWARENESS:
+            logger.warning("[PLAY] MetaAwareness não fornecido pelo wrapper - combat não terá matchup awareness")
+
+        # Phase 10: CoverSystem (FIX #8: removed local fallback - wrapper must provide)
+        # If wrapper doesn't pass it, cover_system stays None (no duplicate creation)
+        if self.cover_system is not None:
+            logger.info("[PLAY] CoverSystem recebido do wrapper")
+        elif HAS_COVER_SYSTEM:
+            logger.warning("[PLAY] CoverSystem não fornecido pelo wrapper - combat não terá cover evaluation")
 
         # Phase 10: Game Feature Extractor (walls, HP, bushes)
         self._feature_extractor: Optional[Any] = None
@@ -181,9 +232,23 @@ class PlayLogic:
             except Exception as e:
                 logger.warning(f"[PLAY] GameFeatureExtractor indisponível: {e}")
 
+        # Phase 10: Occupancy Grid (A* pathfinding)
+        self._occupancy_grid: Optional[Any] = None
+        if HAS_OCCUPANCY_GRID:
+            try:
+                screen_w = 1920
+                screen_h = 1080
+                if movement and hasattr(movement, 'window_w'):
+                    screen_w = movement.window_w
+                    screen_h = movement.window_h
+                self._occupancy_grid = OccupancyGrid(map_width=screen_w, map_height=screen_h)
+                logger.info("[PLAY] OccupancyGrid inicializado")
+            except Exception as e:
+                logger.warning(f"[PLAY] OccupancyGrid indisponível: {e}")
+
         # Feature flags para integração Phase 10 (permite rollback rápido)
         self._enable_utility_ai = True
-        self._utility_ai_threshold = 0.45  # Score mínimo para override da lógica hard-coded
+        self._utility_ai_threshold = 0.70  # FIX #11: Score mínimo para override (era 0.45 - muito baixo)
         self._enable_intent_system = True
         self._enable_enemy_intention = True
 
@@ -275,6 +340,17 @@ class PlayLogic:
         except Exception as e:
             logger.warning(f"[PLAY] Falha ao inicializar combat avancado: {e}")
 
+    def set_current_game_mode(self, game_mode: str):
+        """Define o modo de jogo atual e sincroniza sistemas dependentes de modo."""
+        normalized = (game_mode or "showdown").lower().replace(" ", "_")
+        self.current_game_mode = normalized
+        if self._intent_system and hasattr(self._intent_system, "set_game_mode"):
+            try:
+                self._intent_system.set_game_mode(normalized)
+            except Exception as e:
+                logger.debug(f"[PLAY] IntentSystem mode update failed: {e}")
+        logger.info(f"[PLAY] Game mode definido: {self.current_game_mode}")
+
     def get_brawler_strategy(self) -> Dict:
         """Retorna a estratégia atual do brawler"""
         return self.brawler_strategy or self.brawler_strategies.get("default", {})
@@ -306,6 +382,18 @@ class PlayLogic:
                 logger.warning(f"[PLAY] Falha ao obter state summary: {e}")
 
         return snapshot
+
+    def _get_safe_resolution(self) -> tuple:
+        """Retorna resolucao segura, consultando ResolutionManager se disponivel."""
+        try:
+            from core.resolution_manager import ResolutionManager
+            rm = ResolutionManager()
+            rm.detect()
+            if rm.profile.is_reasonable():
+                return rm.actual_resolution
+        except Exception:
+            pass
+        return (1920, 1080)
 
     def _snapshot_window_state(self) -> Dict[str, object]:
         """Lê o estado da janela do emulador, se existir, para diagnosticar input perdido."""
@@ -567,6 +655,104 @@ class PlayLogic:
         # Fallback para _predict_position simples
         return self._predict_position(enemy_bbox, time_ahead=0.25)
 
+    def _get_pressure(self, player_bbox) -> float:
+        """Get pressure value at player position from PressureMap."""
+        if not self.pressure_map:
+            return 0.0
+        try:
+            px, py = _center(player_bbox)
+            return self.pressure_map.get_pressure_at(px, py)
+        except Exception as e:
+            logger.debug(f"[PLAY] PressureMap error: {e}")
+            return 0.0
+
+    def _get_danger(self, player_bbox) -> float:
+        """Get danger value at player position from PressureMap."""
+        if not self.pressure_map:
+            return 0.0
+        try:
+            px, py = _center(player_bbox)
+            pressure = self.pressure_map.get_pressure_at(px, py)
+            return min(1.0, pressure * 1.5)
+        except Exception as e:
+            logger.debug(f"[PLAY] PressureMap error: {e}")
+            return 0.0
+
+    def _get_matchup_advantage(self) -> float:
+        """Get matchup advantage from MetaAwareness for current enemy."""
+        if not self.meta_awareness or not self.current_brawler or not self.enemies:
+            return 0.0
+        try:
+            enemy = self.enemies[0]
+            enemy_name = self._get_enemy_brawler_name(enemy)
+            if enemy_name:
+                matchup = self.meta_awareness.evaluate_matchup(self.current_brawler, enemy_name)
+                return matchup.advantage
+        except Exception as e:
+            logger.debug(f"[META] Matchup evaluation error: {e}")
+        return 0.0
+
+    def _get_enemy_brawler_name(self, enemy_bbox) -> Optional[str]:
+        """Extract brawler name from enemy bbox if available."""
+        return None
+
+    def _should_kite_from_matchup(self) -> bool:
+        """Should we kite current enemy based on matchup."""
+        if not self.meta_awareness or not self.current_brawler or not self.enemies:
+            return False
+        try:
+            enemy = self.enemies[0]
+            enemy_name = self._get_enemy_brawler_name(enemy)
+            if enemy_name:
+                adj = self.meta_awareness.get_combat_adjustment(self.current_brawler, enemy_name)
+                return adj.should_kite
+        except Exception as e:
+            logger.debug(f"[META] Combat adjustment error: {e}")
+        return False
+
+    def _should_rush_from_matchup(self) -> bool:
+        """Should we rush current enemy based on matchup."""
+        if not self.meta_awareness or not self.current_brawler or not self.enemies:
+            return False
+        try:
+            enemy = self.enemies[0]
+            enemy_name = self._get_enemy_brawler_name(enemy)
+            if enemy_name:
+                adj = self.meta_awareness.get_combat_adjustment(self.current_brawler, enemy_name)
+                return adj.should_rush
+        except Exception as e:
+            logger.debug(f"[META] Combat adjustment error: {e}")
+        return False
+
+    def _get_aggression_modifier(self) -> float:
+        """Get aggression modifier from MetaAwareness based on matchup."""
+        if not self.meta_awareness or not self.current_brawler or not self.enemies:
+            return 0.0
+        try:
+            enemy = self.enemies[0]
+            enemy_name = self._get_enemy_brawler_name(enemy)
+            if enemy_name:
+                adj = self.meta_awareness.get_combat_adjustment(self.current_brawler, enemy_name)
+                return adj.aggression_modifier
+        except Exception as e:
+            logger.debug(f"[META] Combat adjustment error: {e}")
+        return 0.0
+
+    def _find_best_cover_position(self, player, enemies) -> Optional[Tuple[int, int]]:
+        """Find best cover position using CoverSystem."""
+        if not self.cover_system or not player:
+            return None
+        try:
+            player_pos = _center(player)
+            enemy_dicts = [{"x": _center(e)[0], "y": _center(e)[1], "track_id": i}
+                           for i, e in enumerate(enemies)]
+            best_cover = self.cover_system.find_best_cover(player_pos, enemy_dicts)
+            if best_cover:
+                return (int(best_cover.x), int(best_cover.y))
+        except Exception as e:
+            logger.debug(f"[COVER] Find best cover error: {e}")
+        return None
+
     def _compute_frame_reward(self, player, enemies, attack_taken: bool) -> float:
         """
         Calcula reward heuristico para um frame de combate.
@@ -599,7 +785,7 @@ class PlayLogic:
 
         return reward
 
-    def _get_rl_state(self, player, enemies, can_attack=True, can_super=False):
+    def _get_rl_state(self, player, enemies, can_attack=True, can_super=False, real_hp=None):
         """
         Extrai estado discreto para Q-Learning a partir dos dados de combate.
         Retorna tupla (hp_bucket, enemies_bucket, distance_bucket, ammo_bucket, super_bucket).
@@ -613,6 +799,7 @@ class PlayLogic:
                 enemies=enemies,
                 can_attack=can_attack,
                 can_super=can_super,
+                player_hp_pct=real_hp,
             )
             return state
         except Exception as e:
@@ -646,12 +833,31 @@ class PlayLogic:
                 cy = (closest[1] + closest[3]) // 2
                 px = (player[0] + player[2]) // 2 if len(player) >= 4 else player[0]
                 py = (player[1] + player[3]) // 2 if len(player) >= 4 else player[1]
-                dx = px - cx
-                dy = py - cy
-                flee_x = px + dx
-                flee_y = py + dy
-                self.movement.move_to_position(flee_x, flee_y)
-                logger.info("[RL] Acao escolhida: RETREAT")
+
+                # A* pathfinding se OccupancyGrid disponível
+                if self._occupancy_grid:
+                    goal_x = px + (px - cx)
+                    goal_y = py + (py - cy)
+                    path = self._occupancy_grid.a_star((px, py), (goal_x, goal_y))
+                    if path and len(path) > 1:
+                        # Ir para primeiro waypoint do caminho
+                        flee_x, flee_y = path[1]
+                        self.movement.move_to_position(int(flee_x), int(flee_y))
+                        logger.info(f"[RL] Acao escolhida: RETREAT (A* path with {len(path)} waypoints)")
+                    else:
+                        # Fallback: método simples
+                        flee_x = px + (px - cx)
+                        flee_y = py + (py - cy)
+                        self.movement.move_to_position(int(flee_x), int(flee_y))
+                        logger.info("[RL] Acao escolhida: RETREAT (fallback)")
+                else:
+                    # Sem A*: método simples
+                    dx = px - cx
+                    dy = py - cy
+                    flee_x = px + dx
+                    flee_y = py + dy
+                    self.movement.move_to_position(int(flee_x), int(flee_y))
+                    logger.info("[RL] Acao escolhida: RETREAT")
                 return "backward"
             return move_key
         elif rl_action == "use_super" and enemies and self.emulator_controller:
@@ -659,7 +865,7 @@ class PlayLogic:
             if self.movement and hasattr(self.movement, 'window_w'):
                 w, h = self.movement.window_w, self.movement.window_h
             else:
-                w, h = 1920, 1080
+                w, h = self._get_safe_resolution()
             super_btn_x = round(w * 0.75)
             super_btn_y = round(h * 0.69)
             self.emulator_controller.ensure_window_active()
@@ -724,6 +930,37 @@ class PlayLogic:
             bushes = self._find_bushes(detections)
             power_cubes = self._find_power_cubes(detections)
             logger.info(f"[COMBAT] Inimigos detectados: {len(enemies)}")
+
+            # Phase 10: WorldModelIntegrator - update spatial memory
+            if self.world_model_integrator and enemies:
+                try:
+                    self.world_model_integrator.update_from_detections(
+                        enemies=enemies,
+                        player=player,
+                        power_cubes=power_cubes,
+                        bushes=bushes,
+                        walls=extracted_walls if extracted_walls else None,
+                        player_hp=real_hp if real_hp else 1.0,
+                    )
+                    logger.debug(f"[WORLD_INTEG] WorldModel atualizado: {len(enemies)} enemies, {len(power_cubes)} cubes")
+                except Exception as e:
+                    logger.debug(f"[WORLD_INTEG] Update error: {e}")
+
+            # Phase 10: EnemyIntention - update enemy intentions
+            if self.enemy_intention and enemies and player:
+                try:
+                    player_center = _center(player)
+                    enemy_dicts = [{"track_id": i, "x": _center(e)[0], "y": _center(e)[1],
+                                    "width": e[2]-e[0], "height": e[3]-e[1]}
+                                   for i, e in enumerate(enemies)]
+                    self.enemy_intention.update(enemy_dicts, player_center)
+                    rushers = self.enemy_intention.get_rushers()
+                    flankers = self.enemy_intention.get_flankers()
+                    baiters = self.enemy_intention.get_baiters()
+                    if rushers or flankers or baiters:
+                        logger.info(f"[ENEMY_INTENT] rushers={len(rushers)}, flankers={len(flankers)}, baiters={len(baiters)}")
+                except Exception as e:
+                    logger.debug(f"[ENEMY_INTENT] Update error: {e}")
             logger.debug(f"[COMBAT] Bushes detectados: {len(bushes)}")
             if log_manager:
                 log_manager.log(
@@ -811,8 +1048,9 @@ class PlayLogic:
             # === DECISAO Q-LEARNING (NOVO) ===
             rl_state = self._get_rl_state(
                 player, enemies,
-                can_attack=True,  # Simplificacao: assumir que pode atacar
+                can_attack=True,
                 can_super=self.super_ready,
+                real_hp=real_hp,
             )
             rl_action = None
             rl_confidence = 0.0
@@ -861,24 +1099,31 @@ class PlayLogic:
                     cover_pos = None
                     if bushes:
                         cover_pos = _center(min(bushes, key=lambda b: self._distance(player, b)))
+                    best_cover_pos = self._find_best_cover_position(player, enemies)
                     utility_context = {
                         "health": hp,
                         "ammo": 3,
                         "max_ammo": 3,
-                        "super_charged": self.super_ready,
+                        "super_charged": self.super_ree,
+                        "game_mode": self.current_game_modady,
                         "enemies_nearby": len(enemies),
                         "nearest_enemy_dist": nearest_dist,
                         "nearest_enemy_health": enemy_hp,
                         "player_position": _center(player) if player else (0, 0),
-                        "pressure": 0.0,
-                        "danger": 0.0,
+                        "pressure": self._get_pressure(player) if player else 0.0,
+                        "danger": self._get_danger(player) if player else 0.0,
                         "has_cover_nearby": has_cover,
                         "cover_position": cover_pos,
+                        "best_cover_position": best_cover_pos,
                         "nearest_cube_dist": nearest_cube_dist,
                         "cube_position": _center(nearest_cube) if nearest_cube else None,
                         "match_phase": self._game_phase,
                         "brawler_role": self.current_brawler if self.current_brawler else "damage",
                         "intent": current_intent_value,
+                        "matchup_advantage": self._get_matchup_advantage(),
+                        "should_kite": self._should_kite_from_matchup(),
+                        "should_rush": self._should_rush_from_matchup(),
+                        "aggression_modifier": self._get_aggression_modifier(),
                     }
                     utility_decision = self._utility_ai.evaluate(utility_context)
                     logger.info(
@@ -1301,7 +1546,7 @@ class PlayLogic:
         if self.movement and hasattr(self.movement, 'window_w'):
             w, h = self.movement.window_w, self.movement.window_h
         else:
-            w, h = 1920, 1080
+            w, h = self._get_safe_resolution()
 
         attack_btn_x = round(w * 0.90)
         attack_btn_y = round(h * 0.82)
@@ -1335,7 +1580,7 @@ class PlayLogic:
         if self.movement and hasattr(self.movement, 'window_w'):
             w, h = self.movement.window_w, self.movement.window_h
         else:
-            w, h = 1920, 1080
+            w, h = self._get_safe_resolution()
 
         super_btn_x = round(w * 0.75)
         super_btn_y = round(h * 0.69)
@@ -1385,43 +1630,44 @@ class PlayLogic:
         return math.sqrt((c1[0]-c2[0])**2 + (c1[1]-c2[1])**2)
 
     def _find_player(self, detections):
-        logger.debug(f"[PLAYER] Procurando Player em detecções: {list(detections.keys())}")
-        # BrawlStarsBot model classes: Player, Bush, Enemy, Cubebox
-        for k in ['Player', 'player', 'self', 'teammate']:
-            if k in detections and detections[k]:
-                logger.info(f"[PLAYER] Player encontrado como '{k}': bbox={detections[k][0]}")
-                logger.debug(f"[PLAYER] Coordenadas do Player: x={detections[k][0][0]}, y={detections[k][0][1]}, w={detections[k][0][2]-detections[k][0][0]}, h={detections[k][0][3]-detections[k][0][1]}")
-                return detections[k][0]
-        # Fallback: COCO generic model detects 'person' as player proxy
-        logger.warning("[PLAYER] Player não encontrado em nenhuma categoria")
-        logger.debug(f"[PLAYER] Tentando fallback 'person': {'person' in detections and detections['person']}")
-        if 'person' in detections and detections['person']:
-            logger.info(f"[PLAYER] Player encontrado como 'person' (fallback): bbox={detections['person'][0]}")
-            return detections['person'][0]
-        logger.error("[PLAYER] Player não encontrado em nenhuma categoria, incluindo fallback")
+        """
+        Find player in detections using unified class registry.
+
+        Uses core.class_registry for consistent name normalization.
+        Eliminates hardcoded variants (Player, player, self, teammate, person).
+        """
+        from core.class_registry import get_by_type
+
+        logger.debug(f"[PLAYER] Procurando player em detecções: {list(detections.keys())}")
+
+        # Use unified registry for consistent lookup
+        player = get_by_type(detections, "player", first_only=True)
+
+        if player is not None:
+            logger.info(f"[PLAYER] Player encontrado: bbox={player}")
+            logger.debug(f"[PLAYER] Coordenadas: x={player[0]}, y={player[1]}, w={player[2]-player[0]}, h={player[3]-player[1]}")
+            return player
+
+        logger.error("[PLAYER] Player não encontrado em detecções")
         return None
 
     def _find_enemies(self, detections):
+        """
+        Find enemies in detections using unified class registry.
+
+        Uses core.class_registry for consistent name normalization.
+        Eliminates hardcoded variants (Enemy, enemy, brawler, person).
+        """
+        from core.class_registry import get_by_type
+
         logger.debug(f"[ENEMIES] Procurando inimigos em detecções: {list(detections.keys())}")
-        enemies = []
-        # BrawlStarsBot model: class 2 = Enemy
-        for k in ['Enemy', 'enemy', 'brawler']:
-            if k in detections:
-                count = len(detections[k])
-                logger.info(f"[ENEMIES] {count} inimigo(s) encontrados como '{k}'")
-                for i, enemy in enumerate(detections[k]):
-                    logger.debug(f"[ENEMIES]   Inimigo {i}: bbox={enemy}")
-                enemies.extend(detections[k])
-        # Fallback: COCO generic model may detect brawlers as 'person'
-        if 'person' in detections:
-            player = self._find_player(detections)
-            person_count = len(detections['person'])
-            logger.debug(f"[ENEMIES] {person_count} 'person' detectados, verificando se são inimigos")
-            for i, bbox in enumerate(detections['person']):
-                if player is None or bbox != player:
-                    logger.debug(f"[ENEMIES]   'person' {i} é inimigo: bbox={bbox}")
-                    enemies.append(bbox)
-        logger.debug(f"[ENEMIES] Total de inimigos encontrados: {len(enemies)}")
+
+        # Use unified registry for consistent lookup
+        enemies = get_by_type(detections, "enemy", first_only=False)
+
+        logger.info(f"[ENEMIES] {len(enemies)} inimigo(s) encontrados")
+        for i, enemy in enumerate(enemies):
+            logger.debug(f"[ENEMIES]   Inimigo {i}: bbox={enemy}")
 
         # Atualizar tracker com novas detecções (mas sempre retornar deteções brutas)
         if self.enemy_tracker:
@@ -1436,16 +1682,15 @@ class PlayLogic:
         return enemies
 
     def _find_bushes(self, detections):
-        """Find bushes to hide in (BrawlStarsBot class: Bush)."""
-        for k in ['Bush', 'bush']:
-            if k in detections: return detections[k]
-        return []
+        """Find bushes to hide in using unified class registry."""
+        from core.class_registry import get_by_type
+        return get_by_type(detections, "bush", first_only=False)
 
     def _find_power_cubes(self, detections):
-        """Find power cubes (BrawlStarsBot class: Cubebox)."""
-        for k in ['Cubebox', 'cubebox', 'powerup', 'power_cube']:
-            if k in detections: return detections[k]
-        return []
+        """Find power cubes using unified class registry."""
+        from core.class_registry import get_by_type
+        # cubebox is the canonical name for power cubes
+        return get_by_type(detections, "cubebox", first_only=False)
 
     def _execute_movement(self, key):
         if not key:

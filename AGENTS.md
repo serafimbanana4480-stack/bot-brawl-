@@ -104,6 +104,62 @@
 | `vision/game_state.py` | `GameState` | Unified game state dataclass (objects + HUD + player status) |
 | `vision/multimodal_pipeline.py` | `MultimodalPipeline` | 3-layer vision pipeline: YOLO → OCR → heuristics → GameState |
 
+### 3.6 Resolution Management (`core/resolution_manager.py`)
+
+Sistema centralizado de gestão de resolução — **resposta crítica à Análise de Arquitetura v2.0**.
+
+**Problema identificado:** Coordenadas hardcoded 1920×1080 espalhadas por `wrapper.py`, `play.py`, `state_manager.py`, etc., quebravam em qualquer resolução não-padrão.
+
+**Solução:**
+
+| Componente | Classe | Responsabilidade |
+|---|---|---|
+| `core/resolution_manager.py` | `ResolutionManager` | Deteta resolução real (Win32/ADB), mantém canónico 1920×1080, fornece escala bidirecional |
+| `core/resolution_manager.py` | `ResolutionProfile` | Perfil com metadados: actual_resolution, canonical_resolution, scale_x/y, validated, source |
+
+**Fluxo de Coordenadas:**
+
+```
+Emulador (actual: 2560x1440)
+    │
+    ▼  ScreenshotTaker.normaliza_para_1920x1080()
+Pipeline de Visão (canónico: 1920x1080)
+    │
+    ▼  ResolutionManager.from_canonical(x, y)
+ADB Input (actual: 2560x1440)
+```
+
+**API Principal:**
+
+```python
+rm = ResolutionManager(window_title="LDPlayer")
+rm.detect()  # Win32 → ADB → config → fallback
+
+# Vision -> Input
+actual_x, actual_y = rm.from_canonical(x_1080, y_1080)
+
+# Input -> Vision (raramente necessário)
+canonical_x, canonical_y = rm.to_canonical(x_actual, y_actual)
+
+# ROI normalizada (0-1) -> pixels reais
+px = rm.scale_relative_to_actual(rx, ry)
+```
+
+**Validação:**
+- `MIN_WIDTH=640`, `MAX_WIDTH=5120`
+- `MIN_ASPECT_RATIO=1.3`, `MAX_ASPECT_RATIO=2.4`
+- Resoluções inválidas logam warning e usam fallback canónico
+
+**Mudanças Runtime:**
+- `check_for_changes()` detecta resize da janela
+- Callback `on_resolution_change` atualiza `MovementEngine`, `UnifiedStateDetector`, invalida cache do `AutoCalibrator`
+
+**Integração com AutoCalibrator:**
+- Cache do AutoCalibrator armazena coordenadas **canónicas** (resolução-independente)
+- `detect_element()` converte automáticamente: cache canónico → screenshot actual
+- Templates são escalados do canónico para o actual antes do template matching
+- Fallback coords são fornecidas em canónico e convertidas no retorno
+
 ---
 
 ## 4. Decision Systems

@@ -22,6 +22,12 @@ from typing import Dict, Tuple, Optional, List
 from dataclasses import dataclass, field
 import json
 
+try:
+    from core.resolution_manager import ResolutionManager, ResolutionProfile
+    HAS_RES_MANAGER = True
+except ImportError:
+    HAS_RES_MANAGER = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -53,23 +59,37 @@ class AutoCalibrator:
         templates_dir: Path = None,
         cache_file: Path = None,
         enable_cache: bool = True,
-        cache_ttl_hours: float = 24.0
+        cache_ttl_hours: float = 24.0,
+        resolution_manager: Optional["ResolutionManager"] = None,
+        window_title: str = "auto",
     ):
         self.templates_dir = templates_dir or Path("images/templates")
         self.cache_file = cache_file or Path("data/coords_cache.json")
         self.enable_cache = enable_cache
         self.cache_ttl = cache_ttl_hours * 3600  # converter para segundos
-        
+
         # Cache de coordenadas
         self.coords_cache: Dict[str, CalibratedCoords] = {}
-        
+
+        # ResolutionManager (auto-cria se não fornecido)
+        if resolution_manager is not None:
+            self.res_manager = resolution_manager
+        elif HAS_RES_MANAGER:
+            self.res_manager = ResolutionManager(window_title=window_title)
+        else:
+            self.res_manager = None
+
         # Carregar cache do disco
         if self.enable_cache and self.cache_file.exists():
             self._load_cache()
-        
+
         # Carregar templates
         self.templates = self._load_templates()
-        
+
+        # Resolução canónica de referência para templates
+        self._canonical_w = 1920
+        self._canonical_h = 1080
+
         logger.info(f"[AUTOCAL] Inicializado: {len(self.templates)} templates, {len(self.coords_cache)} coords cacheadas")
     
     def _load_templates(self) -> Dict[str, np.ndarray]:
@@ -167,19 +187,24 @@ class AutoCalibrator:
             CalibratedCoords com posição e confiança, ou None se falhar
         """
         
-        # Verificar cache primeiro
+        # Verificar cache primeiro (cache guarda coordenadas CANONICAS)
         if element_name in self.coords_cache:
             cached = self.coords_cache[element_name]
-            # Cache ainda válido?
             if time.time() - cached.timestamp < self.cache_ttl:
+                actual = self._coords_from_canonical(cached, screenshot)
                 logger.debug(f"[AUTOCAL] Cache hit para {element_name}")
-                return cached
+                return actual
         
-        # Tentar detecção
+        # Verificar se resolução mudou e invalidar cache se necessario
+        if self.res_manager is not None:
+            if self.res_manager.check_for_changes():
+                logger.info("[AUTOCAL] Mudanca de resolucao detetada — cache invalidado")
+                self.invalidate_cache()
+
+        # Tentar deteccao
         result = None
-        
+
         if method == "auto":
-            # Tentar múltiplos métodos em ordem de precisão
             for try_method in ["template", "color", "ocr"]:
                 result = self._detect_with_method(screenshot, element_name, try_method)
                 if result and result.confidence > 0.6:
@@ -189,20 +214,22 @@ class AutoCalibrator:
         
         # Se falhou, usar fallback
         if result is None and fallback_coords:
-            logger.warning(f"[AUTOCAL] Detecção falhou para {element_name}, usando fallback")
-            result = CalibratedCoords(
+            logger.warning(f"[AUTOCAL] Deteccao falhou para {element_name}, usando fallback")
+            fallback_canonical = CalibratedCoords(
                 element_name=element_name,
                 x=fallback_coords[0],
                 y=fallback_coords[1],
                 confidence=0.5,
                 method="fallback"
             )
-        
-        # Salvar no cache se sucesso
+            result = self._coords_from_canonical(fallback_canonical, screenshot)
+
+        # Guardar no cache em coordenadas CANONICAS (resolucao-independente)
         if result and result.confidence > 0.5:
-            self.coords_cache[element_name] = result
+            canonical = self._coords_to_canonical(result, screenshot)
+            self.coords_cache[element_name] = canonical
             self._save_cache()
-        
+
         return result
     
     def _detect_with_method(
@@ -228,35 +255,45 @@ class AutoCalibrator:
         screenshot: np.ndarray,
         element_name: str
     ) -> Optional[CalibratedCoords]:
-        """Detecta usando template matching multi-escala."""
-        
+        """Detecta usando template matching multi-escala, adaptado à resolução actual."""
+
         if element_name not in self.templates:
             logger.debug(f"[AUTOCAL] Template não encontrado: {element_name}")
             return None
-        
+
         template = self.templates[element_name]
+        # Escalar template para a resolução actual se necessário
+        template = self._scale_template_for_resolution(template)
         h, w = template.shape[:2]
-        
-        # Tentar múltiplas escalas (0.8x a 1.2x)
+
+        # Determinar range de escalas com base na resolução
+        # Em resoluções mais baixas, procurar numa gama mais ampla
+        actual_w, _ = self._get_actual_resolution()
+        if actual_w < 1280:
+            scale_range = np.linspace(0.6, 1.4, 13)
+        elif actual_w > 2560:
+            scale_range = np.linspace(0.85, 1.15, 7)
+        else:
+            scale_range = np.linspace(0.8, 1.2, 9)
+
         best_match = None
         best_confidence = 0.0
-        
-        for scale in np.linspace(0.8, 1.2, 9):
-            # Redimensionar template
-            scaled_w = int(w * scale)
-            scaled_h = int(h * scale)
-            scaled_template = cv2.resize(template, (scaled_w, scaled_h))
-            
-            # Template matching
+
+        for scale in scale_range:
+            scaled_w = max(1, int(w * scale))
+            scaled_h = max(1, int(h * scale))
+            try:
+                scaled_template = cv2.resize(template, (scaled_w, scaled_h), interpolation=cv2.INTER_AREA)
+            except Exception:
+                continue
+
             result = cv2.matchTemplate(screenshot, scaled_template, cv2.TM_CCOEFF_NORMED)
             min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-            
+
             if max_val > best_confidence:
                 best_confidence = max_val
-                # Calcular centro do match
                 center_x = max_loc[0] + scaled_w // 2
                 center_y = max_loc[1] + scaled_h // 2
-                
                 best_match = CalibratedCoords(
                     element_name=element_name,
                     x=center_x,
@@ -265,11 +302,14 @@ class AutoCalibrator:
                     method="template",
                     bbox=(max_loc[0], max_loc[1], max_loc[0] + scaled_w, max_loc[1] + scaled_h)
                 )
-        
+
         if best_match and best_match.confidence > 0.7:
+            if not self._validate_coords(best_match, screenshot.shape):
+                logger.warning(f"[AUTOCAL] Template match fora dos limites para {element_name}")
+                return None
             logger.debug(f"[AUTOCAL] Template match para {element_name}: {best_match.confidence:.3f}")
             return best_match
-        
+
         return None
     
     def _detect_color(
@@ -393,6 +433,109 @@ class AutoCalibrator:
         
         return None
     
+    # ------------------------------------------------------------------
+    # Resolution-aware helpers
+    # ------------------------------------------------------------------
+    def _get_actual_resolution(self) -> Tuple[int, int]:
+        """Retorna resolução actual do emulador, usando ResolutionManager se disponível."""
+        if self.res_manager is not None:
+            try:
+                self.res_manager.detect()
+                return self.res_manager.actual_resolution
+            except Exception as e:
+                logger.debug(f"[AUTOCAL] ResolutionManager falhou: {e}")
+        # Fallback: inferir da screenshot mais recente ou canónico
+        return (self._canonical_w, self._canonical_h)
+
+    def _validate_coords(
+        self,
+        coords: CalibratedCoords,
+        screenshot_shape: Tuple[int, ...],
+    ) -> bool:
+        """Valida se coordenadas detetadas estão dentro dos limites da imagem/resolução."""
+        if coords is None:
+            return False
+        h, w = screenshot_shape[:2]
+        # Margem de 2px de tolerância
+        if coords.x < -2 or coords.y < -2:
+            return False
+        if coords.x > w + 2 or coords.y > h + 2:
+            return False
+        # Se tem bbox, validar também
+        if coords.bbox:
+            x1, y1, x2, y2 = coords.bbox
+            if x1 < -2 or y1 < -2 or x2 > w + 2 or y2 > h + 2:
+                return False
+        return True
+
+    def _scale_template_for_resolution(
+        self, template: np.ndarray
+    ) -> np.ndarray:
+        """
+        Escalar template de 1920x1080 (canónico) para a resolução actual.
+        Templates são guardados em resolução canónica para consistência.
+        """
+        actual_w, actual_h = self._get_actual_resolution()
+        if actual_w == self._canonical_w and actual_h == self._canonical_h:
+            return template
+        scale_x = actual_w / self._canonical_w
+        scale_y = actual_h / self._canonical_h
+        new_w = max(1, int(template.shape[1] * scale_x))
+        new_h = max(1, int(template.shape[0] * scale_y))
+        try:
+            return cv2.resize(template, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        except Exception as e:
+            logger.warning(f"[AUTOCAL] Falha ao escalar template: {e}")
+            return template
+
+    def _coords_to_canonical(
+        self, coords: CalibratedCoords, screenshot: np.ndarray
+    ) -> CalibratedCoords:
+        """Converte coordenadas detetadas (em resolução actual) para canónicas (1920x1080)."""
+        h, w = screenshot.shape[:2]
+        if w == self._canonical_w and h == self._canonical_h:
+            return coords
+        cx = round(coords.x * self._canonical_w / max(w, 1))
+        cy = round(coords.y * self._canonical_h / max(h, 1))
+        bbox = coords.bbox
+        if bbox:
+            x1 = round(bbox[0] * self._canonical_w / max(w, 1))
+            y1 = round(bbox[1] * self._canonical_h / max(h, 1))
+            x2 = round(bbox[2] * self._canonical_w / max(w, 1))
+            y2 = round(bbox[3] * self._canonical_h / max(h, 1))
+            bbox = (x1, y1, x2, y2)
+        return CalibratedCoords(
+            element_name=coords.element_name,
+            x=cx, y=cy,
+            confidence=coords.confidence,
+            method=coords.method,
+            bbox=bbox,
+        )
+
+    def _coords_from_canonical(
+        self, coords: CalibratedCoords, screenshot: np.ndarray
+    ) -> CalibratedCoords:
+        """Converte coordenadas canónicas (1920x1080) para a resolução da screenshot."""
+        h, w = screenshot.shape[:2]
+        if w == self._canonical_w and h == self._canonical_h:
+            return coords
+        ax = round(coords.x * w / self._canonical_w)
+        ay = round(coords.y * h / self._canonical_h)
+        bbox = coords.bbox
+        if bbox:
+            x1 = round(bbox[0] * w / self._canonical_w)
+            y1 = round(bbox[1] * h / self._canonical_h)
+            x2 = round(bbox[2] * w / self._canonical_w)
+            y2 = round(bbox[3] * h / self._canonical_h)
+            bbox = (x1, y1, x2, y2)
+        return CalibratedCoords(
+            element_name=coords.element_name,
+            x=ax, y=ay,
+            confidence=coords.confidence,
+            method=coords.method,
+            bbox=bbox,
+        )
+
     def invalidate_cache(self, element_name: Optional[str] = None):
         """Invalida cache para um elemento ou todos."""
         if element_name:

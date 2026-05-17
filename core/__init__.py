@@ -1,22 +1,43 @@
 """
 Core module for Brawl Stars bot.
-Provides orchestration and main execution loop.
+Provides direct imports for all core subsystems.
 """
 
-# Lazy imports to avoid heavy dependencies on submodule imports
-def __getattr__(name):
-    if name in ("BrawlStarsOrchestrator", "BotConfig", "create_bot_orchestrator"):
-        from .orchestrator import BrawlStarsOrchestrator, BotConfig, create_bot_orchestrator
-        if name == "BrawlStarsOrchestrator":
-            return BrawlStarsOrchestrator
-        if name == "BotConfig":
-            return BotConfig
-        if name == "create_bot_orchestrator":
-            return create_bot_orchestrator
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+# Expose all core submodules directly for clean imports
+from .error_recovery import ErrorRecoverySystem, ErrorRecoveryIntegration, CircuitBreaker
+from .world_model import WorldModel
+from .pressure_map import PressureMap
+from .central_coordinator import CentralCoordinator
+from .cover_system import CoverSystem
+from .behavioral_profile import BehavioralProfile
+from .adaptive_screenshot import AdaptiveScreenshotCache as AdaptiveScreenshot
+from .async_pipeline import AsyncPipeline
+from .input_optimizer import InputOptimizer
+from .replay_analyzer import ReplayFailureAnalyzer as ReplayAnalyzer
+from .tactical_bridge import TacticalBridge
+from .lobby_fsm import HierarchicalFSM
+from .observability import ObservabilityCollector, HealthChecker
+from .anti_ban import AntiBanSystem, AntiBanConfig
+from .reward_bridge import RewardBridge
+from .occupancy_grid import OccupancyGrid
+from .resolution_manager import ResolutionManager, ResolutionProfile
 
 __all__ = [
-    "BrawlStarsOrchestrator",
-    "BotConfig",
-    "create_bot_orchestrator",
+    "ErrorRecoverySystem", "ErrorRecoveryIntegration", "CircuitBreaker",
+    "WorldModel",
+    "PressureMap",
+    "CentralCoordinator",
+    "CoverSystem",
+    "BehavioralProfile",
+    "AdaptiveScreenshot",
+    "AsyncPipeline",
+    "InputOptimizer",
+    "ReplayAnalyzer",
+    "TacticalBridge",
+    "HierarchicalFSM",
+    "ObservabilityCollector", "HealthChecker",
+    "AntiBanSystem", "AntiBanConfig",
+    "RewardBridge",
+    "OccupancyGrid",
+    "ResolutionManager", "ResolutionProfile",
 ]
