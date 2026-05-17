@@ -21,7 +21,14 @@ try:
     log_manager = get_log_manager()
 except (ImportError, Exception):
     log_manager = None
-    logger.warning("[SAFETY] Log manager não disponível")
+    logger.warning('[SAFETY] Log manager não disponível')
+
+try:
+    from core.rate_limiter import IntelligentRateLimiter
+    HAS_RATE_LIMITER = True
+except ImportError:
+    HAS_RATE_LIMITER = False
+    IntelligentRateLimiter = None
 
 @dataclass
 class SafetyConfig:
@@ -376,12 +383,22 @@ class APMLimiter:
 class SafetySystem:
     """Sistema principal de segurança"""
 
-    def __init__(self, config: Optional[SafetyConfig] = None):
+    def __init__(self, config: Optional[SafetyConfig] = None, account_id: str = 'default_account'):
         self.config = config or SafetyConfig()
         self.stats = SessionStats()
         self.pattern_detector = PatternDetector(self.config.suspicious_pattern_threshold)
         self.apm_limiter = APMLimiter(self.config.min_apm, self.config.max_apm)
         self.movement_analyzer = MovementAnalyzer(self.config.biometric_window_size)
+
+        # Phase v2.1: Rate Limiter integration
+        self.rate_limiter = None
+        if HAS_RATE_LIMITER:
+            try:
+                self.rate_limiter = IntelligentRateLimiter()
+                self.rate_limiter.register_account(account_id)
+                logger.info(f'[SAFETY] Rate limiter ativado para conta: {account_id}')
+            except Exception as e:
+                logger.warning(f'[SAFETY] Rate limiter indisponível: {e}')
 
         self.is_running = False
         self.last_break_time = time.time()

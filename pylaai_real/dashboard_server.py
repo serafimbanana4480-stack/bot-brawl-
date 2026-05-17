@@ -223,8 +223,8 @@ class DashboardDataBridge:
                     kwargs["state_recovery_active"] = sr_status.get("is_recovering", False)
                     kwargs["state_recovery_attempts"] = sr_status.get("recovery_attempts", 0)
                     kwargs["state_recovery_current"] = sr_status.get("current_state", "none")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[DASHBOARD] State recovery stats unavailable: {e}")
 
             # Phase 9: AutoCalibrator stats
             ac = getattr(w, 'auto_calibrator', None)
@@ -232,7 +232,8 @@ class DashboardDataBridge:
                 try:
                     kwargs["autocalibrator_enabled"] = True
                     kwargs["autocalibrator_cache_size"] = len(ac.get_all_cached_coords())
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"[DASHBOARD] AutoCalibrator stats unavailable: {e}")
                     kwargs["autocalibrator_enabled"] = True
 
             # Phase 9: OCR stats
@@ -242,7 +243,8 @@ class DashboardDataBridge:
                     ocr_stats = ocr.get_detection_stats()
                     kwargs["ocr_detector_enabled"] = True
                     kwargs["ocr_reader_available"] = ocr_stats.get("reader_available", False)
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"[DASHBOARD] OCR stats unavailable: {e}")
                     kwargs["ocr_detector_enabled"] = True
 
             # Phase 9: Debug Visualizer stats
@@ -251,7 +253,8 @@ class DashboardDataBridge:
                 try:
                     kwargs["debug_visualizer_enabled"] = True
                     kwargs["debug_visualizer_running"] = getattr(dv, 'is_running', False)
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"[DASHBOARD] Debug visualizer stats unavailable: {e}")
                     kwargs["debug_visualizer_enabled"] = True
 
             # Premium: Brawler stats & trophies
@@ -263,8 +266,8 @@ class DashboardDataBridge:
                 kwargs["trophy_history"] = self.trophy_tracker.get_trophy_history(30)
                 kwargs["daily_evolution"] = self.trophy_tracker.get_daily_evolution(14)
                 kwargs["weekly_progress"] = self.trophy_tracker.get_weekly_progress()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[DASHBOARD] Premium stats unavailable: {e}")
 
             # Premium: AI pick suggestion
             try:
@@ -279,8 +282,8 @@ class DashboardDataBridge:
                     if available:
                         brawler = kwargs.get("brawler", "colt")
                         kwargs["coach_tips"] = self.match_analyzer.get_coach_tips(brawler)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[DASHBOARD] Premium stats unavailable: {e}")
 
             # Real combat data from PlayLogic
             try:
@@ -294,15 +297,15 @@ class DashboardDataBridge:
                     if combat:
                         kwargs["hp_estimate"] = getattr(combat, 'estimated_hp', 1.0)
                         kwargs["combat_mode"] = getattr(combat, 'current_state', 'neutral')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[DASHBOARD] Premium stats unavailable: {e}")
 
             # Session duration
             try:
                 if hasattr(w, 'session_start') and w.session_start:
                     kwargs["uptime_seconds"] = time.time() - w.session_start
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[DASHBOARD] Premium stats unavailable: {e}")
 
             self.update(**kwargs)
         except Exception as e:
@@ -401,8 +404,8 @@ class ReplayRecorder:
             if isinstance(screenshot, np.ndarray):
                 img = Image.fromarray(screenshot)
                 img.save(path, "JPEG", quality=self._quality)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[REPLAY] screenshot save failed: {e}")
 
     def _save_replay(self):
         meta = {
@@ -429,8 +432,8 @@ class ReplayRecorder:
                         "duration": data["end_time"] - data["start_time"],
                         "path": str(entry),
                     })
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[DASHBOARD] State recovery stats unavailable: {e}")
         return sorted(replays, key=lambda x: x["name"], reverse=True)
 
 
@@ -658,8 +661,8 @@ class BrawlerStatsTracker:
         try:
             with open(self.save_path, "w", encoding="utf-8") as f:
                 json.dump({"total_matches": self._total_matches, "brawlers": self._stats}, f, indent=2)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[BRAWLER_TRACKER] save/load failed: {e}")
 
     def _load(self):
         try:
@@ -668,8 +671,8 @@ class BrawlerStatsTracker:
                     data = json.load(f)
                 self._total_matches = data.get("total_matches", 0)
                 self._stats = data.get("brawlers", {})
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[TROPHY_TRACKER] save/load failed: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -971,16 +974,16 @@ class TrophyTracker:
         try:
             with open(self.save_path, "w", encoding="utf-8") as f:
                 json.dump(self._history[-500:], f, indent=2)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[MATCH_ANALYZER] save/load failed: {e}")
 
     def _load(self):
         try:
             if self.save_path.exists():
                 with open(self.save_path, "r", encoding="utf-8") as f:
                     self._history = json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[DASHBOARD] serve loop stopped: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -1125,19 +1128,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 try:
                     if hasattr(w, 'safety') and w.safety and hasattr(w.safety, 'get_status'):
                         status["safety"] = w.safety.get_status()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[DASHBOARD] State recovery stats unavailable: {e}")
                 try:
                     if hasattr(w, 'error_recovery') and w.error_recovery and hasattr(w.error_recovery, 'get_stats'):
                         status["error_recovery"] = w.error_recovery.get_stats()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[DASHBOARD] State recovery stats unavailable: {e}")
                 # Phase 1: System status
                 try:
                     if hasattr(w, 'get_system_status'):
                         status["systems"] = w.get_system_status().get("systems", {})
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[DASHBOARD] State recovery stats unavailable: {e}")
                 self._send_json(status)
             else:
                 self._send_json({"running": False, "error": "Bot not connected to dashboard"})
@@ -1225,7 +1228,37 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 if w.brawler_queue:
                     export_data["queue"] = w.get_queue() if hasattr(w, 'get_queue') else []
             self._send_json(export_data)
-        elif path == "/api/logs":
+        elif path == '/api/v2/status':
+            w = self.wrapper_ref
+            v2_data = {}
+            if w and hasattr(w, 'v2_integrator') and w.v2_integrator:
+                v2_data = w.v2_integrator.get_dashboard_data()
+            self._send_json(v2_data)
+        elif path == '/api/v2/degradation':
+            w = self.wrapper_ref
+            deg = {}
+            if w and hasattr(w, 'v2_integrator') and w.v2_integrator and w.v2_integrator._degradation_mgr:
+                deg = w.v2_integrator._degradation_mgr.get_status()
+            self._send_json(deg)
+        elif path == '/api/v2/alerts':
+            w = self.wrapper_ref
+            alerts = []
+            if w and hasattr(w, 'v2_integrator') and w.v2_integrator and w.v2_integrator._alert_system:
+                alerts = w.v2_integrator._alert_system.get_active_alerts()
+            self._send_json({'alerts': alerts})
+        elif path == '/api/v2/rate-limiter':
+            w = self.wrapper_ref
+            rl = {}
+            if w and hasattr(w, 'v2_integrator') and w.v2_integrator and w.v2_integrator._rate_limiter:
+                rl = w.v2_integrator._rate_limiter.get_account_status(w.v2_integrator.config.account_id)
+            self._send_json(rl)
+        elif path == '/api/v2/checkpoints':
+            w = self.wrapper_ref
+            cp = {}
+            if w and hasattr(w, 'v2_integrator') and w.v2_integrator and w.v2_integrator._checkpointer:
+                cp = w.v2_integrator._checkpointer.get_stats()
+            self._send_json(cp)
+        elif path == '/api/logs':
             # Phase 2: Log viewer endpoint
             if self.log_buffer:
                 import urllib.parse
@@ -1254,15 +1287,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 last_count = len(self.log_buffer.get_lines(limit=1))
                 try:
                     while True:
-                        listener.wait(timeout=1.0)
-                        listener.clear()
+                        # FIX #12: Add safety timeout to prevent infinite loop
+                        if listener.wait(timeout=5.0):
+                            listener.clear()
+                        else:
+                            # Timeout - check if server is shutting down
+                            if hasattr(self.server, '_shutdown') and self.server._shutdown:
+                                break
+                            continue
                         lines = self.log_buffer.get_lines(limit=50)
                         if lines:
                             data = json.dumps({"lines": lines}, ensure_ascii=False)
                             self.wfile.write(f"data: {data}\n\n".encode("utf-8"))
                             self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError):
-                    pass
+                    logger.debug('[DASHBOARD] SSE client disconnected')
+                except Exception as e:
+                    logger.debug(f"[DASHBOARD] SSE stream error: {e}")
                 finally:
                     self.log_buffer.remove_listener(listener)
             else:
@@ -3257,16 +3298,16 @@ class DashboardServer:
     def _serve_loop(self):
         try:
             self._server.serve_forever(poll_interval=0.5)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[DASHBOARD] serve loop stopped: {e}")
 
     def stop(self):
         self._running = False
         if self._server:
             try:
                 self._server.shutdown()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[DASHBOARD] Premium stats unavailable: {e}")
         logger.info("[DASHBOARD] Servidor parado")
 
     def update_live_data(self, **kwargs):

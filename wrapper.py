@@ -252,6 +252,15 @@ except ImportError:
     HAS_STATE_PERSISTENCE = False
     StatePersistence = None
 
+# Phase v2.1: Strategic Improvements Integration
+try:
+    from core.v2_integration import V2Integrator, V2IntegrationConfig
+    HAS_V2_INTEGRATOR = True
+except ImportError:
+    HAS_V2_INTEGRATOR = False
+    V2Integrator = None
+    V2IntegrationConfig = None
+
 logger = logging.getLogger(__name__)
 
 # Default install path
@@ -468,6 +477,18 @@ class PylaAIEnhanced:
                 logger.info("[WRAPPER] State Persistence inicializado")
             except Exception as e:
                 logger.warning(f"[WRAPPER] State Persistence indisponível: {e}")
+
+        # Phase v2.1: Strategic Integrator
+        self.v2_integrator = None
+        if HAS_V2_INTEGRATOR:
+            try:
+                v2_config = V2IntegrationConfig()
+                v2_config.account_id = self.central_config.get('account_id', 'default_account')
+                v2_config.enable_multi_objective_rl = self.central_config.get('enable_moo', False)
+                self.v2_integrator = V2Integrator.from_config(self, v2_config.__dict__)
+                logger.info('[WRAPPER] V2 Strategic Integrator inicializado')
+            except Exception as e:
+                logger.warning(f'[WRAPPER] V2 Integrator indisponível: {e}')
 
         # Phase 9: State Recovery System (deferred init - needs emulator_controller)
         self.state_recovery: Optional[Any] = None
@@ -2034,6 +2055,16 @@ class PylaAIEnhanced:
         while not self.stop_event.is_set() and self.running:
             cycle_start = time.time()
             try:
+                # Phase v2.1: Strategic cycle start
+                if self.v2_integrator:
+                    try:
+                        cycle_ok = self.v2_integrator.on_cycle_start()
+                        if not cycle_ok:
+                            time.sleep(5.0)
+                            continue
+                    except Exception as e:
+                        logger.debug(f'[WRAPPER] V2 cycle start error: {e}')
+
                 # Phase 9: Execute state recovery if active
                 if self.state_recovery and self.state_recovery.is_recovering():
                     self.state_recovery.execute_recovery_step()
@@ -2120,6 +2151,13 @@ class PylaAIEnhanced:
                     except Exception as e:
                         # FIX #15: BehavioralProfile failures should be logged
                         logger.warning(f"[WRAPPER] BehavioralProfile.record_state failed: {e}")
+
+                # Phase v2.1: Strategic cycle end
+                if self.v2_integrator:
+                    try:
+                        self.v2_integrator.on_cycle_end(cycle_duration=time.time() - cycle_start)
+                    except Exception as e:
+                        logger.debug(f'[WRAPPER] V2 cycle end error: {e}')
 
                 # Observability cycle time
                 if self.observability:

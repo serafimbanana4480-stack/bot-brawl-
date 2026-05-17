@@ -574,12 +574,16 @@ c:/Users/rodri/Desktop/bot brawl/
 │
 ├── core/
 │   ├── error_recovery.py              # Circuit breakers, graceful degradation
+│   ├── v2_integration.py            # Unified v2.1 integrator (singleton)
 │   ├── degradation_manager.py         # Automatic health-based degradation (v2.1)
 │   ├── event_store.py                 # Event sourcing + CQRS (v2.1)
 │   ├── game_state_checkpoint.py       # Advanced state checkpointing (v2.1)
 │   ├── distributed_tracing.py         # OpenTelemetry-style tracing (v2.1)
 │   ├── rate_limiter.py                # Intelligent per-account rate limiting (v2.1)
 │   ├── replay_failure_analyzer.py     # AI replay failure analysis (v2.1)
+│   ├── smart_frame_skipper.py         # Adaptive frame skipping (v2.1)
+│   ├── alert_system.py                # Intelligent alerts (v2.1)
+│   ├── auto_roi_calibrator.py         # Auto ROI calibration by resolution (v2.1)
 │   ├── world_model.py                 # Spatial/temporal memory
 │   ├── occupancy_grid.py              # 2D spatial grid
 │   ├── pressure_map.py                # Enemy influence zones
@@ -896,7 +900,69 @@ Coordenacao de multiplos bots com aprendizado centralizado.
 
 ---
 
-### 15.14 Build Seguro (`obfuscate_build.py`)
+### 15.15 Integrador Unificado v2.1 (`core/v2_integration.py`)
+
+Orquestra todos os módulos estratégicos SEM modificar profundamente wrapper.py.
+
+| Componente | Classe | Responsabilidade |
+|---|---|---|
+| `core/v2_integration.py` | `V2Integrator` | Singleton que conecta todos os módulos v2.1 ao ciclo principal |
+| `core/v2_integration.py` | `V2IntegrationConfig` | Configuração ativável de cada módulo |
+
+**Hooks no Ciclo Principal:**
+- `on_cycle_start()` → Rate limit check, degradation, brawler adaptation, frame skip
+- `on_cycle_end()` → Checkpointing, tracing, alert check
+- `on_match_start/end()` → Event store, rate limiter, brawler controller
+- `on_player_died()` → Event store
+- `on_action_taken()` → Event store
+
+**Design:** Hook-based com monkey-patch seguro. Se um módulo falha, os outros continuam.
+
+---
+
+### 15.16 Frame Skipper Inteligente (`core/smart_frame_skipper.py`)
+
+Decide dinamicamente se processa ou pula cada frame.
+
+| Estado | Skip | Razão |
+|---|---|---|
+| `in_game` + combat | 0 | Tempo real crítico |
+| `lobby` | 4 | Estado estático |
+| `match_loading` | 3 | Loading screen |
+| `menu/*` | 5 | Sem relevância |
+| Degradation = minimal | 4x | Sistema instável |
+
+---
+
+### 15.17 Sistema de Alertas (`core/alert_system.py`)
+
+Alertas inteligentes com severidade e recomendações.
+
+| Categoria | Severidade | Gatilho |
+|---|---|---|
+| Performance | Warning | Ciclo > 2s, FPS < 5 |
+| Safety | Critical | APM > 50 |
+| Health | Critical | Modo EMERGENCY |
+| Health | Warning | Modo MINIMAL |
+| Health | Warning | > 10 erros |
+
+**Gestão:** Acknowledge manual, auto-resolve, histórico com 100 alertas.
+
+---
+
+### 15.18 Auto-Calibração de ROIs (`core/auto_roi_calibrator.py`)
+
+Ajusta automaticamente ROIs para qualquer resolução.
+
+- ROIs canônicas em 1920x1080
+- Escala proporcional para resolução alvo
+- Cache por resolução em JSON
+- Validação e clamping automático
+- 15 ROIs built-in (HP, ammo, super, timer, score, play button, etc.)
+
+---
+
+### 15.19 Build Seguro (`obfuscate_build.py`)
 
 Ofuscacao de codigo para distribuicao segura.
 
