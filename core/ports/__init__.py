@@ -27,7 +27,7 @@ Example:
 
 from __future__ import annotations
 
-from .vision_port import VisionPort, GameStateSnapshot
+from .vision_port import VisionPort, GameStateSnapshot, DetectedObject, HUDState
 from .input_port import InputPort, InputAction
 from .decision_port import DecisionPort, Decision, DecisionContext
 from .safety_port import SafetyPort, SafetyStatus
@@ -38,6 +38,8 @@ __all__ = [
     # Vision
     "VisionPort",
     "GameStateSnapshot",
+    "DetectedObject",
+    "HUDState",
     # Input
     "InputPort",
     "InputAction",
