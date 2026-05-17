@@ -86,6 +86,33 @@ def create_orchestrator(
     emulator_controller = _try_create_emulator_controller(config)
     input_adapter = InputAdapter(emulator_controller=emulator_controller)
 
+    # Optional: adversarial humanization wrapper
+    adv_human_cfg = config.get("adversarial_humanization", {})
+    if adv_human_cfg.get("enabled", False):
+        try:
+            from core.adversarial_humanization import (
+                AdversarialHumanizationConfig,
+                AdversarialHumanizer,
+            )
+            from core.adapters.adversarial_input_adapter import AdversarialInputAdapter
+
+            ahc = AdversarialHumanizationConfig(
+                enabled=True,
+                tap_jitter_sigma=adv_human_cfg.get("tap_jitter_sigma", 1.5),
+                miss_tap_probability=adv_human_cfg.get("miss_tap_probability", 0.02),
+                delayed_reaction_probability=adv_human_cfg.get("delayed_reaction_probability", 0.05),
+                fatigue_decay_per_hour=adv_human_cfg.get("fatigue_decay_per_hour", 0.10),
+                rotation_interval_minutes=adv_human_cfg.get("rotation_interval_minutes", 30.0),
+            )
+            humanizer = AdversarialHumanizer(config=ahc)
+            input_adapter = AdversarialInputAdapter(
+                primary=input_adapter,
+                humanizer=humanizer,
+            )
+            logger.info("[FACTORY] Adversarial humanization enabled")
+        except Exception as e:
+            logger.warning("[FACTORY] Adversarial humanization failed: %s", e)
+
     # ------------------------------------------------------------------
     # 3. Vision (screenshot + YOLO + state detector)
     # ------------------------------------------------------------------
