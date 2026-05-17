@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from core.opentelemetry_tracing import span, record_error
 from core.ports import (
     DecisionContext,
     DecisionPort,
@@ -252,60 +253,85 @@ class BotOrchestrator:
 
     def _do_tick(self) -> None:
         """Actual tick logic (wrapped by _tick for error handling)."""
-        # 1. PERCEIVE
-        snapshot = self.vision.capture_and_perceive()
-        if snapshot is None:
-            self.telemetry.record_metric(MetricEvent("vision_failure", 1.0))
-            return
-
-        self.telemetry.record_metric(MetricEvent("vision_latency_ms", snapshot.latency_ms))
-
-        # 2. SAFETY CHECK (pre-decision)
-        safety_status = self.safety.check_before_action("frame_tick")
-        if not safety_status.can_continue:
-            if safety_status.should_stop:
-                self._shutdown_requested = True
+        with span("orchestrator.tick", {"frame": self._frame_count}) as tick_span:
+            # 1. PERCEIVE
+            with span("vision.capture") as vision_span:
+                snapshot = self.vision.capture_and_perceive()
+            if snapshot is None:
+                self.telemetry.record_metric(MetricEvent("vision_failure", 1.0))
+                if tick_span:
+                    tick_span.set_attribute("vision_failure", True)
                 return
-            if safety_status.should_pause:
-                self.pause()
+
+            self.telemetry.record_metric(MetricEvent("vision_latency_ms", snapshot.latency_ms))
+            if tick_span:
+                tick_span.set_attribute("vision_latency_ms", snapshot.latency_ms)
+                tick_span.set_attribute("game_phase", snapshot.game_phase)
+
+            # 2. SAFETY CHECK (pre-decision)
+            with span("safety.check") as safety_span:
+                safety_status = self.safety.check_before_action("frame_tick")
+            if not safety_status.can_continue:
+                if safety_status.should_stop:
+                    self._shutdown_requested = True
+                    if safety_span:
+                        safety_span.set_attribute("should_stop", True)
+                    return
+                if safety_status.should_pause:
+                    self.pause()
+                    if safety_span:
+                        safety_span.set_attribute("should_pause", True)
+                    return
+                # Safety veto without stop/pause - skip this tick
+                if safety_span:
+                    safety_span.set_attribute("veto", True)
                 return
-            # Safety veto without stop/pause - skip this tick
-            return
 
-        # 3. DECIDE
-        context = self._build_decision_context(snapshot)
-        decision = self.decision.decide(context)
+            # 3. DECIDE
+            with span("decision.decide") as decision_span:
+                context = self._build_decision_context(snapshot)
+                decision = self.decision.decide(context)
+                if decision_span:
+                    decision_span.set_attribute("confidence", decision.confidence)
+                    decision_span.set_attribute("action_type", decision.action_type)
 
-        self.telemetry.record_metric(MetricEvent("decision_confidence", decision.confidence))
-        if decision.confidence < 0.3:
-            self.telemetry.record_event("low_confidence_decision", {
-                "action": decision.action_type,
-                "confidence": decision.confidence,
-            })
+            self.telemetry.record_metric(MetricEvent("decision_confidence", decision.confidence))
+            if decision.confidence < 0.3:
+                self.telemetry.record_event("low_confidence_decision", {
+                    "action": decision.action_type,
+                    "confidence": decision.confidence,
+                })
 
-        # 4. ACT
-        if decision.target_pos:
-            action = InputAction(
-                action_type="tap",
-                x=decision.target_pos[0],
-                y=decision.target_pos[1],
-                duration_ms=100,
-            )
-            success = self.input_.execute(action)
-            self.safety.record_action(decision.action_type)
-            if not success:
-                self.telemetry.record_metric(MetricEvent("input_failure", 1.0))
+            # 4. ACT
+            if decision.target_pos:
+                with span("input.execute", {"action_type": decision.action_type}) as act_span:
+                    action = InputAction(
+                        action_type="tap",
+                        x=decision.target_pos[0],
+                        y=decision.target_pos[1],
+                        duration_ms=100,
+                    )
+                    success = self.input_.execute(action)
+                    if act_span:
+                        act_span.set_attribute("success", success)
+                self.safety.record_action(decision.action_type)
+                if not success:
+                    self.telemetry.record_metric(MetricEvent("input_failure", 1.0))
 
-        # 5. LEARN (online RL)
-        reward = self._compute_reward(snapshot, decision)
-        self.decision.learn(context, decision, reward)
+            # 5. LEARN (online RL)
+            with span("decision.learn") as learn_span:
+                reward = self._compute_reward(snapshot, decision)
+                self.decision.learn(context, decision, reward)
+                if learn_span:
+                    learn_span.set_attribute("reward", reward)
 
-        # 6. STATE MACHINE UPDATE
-        self._update_state_machine(snapshot.game_phase)
+            # 6. STATE MACHINE UPDATE
+            self._update_state_machine(snapshot.game_phase)
 
-        # 7. PERSISTENCE (periodic)
-        if self._frame_count % 300 == 0:  # every ~30s at 10 FPS
-            self._save_checkpoint()
+            # 7. PERSISTENCE (periodic)
+            if self._frame_count % 300 == 0:  # every ~30s at 10 FPS
+                with span("persistence.save_checkpoint"):
+                    self._save_checkpoint()
 
     # ------------------------------------------------------------------
     # State Machine

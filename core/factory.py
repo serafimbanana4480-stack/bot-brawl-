@@ -164,7 +164,7 @@ def create_orchestrator(
     decision_adapter = DecisionAdapter()
 
     # ------------------------------------------------------------------
-    # 5. Telemetry
+    # 5. Telemetry + OpenTelemetry
     # ------------------------------------------------------------------
     observability = None
     try:
@@ -176,7 +176,30 @@ def create_orchestrator(
     except Exception as e:
         logger.debug(f"[FACTORY] Observability unavailable: {e}")
 
-    telemetry_adapter = TelemetryAdapter(observability=observability)
+    # Optional: OpenTelemetry tracing + metrics
+    otel_metrics = None
+    otel_cfg = config.get("opentelemetry", {})
+    if otel_cfg.get("enabled", False):
+        try:
+            from core.opentelemetry_tracing import initialize_tracing
+            from core.opentelemetry_metrics import OTelMetrics
+
+            tracing_ok = initialize_tracing(
+                service_name=otel_cfg.get("service_name", "soberana-omega-bot"),
+                endpoint=otel_cfg.get("endpoint"),
+                exporter_type=otel_cfg.get("exporter_type", "otlp"),
+                enabled=True,
+            )
+            otel_metrics = OTelMetrics(
+                enabled=True,
+                endpoint=otel_cfg.get("endpoint"),
+                export_interval_ms=otel_cfg.get("export_interval_ms", 60000.0),
+            )
+            logger.info("[FACTORY] OpenTelemetry initialized (tracing=%s)", tracing_ok)
+        except Exception as e:
+            logger.warning("[FACTORY] OpenTelemetry init failed: %s", e)
+
+    telemetry_adapter = TelemetryAdapter(observability=observability, otel_metrics=otel_metrics)
 
     # ------------------------------------------------------------------
     # 6. Persistence
