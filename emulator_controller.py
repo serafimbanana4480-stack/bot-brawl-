@@ -30,7 +30,7 @@ class EmulatorConfig:
     def for_bluestacks(cls) -> "EmulatorConfig":
         return cls(
             name="BlueStacks",
-            adb_port=5555,
+            adb_port=5554,  # BlueStacks default ADB port (NOT 5555)
             window_title="BlueStacks App Player",
             resolution=(1920, 1080),
             dpi=280
