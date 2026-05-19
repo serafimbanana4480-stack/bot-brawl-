@@ -1260,7 +1260,9 @@ class LobbyAutomator:
                 screenshot = self._screenshot_func()
                 if screenshot is not None:
                     detection = self._state_detector.detect(screenshot)
-                    if detection.state != previous_state and detection.state != "unknown":
+                    # FIXED: Consider any state change from lobby as valid, even "unknown",
+                    # because matchmaking/loading screens may not be recognized yet.
+                    if detection.state != previous_state:
                         logger.info(f"[LOBBY] Estado mudou: {previous_state} -> {detection.state}")
                         return True
             except Exception as e:
