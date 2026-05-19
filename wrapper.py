@@ -825,7 +825,8 @@ class PylaAIEnhanced:
                     name=best_emu.type,
                     adb_port=adb_port,
                     window_title=best_emu.window_title or emu_cfg.get("window_title", "BlueStacks App Player"),
-                    resolution=emu_cfg.get("resolution", (1920, 1080))
+                    resolution=emu_cfg.get("resolution", (1920, 1080)),
+                    adb_path=getattr(best_emu, 'adb_path', None)
                 )
             else:
                 # Fallback to config-based initialization

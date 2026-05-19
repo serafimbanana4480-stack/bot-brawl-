@@ -900,10 +900,14 @@ class StateManager:
             logger.error(f"[STATE] Erro ao forçar clique Play: {e}")
 
     def _handle_lobby(self):
-        """No lobby - pressiona play com verificações proativas"""
+        """No lobby - pressiona play com verificações proativas e recovery autónomo."""
         logger.info("[STATE] No lobby - a pressionar play")
         logger.info(f"[STATE] Lobby automator disponível: {self.lobby is not None}")
         self._diag("lobby_handler_start")
+
+        # Se estamos no lobby há muito tempo, limpar estado de matchmaking para permitir novo ciclo
+        if hasattr(self, '_matchmaking_enter_time') and self._matchmaking_enter_time is not None:
+            self._matchmaking_enter_time = None
 
         # Verificar popups proativamente antes de tentar clicar no Play
         if self.lobby and hasattr(self.lobby, 'close_popup'):

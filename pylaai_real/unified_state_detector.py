@@ -716,9 +716,9 @@ class UnifiedStateDetector:
         # 1. Check play button (lobby)
         play_region = self.region_data.get('play_button')
         found, conf, pos = self._template_match(
-            image, 'play_button.png', play_region, threshold=0.5
+            image, 'play_button.png', play_region, threshold=0.35
         )
-        if found and conf > 0.5:
+        if found and conf > 0.35:
             return DetectedState(
                 state="lobby",
                 confidence=conf,
@@ -731,7 +731,7 @@ class UnifiedStateDetector:
 # 2. Check joystick first (in-game indicator) (in-game indicator)
         joystick_region = self.region_data.get('virtual_joystick')
         found, conf, pos = self._template_match(
-            image, 'joystick.png', joystick_region, threshold=0.8
+            image, 'joystick.png', joystick_region, threshold=0.55
         )
         if found and conf > 0.4:
             return DetectedState(

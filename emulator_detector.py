@@ -77,6 +77,7 @@ class EmulatorInfo:
     window_title: Optional[str] = None
     window_handle: Optional[int] = None
     connected: bool = False
+    adb_path: Optional[str] = None  # Caminho do executável ADB usado para detetar este emulador
 
 
 class EmulatorDetector:
@@ -173,10 +174,11 @@ class EmulatorDetector:
                                     name=device_id,
                                     type=emulator_type,
                                     adb_id=device_id,
-                                    connected=True
+                                    connected=True,
+                                    adb_path=adb_path
                                 ))
                                 
-                                logger.info(f"Emulator ADB detected: {device_id} (type: {emulator_type}, status: connected)")
+                                logger.info(f"Emulator ADB detected: {device_id} (type: {emulator_type}, status: connected, adb_path={adb_path})")
                             else:
                                 logger.debug(f"Skipping duplicate device: {device_id}")
                         else:
@@ -249,10 +251,11 @@ class EmulatorDetector:
                                 name=device_id,
                                 type=emulator_type,
                                 adb_id=device_id,
-                                connected=True
+                                connected=True,
+                                adb_path=adb_path
                             ))
                             
-                            logger.info(f"Emulator {emulator_type} detected via ADB: {device_id} (status: connected)")
+                            logger.info(f"Emulator {emulator_type} detected via ADB: {device_id} (status: connected, adb_path={adb_path})")
                         else:
                             logger.debug(f"Device {device_id} has status: {status} (not connected)")
                 
