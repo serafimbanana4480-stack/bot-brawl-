@@ -153,7 +153,13 @@ class AutoFixEngine:
             recovery_action = "detector_broken"
             forced_state = self._handle_detector_broken(screenshot, analysis)
 
-        # 3f. Anti-oscilação: se alternar rapidamente entre lobby e in_game
+        # 3f. Detector "cego": retorna unknown mas screenshot mostra jogo visivel
+        elif (current_state == "unknown" and duration_in_state > 15.0 and
+              analysis and analysis.valid and not detector_working):
+            recovery_action = "detector_blind"
+            forced_state = self._handle_detector_blind(screenshot, analysis)
+
+        # 3g. Anti-oscilação: se alternar rapidamente entre lobby e in_game
         elif self._is_oscillating(current_state):
             recovery_action = "anti_oscillation"
             forced_state = self._handle_oscillation(current_state)
@@ -221,6 +227,7 @@ class AutoFixEngine:
             "loading_timeout": 2,
             "unknown_timeout": 3,
             "detector_broken": 3,
+            "detector_blind": 2,
             "anti_oscillation": 1,
         }
         return levels.get(action, 0)
@@ -342,6 +349,60 @@ class AutoFixEngine:
                     return "in_game"
 
         return "lobby"  # Fallback mais seguro
+
+    def _handle_detector_blind(self, screenshot: Optional[np.ndarray], analysis: Optional[ScreenshotAnalysis]) -> Optional[str]:
+        """
+        O detector retorna 'unknown' mas o screenshot parece valido.
+        Tentar usar heuristicas avancadas para determinar o estado.
+        """
+        logger.warning("[AUTOFIX] Detector 'cego' - screenshot valido mas detector retorna unknown. "
+                       "Aplicando heuristicas avancadas...")
+
+        if screenshot is None:
+            return "lobby"
+
+        h, w = screenshot.shape[:2]
+
+        # Heuristica 1: Verificar se ha um botao Play visivel usando SmartPlayButtonDetector
+        try:
+            from pylaai_real.lobby_navigator import SmartPlayButtonDetector
+            detector = SmartPlayButtonDetector(self.images_path)
+            result = detector.find_play_button(screenshot)
+            if result.found and result.coords:
+                logger.info(f"[AUTOFIX] SmartPlayButtonDetector encontrou botao Play em {result.coords}. "
+                           "Forcando estado lobby.")
+                # Se temos click_func, clicar no botao encontrado
+                if self.click_func and result.coords:
+                    self.click_func(*result.coords)
+                    time.sleep(1.5)
+                return "lobby"
+        except Exception as e:
+            logger.debug(f"[AUTOFIX] SmartPlayButtonDetector falhou no blind recovery: {e}")
+
+        # Heuristica 2: Se o centro for escuro mas houver elementos coloridos na parte inferior,
+        # pode ser o lobby com um fundo escuro (ex: menu de evento)
+        bottom_area = screenshot[int(h*0.7):h, :]
+        bottom_std = float(np.std(bottom_area))
+        if bottom_std > 30:
+            logger.info("[AUTOFIX] Area inferior tem conteudo variado. Possivelmente lobby com menu aberto.")
+            if self.click_func:
+                # Tentar clicar no centro para fechar qualquer menu/popup
+                self.click_func(w // 2, h // 2)
+                time.sleep(0.5)
+            return "lobby"
+
+        # Heuristica 3: Se houver muitos pixels escuros no centro (como nas screenshots de debug),
+        # pode ser uma tela de transicao. Forcar lobby para tentar avancar.
+        center_brightness = float(np.mean(screenshot[h//2-100:h//2+100, w//2-100:w//2+100]))
+        if center_brightness < 30:
+            logger.info("[AUTOFIX] Centro muito escuro. Possivelmente tela de transicao. "
+                       "Forcando lobby e clicando centro.")
+            if self.click_func:
+                self.click_func(w // 2, h // 2)
+                time.sleep(0.5)
+            return "lobby"
+
+        return "lobby"  # Fallback seguro
 
     def _handle_oscillation(self, current_state: str) -> Optional[str]:
         """Anti-oscilação: manter o estado mais provável."""

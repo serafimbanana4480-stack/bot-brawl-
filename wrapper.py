@@ -2149,7 +2149,7 @@ class PylaAIEnhanced:
             elif action_name == "force_click_play":
                 if self.lobby and hasattr(self.lobby, '_click'):
                     w, h = self._get_safe_resolution()
-                    play_x, play_y = round(w * 0.9419), round(h * 0.8949)
+                    play_x, play_y = round(w * 0.9119), round(h * 0.9122)
                     self.lobby._click(play_x, play_y)
                     logger.info("[WRAPPER] Acao manual: clicar Play")
                 return True

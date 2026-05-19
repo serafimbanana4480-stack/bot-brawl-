@@ -898,7 +898,7 @@ class PlayLogic:
             return ""
         return move_key
 
-    def play_round(self, screenshot: np.ndarray) -> Dict[str, any]:
+    def play_round(self, screenshot: np.ndarray) -> dict:
         """
         Executa um round de combate completo.
         Retorna dict com flags de ação: {"attacked": bool, "moved": bool, "super_used": bool, "success": bool}
@@ -1137,8 +1137,8 @@ class PlayLogic:
                         "health": hp,
                         "ammo": 3,
                         "max_ammo": 3,
-                        "super_charged": self.super_ree,
-                        "game_mode": self.current_game_modady,
+                        "super_charged": self.super_ready,
+                        "game_mode": self.current_game_mode,
                         "enemies_nearby": len(enemies),
                         "nearest_enemy_dist": nearest_dist,
                         "nearest_enemy_health": enemy_hp,

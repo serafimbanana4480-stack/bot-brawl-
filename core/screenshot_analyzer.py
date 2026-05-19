@@ -106,7 +106,7 @@ class ScreenshotAnalyzer:
         self._last_screenshot = screenshot.copy()
 
         # Verificar saúde do detector (cores dos pixels chave)
-        play_pixel = self._sample_pixel(screenshot, 0.9419, 0.8949)
+        play_pixel = self._sample_pixel(screenshot, 0.9119, 0.9122)
         joy_pixel = self._sample_pixel(screenshot, 0.10, 0.75)
         hp_pixel = self._sample_pixel(screenshot, 0.08, 0.06)
 
@@ -135,7 +135,7 @@ class ScreenshotAnalyzer:
         Se o pixel do play button tiver B alto, provavelmente é BGR.
         """
         h, w = image.shape[:2]
-        px = image[int(h * 0.8949), int(w * 0.9419)]
+        px = image[int(h * 0.9122), int(w * 0.9119)]
         r, g, b = int(px[0]), int(px[1]), int(px[2])
 
         # Amarelo em RGB: R > 200, G > 150, B < 50

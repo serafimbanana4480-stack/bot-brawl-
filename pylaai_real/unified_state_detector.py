@@ -80,7 +80,7 @@ class DynamicCoordinates:
         self.play_again_button = (round(w * 0.5903) + ox, round(h * 0.9197) + oy)
 
         # Main play button (lobby)
-        self.play_button = (round(w * 0.9419) + ox, round(h * 0.8949) + oy)
+        self.play_button = (round(w * 0.9119) + ox, round(h * 0.9122) + oy)
 
         # Exit button (when defeated)
         self.exit_button = (round(w * 0.493) + ox, round(h * 0.9187) + oy)
@@ -889,7 +889,36 @@ class UnifiedStateDetector:
             self._record_detection(ocr_result)
             return ocr_result
 
-        # Passo 5: Usar hint como ultimo recurso
+        # Passo 5: SmartPlayButtonDetector fallback (usa template matching inteligente)
+        smart_result = self._smart_play_fallback(image)
+        if smart_result and smart_result.state != "unknown":
+            smoothed = self._smooth_state(smart_result.state, smart_result.confidence)
+            if smoothed != smart_result.state:
+                smart_result.confidence *= 0.8
+            smart_result.state = smoothed
+            logger.info(f"[UNIFIED_DETECTOR] SmartPlay fallback: {smart_result.state} "
+                        f"(conf={smart_result.confidence:.2f}, coords={smart_result.button_coords})")
+            self._record_detection(smart_result)
+            return smart_result
+
+        # Passo 6: Verificar se o jogo esta visivel (heuristica de tela valida)
+        game_visible = self._check_game_visible(image)
+        if not game_visible:
+            result = DetectedState(
+                state="unknown",
+                confidence=0.0,
+                method="none",
+                details={
+                    "pixel_state": pixel_result.state,
+                    "template_state": template_result.state,
+                    "game_visible": False,
+                    "reason": "game_not_visible_or_dark_screen"
+                }
+            )
+            self._record_detection(result)
+            return result
+
+        # Passo 7: Usar hint como ultimo recurso
         if screen_hint:
             hinted = self._hint_to_state(screen_hint)
             if hinted and hinted.state != "unknown":
@@ -904,6 +933,73 @@ class UnifiedStateDetector:
                                        "template_state": template_result.state})
         self._record_detection(result)
         return result
+
+    def _smart_play_fallback(self, image: np.ndarray) -> Optional[DetectedState]:
+        """
+        Fallback que usa SmartPlayButtonDetector para encontrar o botao Play.
+        Se encontrar, assume que estamos no lobby.
+        """
+        try:
+            from pylaai_real.lobby_navigator import SmartPlayButtonDetector
+            detector = SmartPlayButtonDetector(self.images_path)
+            result = detector.find_play_button(image)
+            if result.found and result.coords and result.confidence > 0.25:
+                return DetectedState(
+                    state="lobby",
+                    confidence=result.confidence,
+                    method="smart_play",
+                    button_coords=result.coords,
+                    details={
+                        "sub_type": "play_button_found",
+                        "region": result.region,
+                        "screenshot_verified": result.screenshot_verified
+                    }
+                )
+        except Exception as e:
+            logger.debug(f"[UNIFIED_DETECTOR] SmartPlay fallback falhou: {e}")
+        return None
+
+    def _check_game_visible(self, image: np.ndarray) -> bool:
+        """
+        Heuristica para verificar se o jogo esta realmente visivel na screenshot.
+        Detecta telas pretas, brancas, ou telas do emulador sem o jogo.
+        """
+        h, w = image.shape[:2]
+        if h < 100 or w < 100:
+            return False
+
+        # Verificar se o centro nao e completamente preto (pode ser tela de loading)
+        center = image[h//2-50:h//2+50, w//2-50:w//2+50]
+        center_brightness = float(np.mean(center))
+
+        # Verificar se ha variacao de cor (tela preta/branca pura e invalida)
+        std = float(np.std(image))
+
+        # Verificar cantos - se todos os cantos forem identicos, pode ser screenshot congelada
+        corners = [
+            image[0:10, 0:10],
+            image[0:10, w-10:w],
+            image[h-10:h, 0:10],
+            image[h-10:h, w-10:w]
+        ]
+        corner_means = [float(np.mean(c)) for c in corners]
+        corner_variance = float(np.std(corner_means))
+
+        # Regras:
+        # - Se o centro for muito escuro (< 5) e std baixo -> tela preta
+        # - Se std muito baixo (< 3) -> tela congelada ou uniforme
+        # - Se cantos todos iguais (variance < 1) e std baixo -> screenshot invalida
+        if center_brightness < 5 and std < 10:
+            logger.warning("[UNIFIED_DETECTOR] Tela aparentemente preta - jogo nao visivel")
+            return False
+        if std < 3:
+            logger.warning("[UNIFIED_DETECTOR] Screenshot uniforme - possivelmente congelada")
+            return False
+        if corner_variance < 1 and std < 15:
+            logger.warning("[UNIFIED_DETECTOR] Cantos identicos e baixa variacao - screenshot suspeita")
+            return False
+
+        return True
 
     def _hint_to_state(self, hint: str) -> Optional[DetectedState]:
         """Converte screen hint em DetectedState."""

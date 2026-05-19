@@ -229,13 +229,30 @@ class PopupManager:
         logger.info(f"[POPUP] Detectado: {popup.popup_type} (conf={popup.confidence:.2f}) -> acao={popup.action}")
 
         if popup.action == "click" and popup.close_coords:
-            # Jitter no clique para parecer humano
-            x, y = popup.close_coords
-            jitter_x = random.randint(-15, 15)
-            jitter_y = random.randint(-15, 15)
-            click_func(x + jitter_x, y + jitter_y)
-            time.sleep(random.uniform(0.4, 0.8))
-            return True
+            # Estratégia agressiva para event_screen: múltiplos cliques
+            if popup.popup_type == "event_screen":
+                h, w = getattr(self, '_last_hw', (1080, 1920))
+                tap_positions = [
+                    popup.close_coords,
+                    (w // 2, int(h * 0.82)),  # Botão verde inferior
+                    (w // 2, int(h * 0.50)),  # Centro
+                    (int(w * 0.85), int(h * 0.10)),  # X canto superior direito
+                ]
+                for i, (tx, ty) in enumerate(tap_positions):
+                    jitter_x = random.randint(-15, 15)
+                    jitter_y = random.randint(-15, 15)
+                    click_func(tx + jitter_x, ty + jitter_y)
+                    logger.info(f"[POPUP] Event screen tap {i+1}/{len(tap_positions)}: ({tx},{ty})")
+                    time.sleep(random.uniform(0.3, 0.5))
+                return True
+            else:
+                # Jitter no clique para parecer humano
+                x, y = popup.close_coords
+                jitter_x = random.randint(-15, 15)
+                jitter_y = random.randint(-15, 15)
+                click_func(x + jitter_x, y + jitter_y)
+                time.sleep(random.uniform(0.4, 0.8))
+                return True
 
         elif popup.action == "esc":
             key_func('esc')

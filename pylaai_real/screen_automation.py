@@ -66,7 +66,7 @@ class ScreenAutomation:
         self.star_drop2 = (round(w * 0.5228) + ox, round(h * 0.9296) + oy)
 
         self.play_again_button = (round(w * 0.5903) + ox, round(h * 0.9197) + oy)
-        self.play_button = (round(w * 0.9419) + ox, round(h * 0.8949) + oy)
+        self.play_button = (round(w * 0.9119) + ox, round(h * 0.9122) + oy)
         self.exit_button = (round(w * 0.493) + ox, round(h * 0.9187) + oy)
         self.load_button = (round(w * 0.8057) + ox, round(h * 0.9675) + oy)
         self.proceed_button = (round(w * 0.8093) + ox, round(h * 0.9165) + oy)

@@ -227,6 +227,14 @@ class StateManager:
             logger.info("[STATE] Sistema de Melhoria Contínua ativado")
         except ImportError:
             self.improvement_system = None
+
+        # Autonomous Tester (auto-diagnóstico)
+        try:
+            from autonomous_tester import AutonomousTester
+            self.autonomous_tester = AutonomousTester(state_manager=self)
+            logger.info("[STATE] AutonomousTester ativado")
+        except ImportError:
+            self.autonomous_tester = None
         
         self.state_timeouts = {
             'loading': 30,    # 30 seconds max in loading
@@ -415,13 +423,27 @@ class StateManager:
                     detected_state = self.current_state
 
                 # ANTI-OSCILLATION: Lock de in_game - só sai para end, connection_lost, ou unknown com confiança alta
-                elif self.current_state == 'in_game' and detected_state not in ('end', 'connection_lost', 'unknown'):
+                # FIX: Permitir lobby/loading/matchmaking após tempo mínimo em jogo
+                # FIX: Bloquear in_game -> loading a menos que screen_state_hint confirme (evita falsos positivos durante gameplay)
+                elif self.current_state == 'in_game' and detected_state not in ('end', 'connection_lost', 'unknown', 'lobby', 'loading', 'matchmaking'):
                     time_in_game = time.time() - self.state_start_time if self.state_start_time else 0
                     if time_in_game < self._in_game_min_duration:
                         logger.warning(f"[STATE] BLOCKED: in_game -> {detected_state} (apenas {time_in_game:.1f}s em jogo, mínimo {self._in_game_min_duration}s)")
                         detected_state = self.current_state
                     else:
-                        logger.warning(f"[STATE] BLOCKED: in_game -> {detected_state} (só permitido: end, connection_lost, unknown)")
+                        logger.warning(f"[STATE] BLOCKED: in_game -> {detected_state} (só permitido: end, connection_lost, unknown, lobby, loading, matchmaking)")
+                        detected_state = self.current_state
+                elif self.current_state == 'in_game' and detected_state == 'loading':
+                    # CRITICAL: Nunca permitir in_game -> loading a menos que screen_state_hint confirme
+                    # AND unless forced in_game timeout has expired
+                    forced_time = getattr(self, '_forced_in_game_time', 0)
+                    if forced_time and (time.time() - forced_time) < 30:
+                        logger.warning(f"[STATE] BLOCKED: in_game -> loading (forçado há {time.time() - forced_time:.0f}s, bloqueado por 30s)")
+                        detected_state = self.current_state
+                    elif screen_state_hint and screen_state_hint in ('loading', 'detecting'):
+                        logger.info(f"[STATE] Permitindo in_game -> loading (screen_state_hint={screen_state_hint} confirmou)")
+                    else:
+                        logger.warning(f"[STATE] BLOCKED: in_game -> loading (screen_state_hint={screen_state_hint}, não confirmado - provável falso positivo)")
                         detected_state = self.current_state
 
                 elif valid_next and detected_state not in valid_next:
@@ -588,7 +610,7 @@ class StateManager:
         else:
             w, h = self._get_window_size()
         center_x, center_y = round(w / 2), round(h / 2)
-        play_x, play_y = round(w * 0.9419), round(h * 0.8949)
+        play_x, play_y = round(w * 0.9119), round(h * 0.9122)
 
         # Se temos o detector unificado, usar diagnóstico detalhado
         if self.unified_detector and image is not None:
@@ -744,11 +766,21 @@ class StateManager:
                         self.current_state = 'in_game'
                         self.state_start_time = time.time()
                         self._remember_known_state('in_game')
+                        self._forced_in_game_time = time.time()
+                        logger.info("[STATE] Forçado in_game desde loading (main loop) - bloqueando retorno por 30s")
                         # Skip _process_cycle to avoid being reset back to loading
                         time.sleep(0.5)
                         continue
                 
                 self._process_cycle()
+
+                # AutonomousTester: verificação periódica de saúde do bot
+                if self.autonomous_tester:
+                    try:
+                        self.autonomous_tester.periodic_check()
+                    except Exception as e:
+                        logger.debug(f"[STATE] AutonomousTester error: {e}")
+
                 # Delay adaptativo: mais rapido em in_game, mais lento em estados estaticos
                 elapsed = time.time() - cycle_start
                 if self.current_state == 'in_game':
@@ -930,8 +962,46 @@ class StateManager:
         pressed = self.lobby.press_play()
         self._diag(f"press_play_result={pressed}")
         if not pressed:
-            logger.warning("[STATE] press_play falhou; o fluxo parou no lobby")
+            logger.warning("[STATE] press_play falhou; tentando fallback inteligente")
             self._log_lobby_snapshot("press_play_failed")
+            # FALLBACK INTELIGENTE: usar coordenadas do detector se disponíveis
+            if self.emulator_controller:
+                try:
+                    fallback_coords = None
+                    
+                    # Estratégia 1: Usar coordenadas detetadas pelo UnifiedStateDetector
+                    if self.unified_detector:
+                        img = self._get_cached_screenshot()
+                        if img is not None:
+                            det = self.unified_detector.detect(img)
+                            if det.state == 'lobby' and det.button_coords and det.confidence > 0.2:
+                                fallback_coords = det.button_coords
+                                logger.info(f"[STATE] Fallback usando coordenadas do detector: {fallback_coords}")
+                    
+                    # Estratégia 2: Usar SmartPlayButtonDetector diretamente
+                    if fallback_coords is None:
+                        from pylaai_real.lobby_navigator import SmartPlayButtonDetector
+                        play_det = SmartPlayButtonDetector(
+                            self.unified_detector.images_path if self.unified_detector else 'images'
+                        )
+                        img = self._get_cached_screenshot()
+                        if img is not None:
+                            play_result = play_det.find_play_button(img)
+                            if play_result.found and play_result.coords:
+                                fallback_coords = play_result.coords
+                                logger.info(f"[STATE] Fallback usando SmartPlayButtonDetector: {fallback_coords}")
+                    
+                    # Estratégia 3: Coordenadas hardcoded (último recurso)
+                    if fallback_coords is None:
+                        w, h = self._get_window_size()
+                        fallback_coords = (round(w * 0.9119), round(h * 0.9122))
+                        logger.info(f"[STATE] Fallback usando coordenadas hardcoded: {fallback_coords}")
+                    
+                    self.emulator_controller.tap_scaled(*fallback_coords)
+                    logger.info(f"[STATE] Fallback clicando em: {fallback_coords}")
+                    time.sleep(1.5)
+                except Exception as e:
+                    logger.warning(f"[STATE] Fallback inteligente falhou: {e}")
             return
 
         # Reset MatchController se necessário para permitir novas partidas
@@ -1089,8 +1159,18 @@ class StateManager:
         pressed = self.lobby.press_play()
         self._diag(f"press_play_after_selection_result={pressed}")
         if not pressed:
-            logger.warning("[STATE] press_play falhou após seleção; fluxo interrompido")
+            logger.warning("[STATE] press_play falhou após seleção; tentando fallback direto")
             self._log_lobby_snapshot("press_play_after_selection_failed")
+            if self.emulator_controller:
+                try:
+                    w, h = self._get_window_size()
+                    play_x = round(w * 0.9119)
+                    play_y = round(h * 0.9122)
+                    self.emulator_controller.tap_scaled(play_x, play_y)
+                    logger.info(f"[STATE] Fallback direto no Play após seleção: ({play_x},{play_y})")
+                    time.sleep(1.5)
+                except Exception as e:
+                    logger.warning(f"[STATE] Fallback direto após seleção falhou: {e}")
             return
         time.sleep(2)
         
@@ -1112,8 +1192,12 @@ class StateManager:
             logger.warning(f"[STATE] Loading timeout ({elapsed:.0f}s), forcing transition to in_game")
             self._loading_start_time = None
             self.current_state = 'in_game'
+            self.state_start_time = time.time()
             self._remember_known_state('in_game')
             self._diag("loading_handler_timeout_forced_in_game")
+            # CRITICAL: Mark that we forced in_game from loading - block return to loading for 30s
+            self._forced_in_game_time = time.time()
+            logger.info("[STATE] Forçado in_game desde loading - bloqueando retorno a loading por 30s")
             return
         
         if self.screen_automation and hasattr(self.screen_automation, "get_current_state_name"):
@@ -1140,6 +1224,8 @@ class StateManager:
                 self.current_state = 'in_game'
                 self.state_start_time = time.time()
                 self._remember_known_state('in_game')
+                self._forced_in_game_time = time.time()
+                logger.info("[STATE] Forçado in_game desde matchmaking - bloqueando retorno por 30s")
                 return
             elif elapsed > 10:
                 logger.info(f"[STATE] Matchmaking há {elapsed:.0f}s - verificando se partida começou")
@@ -1270,7 +1356,45 @@ class StateManager:
 
             result = self.play.play_round(screenshot)
             logger.info(f"[STATE] Play round resultado: {result}")
-            
+
+            # FALLBACK IMEDIATO: Se play_round falhou (ex: sem modelo), forçar ação imediatamente
+            if result and isinstance(result, dict) and not result.get('success', True):
+                logger.warning(f"[STATE] Play round falhou: {result.get('error', 'unknown')} - forçando ação imediata")
+                current_time = time.time()
+                if not hasattr(self, '_last_combat_action_time'):
+                    self._last_combat_action_time = current_time
+                # Forçar movimento imediato
+                joy_x, joy_y = 300, 900
+                if self.movement and hasattr(self.movement, 'joystick_center_x'):
+                    joy_x = self.movement.joystick_center_x
+                    joy_y = self.movement.joystick_center_y
+                if self.emulator_controller:
+                    import random
+                    angle = random.uniform(0, 2 * 3.14159)
+                    distance = random.randint(150, 350)
+                    target_x = int(joy_x + distance * __import__('math').cos(angle))
+                    target_y = int(joy_y + distance * __import__('math').sin(angle))
+                    try:
+                        self.emulator_controller.swipe_scaled(joy_x, joy_y, target_x, target_y, duration=200)
+                        logger.info(f"[STATE] Movimento imediato: ({joy_x},{joy_y}) -> ({target_x},{target_y})")
+                    except Exception as e:
+                        logger.warning(f"[STATE] Falha no swipe imediato: {e}")
+                    # Forçar ataque imediato
+                    try:
+                        atk_x, atk_y = 1750, 850
+                        if self.movement and hasattr(self.movement, 'window_w'):
+                            atk_x = round(self.movement.window_w * 0.90)
+                            atk_y = round(self.movement.window_h * 0.82)
+                        self.emulator_controller.tap_scaled(atk_x, atk_y)
+                        logger.info(f"[STATE] Ataque imediato em ({atk_x},{atk_y})")
+                        if hasattr(self.play, 'last_shot_time'):
+                            self.play.last_shot_time = current_time
+                    except Exception as e:
+                        logger.warning(f"[STATE] Falha no ataque imediato: {e}")
+                self._last_combat_action_time = current_time
+                # Pular o resto do ciclo para evitar delays
+                return
+
             # FALLBACK: Garantir que o bot nunca fica parado por muito tempo
             current_time = time.time()
             if not hasattr(self, '_last_combat_action_time'):
@@ -1705,6 +1829,23 @@ class StateManager:
             except Exception as e:
                 logger.debug(f"[STATE][DIAG] Falha ao ler diagnóstico de estado: {e}")
 
+        # NOVO: Tentar usar UnifiedStateDetector com fallback inteligente
+        if self.unified_detector and image is not None:
+            try:
+                detection = self.unified_detector.detect(image)
+                if detection.state != 'unknown' and detection.confidence > 0.2:
+                    logger.info(f"[STATE] Unknown handler: detector recuperou estado {detection.state} "
+                               f"(conf={detection.confidence:.2f}, method={detection.method})")
+                    self.current_state = detection.state
+                    self._remember_known_state(detection.state)
+                    if detection.state == 'lobby' and detection.button_coords and self.emulator_controller:
+                        logger.info(f"[STATE] Clicando no botao Play detectado em {detection.button_coords}")
+                        self.emulator_controller.tap_scaled(*detection.button_coords)
+                        time.sleep(1.5)
+                    return
+            except Exception as e:
+                logger.debug(f"[STATE] Unknown handler: detector fallback falhou: {e}")
+
         # Check if we've been in unknown too long - force reset
         if self.unknown_since:
             unknown_elapsed = time.time() - self.unknown_since
@@ -1835,12 +1976,19 @@ class StateManager:
         w, h = self._get_window_size()
         if self.emulator_controller:
             try:
-                # Tentar clicar no botao verde (GOT IT!) na parte inferior central
-                self.emulator_controller.tap_scaled(round(w * 0.50), round(h * 0.82))
-                time.sleep(0.5)
-                # Fallback: clicar no centro
-                self.emulator_controller.tap_scaled(round(w * 0.50), round(h * 0.50))
-                time.sleep(0.3)
+                # Estratégia agressiva: múltiplos cliques em posições comuns de botões
+                tap_positions = [
+                    (0.50, 0.82),  # Botão verde GOT IT inferior central
+                    (0.50, 0.75),  # Botão verde um pouco mais acima
+                    (0.50, 0.88),  # Botão verde mais abaixo
+                    (0.50, 0.50),  # Centro (fallback)
+                    (0.85, 0.10),  # X no canto superior direito
+                    (0.15, 0.10),  # X no canto superior esquerdo
+                ]
+                for i, (x_pct, y_pct) in enumerate(tap_positions):
+                    self.emulator_controller.tap_scaled(round(w * x_pct), round(h * y_pct))
+                    logger.info(f"[STATE] Event screen tap {i+1}/{len(tap_positions)}: ({x_pct},{y_pct})")
+                    time.sleep(0.4)
                 self._diag("event_screen_tapped")
             except Exception as e:
                 logger.debug(f"[STATE] Erro ao fechar event screen: {e}")
