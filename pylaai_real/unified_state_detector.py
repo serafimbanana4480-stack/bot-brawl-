@@ -208,7 +208,7 @@ class UnifiedStateDetector:
     # RGB reference colors (from BrawlStarsBot, calibrated)
     _DEFEATED_COLOR = (62, 0, 0)
     _PLAY_COLOR = (224, 186, 8)
-    _LOAD_COLOR = (0, 1, 0)
+    _LOAD_COLOR = (50, 255, 50)  # Verde brilhante do spinner de loading
     _PROCEED_COLOR = (35, 115, 255)
     _CONNECTION_LOST_COLOR = (66, 66, 66)
     _STAR_DROP_COLOR = (222, 72, 227)
@@ -226,7 +226,7 @@ class UnifiedStateDetector:
     _TOLERANCES = {
         'defeated': 12,
         'play': 20,
-        'load': 35,
+        'load': 25,  # Tolerancia reduzida para evitar falsos positivos em pixels escuros
         'proceed': 30,
         'connection': 10,
         'star_drop': 20,
@@ -447,20 +447,7 @@ class UnifiedStateDetector:
                 details={"sub_type": "play_again", "match_fraction": match_frac}
             )
 
-        # 2. Loading (green pixel)
-        match_frac = self._pixel_match_region(
-            image, *sc(c.load_button), self._LOAD_COLOR,
-            tolerance=self._TOLERANCES['load']
-        )
-        if match_frac > 0.2:
-            return DetectedState(
-                state="loading",
-                confidence=match_frac,
-                method="pixel",
-                details={"sub_type": "loading", "match_fraction": match_frac}
-            )
-
-        # 3. Defeated (red corners)
+        # 2. Defeated (red corners)
         d1_frac = self._pixel_match_region(
             image, *sc(c.defeated1), self._DEFEATED_COLOR,
             tolerance=self._TOLERANCES['defeated']
@@ -522,7 +509,7 @@ class UnifiedStateDetector:
                 in_game_details["atk_brightness"] = float(atk_brightness)
                 in_game_details["atk_std"] = float(atk_std)
                 # In-game: joystick area is dark (brightness < 150) AND attack area has some content
-                if joy_brightness < 150:
+                if joy_brightness < 50:
                     in_game_conf = 0.35
                     if atk_region.size > 0 and atk_std > 15:
                         in_game_conf = 0.55
@@ -627,7 +614,20 @@ class UnifiedStateDetector:
                 details={"sub_type": "connection_lost", "match_fraction": match_frac}
             )
 
-        # 9. Matchmaking detection: dark screen with loading spinner or player icons
+        # 9. Loading (green spinner) - verificado DEPOIS de lobby/end para evitar falsos positivos
+        match_frac = self._pixel_match_region(
+            image, *sc(c.load_button), self._LOAD_COLOR,
+            tolerance=self._TOLERANCES['load']
+        )
+        if match_frac > 0.2:
+            return DetectedState(
+                state="loading",
+                confidence=match_frac,
+                method="pixel",
+                details={"sub_type": "loading", "match_fraction": match_frac}
+            )
+
+        # 10. Matchmaking detection: dark screen with loading spinner or player icons
         # During matchmaking, the screen is mostly dark with occasional UI elements
         # Distinguish from loading by checking for absence of bright green load indicator
         center_region = image[h//3:2*h//3, w//3:2*w//3]
