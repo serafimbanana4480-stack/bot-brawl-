@@ -70,6 +70,14 @@ def _get_ocr_detector_module():
     )
 
 
+def _get_unified_detector_module():
+    """Import unified_state_detector directly."""
+    return _import_module_direct(
+        "pylaai_real.unified_state_detector",
+        project_root / "pylaai_real" / "unified_state_detector.py"
+    )
+
+
 def _get_debug_visualizer_module():
     """Import debug_visualizer directly."""
     return _import_module_direct(
@@ -433,6 +441,79 @@ class TestOCRStateDetector:
 
         assert "reader_available" in stats
         assert "confidence_threshold" in stats
+
+    def test_parse_structured_hud_text(self):
+        """Testa parsing estruturado de timer, score e estado de habilidade."""
+        mod = _ensure_ocr_detector()
+        detector = mod.OCRStateDetector()
+
+        assert detector.parse_timer_text("1:23") == 83.0
+        assert detector.parse_timer_text("O:4S") == 45.0
+        assert detector.parse_score_text("2-1") == (2, 1)
+        assert detector.parse_score_text("8 / 6") == (8, 6)
+        assert detector.parse_ability_state("READY") is True
+        assert detector.parse_ability_state("COOLDOWN") is False
+
+    def test_extract_hud_text_best_effort(self):
+        """Testa extração HUD com fake reader e múltiplas ROIs."""
+        mod = _ensure_ocr_detector()
+        detector = mod.OCRStateDetector()
+
+        class _FakeReader:
+            def readtext(self, image):
+                return [
+                    ([(0, 0), (1, 0), (1, 1), (0, 1)], "1:23", 0.91),
+                    ([(0, 0), (1, 0), (1, 1), (0, 1)], "2-1", 0.88),
+                    ([(0, 0), (1, 0), (1, 1), (0, 1)], "READY", 0.93),
+                ]
+
+        detector._reader = _FakeReader()
+
+        import numpy as np
+
+        screenshot = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        hud = detector.extract_hud_text(screenshot)
+
+        assert hud["match_timer_text"] == "1:23"
+        assert hud["match_time_remaining"] == 83.0
+        assert hud["score_text"] == "2-1"
+        assert hud["match_score"] == (2, 1)
+        assert hud["ability_texts"]
+        assert hud["ability_states"]
+
+
+class TestUnifiedStateDetectorOCRFallback:
+    """Testes para fallback OCR no UnifiedStateDetector."""
+
+    def test_ocr_fallback_when_pixel_and_template_fail(self):
+        """Quando pixel/template não detectam nada, OCR deve resolver o estado."""
+        u_mod = _get_unified_detector_module()
+        o_mod = _get_ocr_detector_module()
+
+        class _FakeOCR:
+            def detect_state_from_text(self, image):
+                return "lobby", 0.85
+
+        images_path = project_root / "images"
+        detector = u_mod.UnifiedStateDetector(
+            images_path=images_path,
+            window_w=1920,
+            window_h=1080,
+            ocr_detector=_FakeOCR(),
+        )
+
+        import numpy as np
+        black_image = np.zeros((1080, 1920, 3), dtype=np.uint8)
+
+        # Forçar pixel/template a falharem para que OCR seja usado
+        detector._detect_by_pixels = lambda img: u_mod.DetectedState("unknown", 0.0, "pixel")
+        detector._detect_by_templates = lambda img: u_mod.DetectedState("unknown", 0.0, "template")
+
+        result = detector.detect(black_image)
+
+        assert result.state == "lobby"
+        assert result.method == "ocr"
+        assert result.confidence > 0.0
 
 
 class TestDebugVisualizer:

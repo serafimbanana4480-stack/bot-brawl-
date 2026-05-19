@@ -517,10 +517,18 @@ class RLBridge:
         stats = {
             "use_neural": self.use_neural,
             "buffer_size": len(self.buffer),
+            "buffer_capacity": getattr(self.buffer, 'capacity', 0),
             "total_steps": self.total_steps,
+            "device": self.device,
         }
         if self.q_learning is not None:
-            stats["q_learning"] = self.q_learning.get_policy_summary()
+            stats["q_learning"] = self.q_learning.get_live_metrics()
+        # PPO metrics placeholders (populated by _train_step)
+        stats["ppo"] = {
+            "policy_loss": round(getattr(self, '_last_policy_loss', 0.0), 4),
+            "value_loss": round(getattr(self, '_last_value_loss', 0.0), 4),
+            "entropy": round(getattr(self, '_last_entropy', 0.0), 4),
+        }
         return stats
 
     # ------------------------------------------------------------------

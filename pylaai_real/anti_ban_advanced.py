@@ -345,6 +345,46 @@ class SessionOrchestrator:
         cutoff = time.time() - 3600
         return sum(1 for t in self._match_times if t > cutoff)
 
+    def get_session_pressure(self) -> float:
+        """Retorna uma pressão agregada da sessão para pacing adaptativo."""
+        fatigue = self.get_fatigue_factor()
+        warmup = self.get_warmup_factor()
+        matches_per_hour = self.get_matches_this_hour()
+        break_urgency = 1.0 if self.should_take_break() else 0.0
+        density_pressure = _clamp(matches_per_hour / max(1, self.plan.max_matches_per_hour), 0.0, 1.0)
+        return _clamp(
+            fatigue * 0.45 + warmup * 0.20 + density_pressure * 0.20 + break_urgency * 0.60,
+            0.0,
+            1.0,
+        )
+
+    def recommend_pacing(self, base_delay: float, action_type: str = "generic") -> float:
+        """Ajusta um delay base para refletir fase da sessão e densidade recente."""
+        pressure = self.get_session_pressure()
+        delay = base_delay
+
+        # Warm-up: mais lento no começo para parecer humano e não estourar APM cedo.
+        delay *= 1.0 + self.get_warmup_factor() * 0.35
+
+        # Fadiga: mais lento conforme a sessão avança.
+        delay *= 1.0 + self.get_fatigue_factor() * 0.45
+
+        # Break urgency: aumenta significativamente a cadência quando uma pausa está próxima.
+        if self.should_take_break():
+            delay *= 1.35
+
+        # Densidade de partidas: se a janela horária está agressiva, reduza ritmo.
+        matches_ratio = _clamp(self.get_matches_this_hour() / max(1, self.plan.max_matches_per_hour), 0.0, 1.5)
+        delay *= 1.0 + matches_ratio * 0.12
+
+        # Micro-ajuste por tipo de ação: menus/lobby devem parecer menos mecânicos.
+        if action_type in ("lobby_click", "menu_nav"):
+            delay *= 1.08 + pressure * 0.08
+        elif action_type in ("attack", "super", "dodge"):
+            delay *= 0.92 + pressure * 0.05
+
+        return _clamp(delay, base_delay * 0.5, base_delay * 2.75)
+
     def can_start_match(self) -> bool:
         if self.should_take_break():
             return False
@@ -361,6 +401,7 @@ class SessionOrchestrator:
             "elapsed_minutes": round(elapsed, 1),
             "fatigue_factor": round(self.get_fatigue_factor(), 2),
             "warmup_factor": round(self.get_warmup_factor(), 2),
+            "session_pressure": round(self.get_session_pressure(), 2),
             "in_break": self._in_break,
             "session_should_end": self.should_end_session(),
             "can_start_match": self.can_start_match(),
@@ -1030,11 +1071,45 @@ class AdvancedAntiBanSystem:
         risk = self.risk_scorer.calculate_risk()
         return risk["total"] > 60
 
+    def get_adaptive_pacing(self, base_delay: float, action_type: str = "generic") -> float:
+        """Calcula pacing adaptativo combinando sessão, risco e remediação."""
+        if not self.enabled:
+            return base_delay
+
+        delay = self.session_orchestrator.recommend_pacing(base_delay, action_type)
+
+        risk = self.risk_scorer.calculate_risk()
+        risk_total = risk.get("total", 0.0)
+        risk_level = risk.get("risk_level", "low")
+
+        if risk_level == "medium":
+            delay *= 1.08
+        elif risk_level == "high":
+            delay *= 1.20
+        elif risk_level == "critical":
+            delay *= 1.40
+
+        # Se o scoring estiver a subir, desacelerar levemente.
+        if self.risk_scorer.get_trend() == "rising":
+            delay *= 1.10
+
+        remediation = self.remediator.evaluate_and_remediate(
+            risk, self.fingerprint, self.input_randomizer, self.micro_humanizer
+        )
+        if remediation.get("force_break"):
+            delay *= 1.25
+
+        # Puxar um pouco para o fingerprint atual para manter consistência de sessão.
+        delay *= self.fingerprint.get_delay_multiplier()
+
+        return self.session_orchestrator.recommend_pacing(delay, action_type)
+
     def apply_action_delay(self, action_type: str, base_delay: float) -> float:
         if not self.enabled:
             return base_delay
         # 1. Randomização de delay
-        delay = self.input_randomizer.randomize_delay(base_delay, action_type)
+        delay = self.get_adaptive_pacing(base_delay, action_type)
+        delay = self.input_randomizer.randomize_delay(delay, action_type)
         # 2. Hesitação
         importance = 0.3 if action_type in ("attack", "move") else 0.7
         hesitation = self.micro_humanizer.hesitate_before_action(importance)
@@ -1094,6 +1169,10 @@ class AdvancedAntiBanSystem:
             "risk": risk,
             "risk_trend": self.risk_scorer.get_trend(),
             "session": self.session_orchestrator.get_status(),
+            "adaptive_pacing": {
+                "next_attack_delay": round(self.get_adaptive_pacing(0.18, "attack"), 3),
+                "next_menu_delay": round(self.get_adaptive_pacing(0.28, "menu_nav"), 3),
+            },
             "fingerprint": self.fingerprint.summary(),
             "playstyle": self.playstyle.summary(),
             "aim_precision": round(self.aim_fatigue.get_precision_factor(), 3),

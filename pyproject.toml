@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "soberana-omega-brawl-bot"
+version = "1.0.0"
+description = "AI-powered Brawl Stars bot with real-time computer vision, adaptive combat, and anti-ban humanization"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [
+    {name = "Soberana Omega Team"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+
+dependencies = [
+    "numpy>=1.24.0",
+    "opencv-python>=4.8.0",
+    "pillow>=10.0.0",
+    "ultralytics>=8.0.0",
+    "scikit-learn>=1.3.0",
+    "easyocr>=1.7.0",
+    "pytesseract>=0.3.10",
+    "pyyaml>=6.0",
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.0",
+    "aiohttp>=3.8.0",
+    "roboflow>=1.1.0",
+    "pyautogui>=0.9.50",
+    "toml>=0.10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
+]
+gpu = [
+    "ultralytics[gpu]>=8.0.0",
+]
+
+[project.scripts]
+brawl-bot = "brawl_bot.wrapper:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["brawl_bot*", "pylaai_real*", "core*", "decision*", "vision*", "training*"]
+
+[tool.setuptools.package-data]
+brawl_bot = ["py.typed"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"

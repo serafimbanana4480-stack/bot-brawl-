@@ -99,6 +99,34 @@ def test_emulator_controller_no_safety_system():
     controller.adb.swipe.assert_called_once()
 
 
+def test_emulator_controller_uses_humanization_delays():
+    """Verifies that EmulatorController consults the humanization engine when available."""
+    from brawl_bot.emulator_controller import EmulatorController, EmulatorConfig
+
+    humanization = Mock()
+    humanization.config.enabled = True
+    humanization.get_tremor = Mock(return_value=(2.2, -1.4))
+    humanization.get_delay = Mock(return_value=0.01)
+
+    config = EmulatorConfig(
+        window_title="Test Emulator",
+        adb_path=None,
+        window_width=1280,
+        window_height=720
+    )
+    controller = EmulatorController(config, safety_system=None, humanization_system=humanization)
+
+    controller.adb = Mock()
+    controller.adb.tap = Mock(return_value=True)
+    controller.adb.swipe = Mock(return_value=True)
+
+    controller.tap_scaled(100, 200)
+    controller.swipe_scaled(100, 200, 300, 400, duration=300)
+
+    assert humanization.get_tremor.called
+    assert humanization.get_delay.call_count >= 2
+
+
 def test_safety_system_receives_tap_data():
     """Verifies that safety_system receives correct tap data."""
     from brawl_bot.safety_system import SafetySystem, SafetyConfig

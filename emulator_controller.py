@@ -262,46 +262,17 @@ class ADBController:
         """
         if not commands:
             return []
-        
-        # For single command, just use normal execution
-        if len(commands) == 1:
-            cmd = [self.adb_path, "-s", self.device_id] + commands[0]
+
+        # FIX #17: Execute commands individually to avoid shell command injection risk
+        # The previous " && ".join() approach was vulnerable to argument injection
+        results = []
+        for args in commands:
+            cmd = [self.adb_path, "-s", self.device_id] + args
             try:
                 result = subprocess.run(cmd, capture_output=True, timeout=5)
-                return [result.returncode == 0]
+                results.append(result.returncode == 0)
             except Exception:
-                return [False]
-        
-        # Batch: write all commands to a temp script and execute via shell
-        results = []
-        script_lines = []
-        for args in commands:
-            full_cmd = " ".join([self.adb_path, "-s", self.device_id] + [str(a) for a in args])
-            script_lines.append(full_cmd)
-        
-        try:
-            script_content = " && ".join(script_lines)
-            result = subprocess.run(
-                ["cmd", "/c", script_content],
-                capture_output=True, timeout=min(30, 5 * len(commands))
-            )
-            # If batch succeeds, all individual commands succeeded
-            if result.returncode == 0:
-                results = [True] * len(commands)
-            else:
-                # Batch failed - fall back to individual execution
-                logger.warning("[ADB] Batch execution failed, falling back to individual")
-                for args in commands:
-                    cmd = [self.adb_path, "-s", self.device_id] + args
-                    try:
-                        r = subprocess.run(cmd, capture_output=True, timeout=5)
-                        results.append(r.returncode == 0)
-                    except Exception:
-                        results.append(False)
-        except Exception as e:
-            logger.error(f"[ADB] Batch execution error: {e}")
-            results = [False] * len(commands)
-        
+                results.append(False)
         return results
     
     def get_resilient_stats(self) -> dict:
@@ -454,12 +425,13 @@ class WindowController:
 class EmulatorController:
     """Controlador principal com Inteligência Soberana"""
 
-    def __init__(self, config: Optional[EmulatorConfig] = None, safety_system=None):
+    def __init__(self, config: Optional[EmulatorConfig] = None, safety_system=None, humanization_system=None):
         self.config = config or EmulatorConfig()
         self.adb = ADBController(self.config)
         self.window = WindowController(self.config.window_title)
         self.is_connected = False
         self.safety_system = safety_system
+        self.humanization_system = humanization_system
         logger.debug(f"[EMULATOR] EmulatorController inicializado com safety_system: {safety_system is not None}")
     
     def connect(self) -> bool:
@@ -506,8 +478,20 @@ class EmulatorController:
 
     def tap(self, x: int, y: int) -> bool:
         """Tap com Jitter e Humanização (Anti-Detection) - usa ADB para emuladores"""
-        jx = x + random.randint(-3, 3)
-        jy = y + random.randint(-3, 3)
+        jx, jy = x, y
+        if self.humanization_system and getattr(self.humanization_system, "config", None) and self.humanization_system.config.enabled:
+            try:
+                tremor_x, tremor_y = self.humanization_system.get_tremor()
+                jx += int(round(tremor_x))
+                jy += int(round(tremor_y))
+                delay = self.humanization_system.get_delay("tap")
+                if delay > 0:
+                    time.sleep(delay)
+            except Exception as e:
+                logger.debug(f"[TAP] Humanization fallback: {e}")
+
+        jx += random.randint(-3, 3)
+        jy += random.randint(-3, 3)
         
         logger.info(f"[TAP] Usando ADB tap em ({jx}, {jy})")
         result = self.adb.tap(jx, jy)
@@ -552,6 +536,11 @@ class EmulatorController:
         w, h = self.config.resolution
         # Randomizar duração para parecer humano
         d = duration + random.randint(-30, 30)
+        if self.humanization_system and getattr(self.humanization_system, "config", None) and self.humanization_system.config.enabled:
+            try:
+                d += int(self.humanization_system.get_delay("movement") * 1000)
+            except Exception as e:
+                logger.debug(f"[SWIPE] Humanization fallback: {e}")
         real_x1, real_y1 = int(rx1*w), int(ry1*h)
         real_x2, real_y2 = int(rx2*w), int(ry2*h)
         result = self.adb.swipe(real_x1, real_y1, real_x2, real_y2, d)

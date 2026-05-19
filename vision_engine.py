@@ -460,3 +460,39 @@ class YOLOVisionEngine:
             self._adaptive_skipper.update_enemy_count(enemy_count)
 
         return detections
+
+    def get_raw_detections(self) -> List[Dict]:
+        """Retorna últimas deteções em formato dict serializável."""
+        return [
+            {
+                "class_name": d.class_name,
+                "confidence": round(d.confidence, 3),
+                "x": d.x,
+                "y": d.y,
+                "width": d.width,
+                "height": d.height,
+                "center_x": d.center_x,
+                "center_y": d.center_y,
+            }
+            for d in self._last_detections
+        ]
+
+    def get_vision_stats(self) -> Dict:
+        """Estatísticas do motor de visão para a dashboard."""
+        fps_stats = self._adaptive_skipper.get_stats() if self._adaptive_skipper else {}
+        detections = self._last_detections
+        class_counts = {}
+        for d in detections:
+            class_counts[d.class_name] = class_counts.get(d.class_name, 0) + 1
+        avg_conf = sum(d.confidence for d in detections) / max(1, len(detections))
+        return {
+            "initialized": self.is_initialized,
+            "models_loaded": len(self.models),
+            "loaded_classes": sorted(self.loaded_classes & self.BRAWL_STARS_CLASSES),
+            "frame_count": self.frame_count,
+            "last_detections_count": len(detections),
+            "class_counts": class_counts,
+            "avg_confidence": round(avg_conf, 3),
+            "device": self.device,
+            **fps_stats,
+        }

@@ -18,19 +18,14 @@ from collections import defaultdict
 import cv2
 import numpy as np
 
+from .class_schema import CORE_CLASSES, EXTENDED_CLASSES, get_schema
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)-8s | %(message)s")
 logger = logging.getLogger("validate_dataset")
 
-CLASS_NAMES = {
-    0: "Player",
-    1: "Enemy",
-    2: "Bush",
-    3: "Cubebox",
-    4: "Wall",
-    5: "Powerup",
-    6: "Bullet",
-    7: "Super",
-}
+CLASS_NAMES = EXTENDED_CLASSES
+CORE_CLASS_IDS = set(CORE_CLASSES.keys())
+EXTENDED_CLASS_IDS = set(EXTENDED_CLASSES.keys())
 
 
 def validate_structure(dataset_dir: Path) -> dict:
@@ -189,11 +184,14 @@ def check_bbox_sizes(dataset_dir: Path) -> dict:
     }
 
 
-def generate_report(dataset_dir: Path, output_path: Path = None) -> dict:
+def generate_report(dataset_dir: Path, output_path: Path = None, schema: str = "core") -> dict:
     """Gera relatório completo do dataset."""
+    expected_schema = get_schema(schema)
+    expected_ids = set(expected_schema.keys())
     logger.info("=" * 60)
     logger.info("DATASET VALIDATION REPORT")
     logger.info("=" * 60)
+    logger.info(f"Expected schema: {schema} ({len(expected_schema)} classes)")
 
     # Structure validation
     logger.info("\n[1] STRUCTURE VALIDATION")
@@ -225,6 +223,20 @@ def generate_report(dataset_dir: Path, output_path: Path = None) -> dict:
 
     empty_total = sum(stats["empty_images"].values())
     logger.info(f"\n  Empty label files: {empty_total}")
+
+    present_classes = set(stats["class_counts"].keys())
+    missing_core = sorted(CORE_CLASS_IDS - present_classes)
+    missing_extended = sorted(EXTENDED_CLASS_IDS - present_classes)
+    missing_expected = sorted(expected_ids - present_classes)
+    extra_classes = sorted(present_classes - expected_ids)
+    if missing_core:
+        logger.warning(f"  Missing core classes: {missing_core}")
+    if len(missing_extended) != len(EXTENDED_CLASSES):
+        logger.info(f"  Missing optional classes: {missing_extended}")
+    if missing_expected:
+        logger.warning(f"  Missing expected schema classes: {missing_expected}")
+    if extra_classes:
+        logger.warning(f"  Unexpected classes for {schema} schema: {extra_classes}")
 
     # Image quality
     logger.info("\n[3] IMAGE QUALITY (sample)")
@@ -260,6 +272,16 @@ def generate_report(dataset_dir: Path, output_path: Path = None) -> dict:
         "stats": stats,
         "quality": quality,
         "bboxes": bboxes,
+        "class_schema": {
+            "expected": sorted(expected_ids),
+            "core": sorted(CORE_CLASS_IDS),
+            "extended": sorted(EXTENDED_CLASS_IDS),
+            "present": sorted(present_classes),
+            "missing_core": missing_core,
+            "missing_optional": missing_extended,
+            "missing_expected": missing_expected,
+            "extra_classes": extra_classes,
+        },
     }
 
     if output_path:
@@ -278,6 +300,13 @@ def main():
                        help="Dataset directory to validate")
     parser.add_argument("--output", type=str, default=None,
                        help="Output JSON report path")
+    parser.add_argument(
+        "--schema",
+        type=str,
+        default="core",
+        choices=["core", "extended"],
+        help="Expected class schema for validation (default: core)",
+    )
     args = parser.parse_args()
 
     dataset_dir = Path(args.dataset)
@@ -287,7 +316,7 @@ def main():
         logger.error(f"Dataset directory not found: {dataset_dir}")
         return
 
-    generate_report(dataset_dir, output_path)
+    generate_report(dataset_dir, output_path, schema=args.schema)
 
 
 if __name__ == "__main__":

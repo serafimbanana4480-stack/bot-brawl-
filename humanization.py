@@ -311,21 +311,18 @@ class DelayRandomizer:
         """
         if not self.config.enabled:
             return 0.0
-        if action_type == "reaction":
-            # Tempo de reação humano: ~250ms com variância
-            base = self.config.reaction_time_base
-            variance = self.config.reaction_time_variance
-        elif action_type == "decision":
-            # Decisões demoram mais
-            base = 0.5
-            variance = 0.3
-        elif action_type == "movement":
-            # Movimentos são mais rápidos
-            base = 0.15
-            variance = 0.1
-        else:
-            base = (self.config.min_delay + self.config.max_delay) / 2
-            variance = (self.config.max_delay - self.config.min_delay) / 4
+        action_type = (action_type or "default").lower()
+        profiles = {
+            "reaction": (self.config.reaction_time_base, self.config.reaction_time_variance),
+            "decision": (0.55, 0.30),
+            "movement": (0.18, 0.08),
+            "tap": (0.20, 0.12),
+            "attack": (0.16, 0.10),
+            "super": (0.28, 0.14),
+            "menu": (0.32, 0.18),
+            "default": ((self.config.min_delay + self.config.max_delay) / 2, (self.config.max_delay - self.config.min_delay) / 4),
+        }
+        base, variance = profiles.get(action_type, profiles["default"])
         
         delay = random.gauss(base, variance)
         
@@ -524,9 +521,13 @@ class HumanizationEngine:
         path = self.mouse.humanize_path((x1, y1), (x2, y2))
 
         # Executar movimento
+        start = time.time()
         for x, y, timestamp in path:
             pyautogui.moveTo(x, y)
-            time.sleep(0.016)  # ~60fps
+            target_elapsed = max(0.0, timestamp)
+            current_elapsed = time.time() - start
+            sleep_time = max(0.008, min(0.028, target_elapsed - current_elapsed + random.uniform(-0.004, 0.004)))
+            time.sleep(sleep_time)
 
 
 # Singleton instance para uso global

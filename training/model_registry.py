@@ -11,12 +11,18 @@ import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass, asdict
 from datetime import datetime
 import hashlib
 
 logger = logging.getLogger(__name__)
+
+PathLike = Union[str, Path]
+
+
+def _coerce_path(path: PathLike) -> Path:
+    return path if isinstance(path, Path) else Path(path)
 
 
 @dataclass
@@ -30,6 +36,7 @@ class ModelMetadata:
     training_data: str
     training_metrics: Dict[str, float]
     validation_metrics: Dict[str, float]
+    class_schema: str = "core"
     is_deployed: bool = False
     is_active: bool = False
     parent_model_id: Optional[str] = None  # For tracking lineage
@@ -61,7 +68,7 @@ class ModelRegistry:
         Args:
             registry_dir: Directory to store registry data
         """
-        self.registry_dir = Path(registry_dir)
+        self.registry_dir = _coerce_path(registry_dir)
         self.registry_dir.mkdir(parents=True, exist_ok=True)
         
         self.models_file = self.registry_dir / "models.json"
@@ -80,6 +87,7 @@ class ModelRegistry:
                 with open(self.models_file, 'r') as f:
                     data = json.load(f)
                     for model_id, model_data in data.items():
+                        model_data.setdefault("class_schema", "core")
                         self.models[model_id] = ModelMetadata(**model_data)
                 logger.info(f"Loaded {len(self.models)} models from registry")
             except Exception as e:
@@ -89,8 +97,10 @@ class ModelRegistry:
         """Save model metadata to file."""
         try:
             data = {model_id: asdict(model) for model_id, model in self.models.items()}
-            with open(self.models_file, 'w') as f:
+            tmp_file = self.models_file.with_suffix(".json.tmp")
+            with open(tmp_file, 'w', encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
+            tmp_file.replace(self.models_file)
         except Exception as e:
             logger.error(f"Error saving models: {e}")
     
@@ -109,25 +119,28 @@ class ModelRegistry:
         """Save performance history to file."""
         try:
             data = [asdict(perf) for perf in self.performance_history]
-            with open(self.performance_file, 'w') as f:
+            tmp_file = self.performance_file.with_suffix(".json.tmp")
+            with open(tmp_file, 'w', encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
+            tmp_file.replace(self.performance_file)
         except Exception as e:
             logger.error(f"Error saving performance: {e}")
     
     def _generate_model_id(self, model_type: str) -> str:
         """Generate unique model ID."""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         random_suffix = hashlib.md5(timestamp.encode()).hexdigest()[:8]
         return f"{model_type}_{timestamp}_{random_suffix}"
     
     def register_model(
         self,
-        model_path: Path,
+        model_path: PathLike,
         model_type: str,
         version: str,
         training_data: str,
         training_metrics: Dict[str, float],
         validation_metrics: Dict[str, float],
+        class_schema: str = "core",
         parent_model_id: Optional[str] = None
     ) -> str:
         """
@@ -146,6 +159,10 @@ class ModelRegistry:
             Model ID
         """
         model_id = self._generate_model_id(model_type)
+        model_path = _coerce_path(model_path)
+        if not model_path.exists():
+            logger.error(f"Model path not found: {model_path}")
+            return ""
         
         # Copy model to registry storage
         storage_dir = self.registry_dir / "models" / model_type
@@ -167,6 +184,7 @@ class ModelRegistry:
             version=version,
             created_at=datetime.now().isoformat(),
             model_type=model_type,
+            class_schema=class_schema,
             training_data=training_data,
             training_metrics=training_metrics,
             validation_metrics=validation_metrics,

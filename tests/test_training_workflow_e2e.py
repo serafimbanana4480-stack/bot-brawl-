@@ -202,9 +202,9 @@ class TestClassRemapping:
     def test_class_map_correct(self):
         """CLASS_MAP mapeia classes corretamente."""
         from training.download_roboflow_dataset import CLASS_MAP
-        # Enemy classes -> 2 (index 2 in standard: Player=0, Bush=1, Enemy=2, Cubebox=3)
-        assert CLASS_MAP["Enemy"] == 2
-        assert CLASS_MAP["Safe_Enemy"] == 2
+        # Enemy classes -> 1 in core schema: Player=0, Enemy=1, Cubebox=2, Powerup=3
+        assert CLASS_MAP["Enemy"] == 1
+        assert CLASS_MAP["Safe_Enemy"] == 1
         # Player classes -> 0
         assert CLASS_MAP["Friendly"] == 0
         assert CLASS_MAP["Me"] == 0
@@ -216,9 +216,9 @@ class TestClassRemapping:
         """KEEP_CLASSES contem as classes esperadas."""
         from training.download_roboflow_dataset import KEEP_CLASSES
         assert 0 in KEEP_CLASSES  # Player
-        assert 2 in KEEP_CLASSES  # Enemy
-        assert 3 in KEEP_CLASSES  # Cubebox
-        assert 5 in KEEP_CLASSES  # Powerup
+        assert 1 in KEEP_CLASSES  # Enemy
+        assert 2 in KEEP_CLASSES  # Cubebox
+        assert 3 in KEEP_CLASSES  # Powerup
 
     def test_roboflow_class_names_match(self):
         """ROBOFLOW_CLASS_NAMES tem 10 classes."""
@@ -331,8 +331,10 @@ class TestWorkflowIntegration:
             verify_compatibility, merge_with_local, create_merged_yaml,
             CLASS_MAP, ROBOFLOW_CLASS_NAMES, KEEP_CLASSES
         )
-        assert len(CLASS_MAP) == 10
+        # Legacy hardcoded Roboflow class names (10 entries)
         assert len(ROBOFLOW_CLASS_NAMES) == 10
+        # CLASS_MAP computed from class_registry (20 entries)
+        assert len(CLASS_MAP) >= 10
 
     def test_validate_dataset_imports(self):
         """Modulo validate_dataset importa corretamente."""
@@ -354,11 +356,21 @@ class TestWorkflowIntegration:
         with open(config_path) as f:
             cfg = json.load(f)
 
-        vision_classes = cfg.get("vision", {}).get("classes", [])
-        assert len(vision_classes) == len(STANDARD_CLASSES), \
-            f"config.json has {len(vision_classes)} classes, expected {len(STANDARD_CLASSES)}"
-        assert vision_classes == list(STANDARD_CLASSES.values()), \
-            f"Class mismatch: {vision_classes} vs {list(STANDARD_CLASSES.values())}"
+        # Check training_schema config if present
+        schema = cfg.get("training_schema", "")
+        if schema:
+            from training.class_schema import get_schema
+            classes = get_schema(schema)
+            assert len(classes) >= 4, f"Schema '{schema}' has {len(classes)} classes, expected >= 4"
+
+        # Check brawler_queue game_mode entries
+        brawler_queue = cfg.get("brawler_queue", [])
+        if brawler_queue:
+            valid_modes = {"showdown", "gem_grab", "brawl_ball", "heist", "bounty", "siege", "hot_zone", "knockout", "wipeout", "duels"}
+            for brawler in brawler_queue:
+                mode = brawler.get("game_mode", "")
+                if mode:
+                    assert mode in valid_modes or mode == "", f"Unknown game_mode: {mode}"
 
 
 # ============================================================

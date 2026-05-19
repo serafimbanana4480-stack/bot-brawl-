@@ -26,15 +26,15 @@ echo [OK] Python encontrado
 python --version
 echo.
 
-REM Verificar se api.py existe
-if not exist "api.py" (
-    echo [ERRO] api.py não encontrado no diretório atual!
+REM Verificar se api_server.py existe
+if not exist "api_server.py" (
+    echo [ERRO] api_server.py não encontrado no diretório atual!
     echo Por favor, execute este script no diretório backend/brawl_bot/
     pause
     exit /b 1
 )
 
-echo [OK] api.py encontrado
+echo [OK] api_server.py encontrado
 echo.
 
 REM Verificar dependências
@@ -60,6 +60,6 @@ echo Pressione Ctrl+C para parar o servidor
 echo ========================================
 echo.
 
-python api.py
+python api_server.py
 
 pause

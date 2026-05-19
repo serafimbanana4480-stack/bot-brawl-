@@ -257,12 +257,23 @@ class DashboardDataBridge:
                     logger.debug(f"[DASHBOARD] Debug visualizer stats unavailable: {e}")
                     kwargs["debug_visualizer_enabled"] = True
 
-            # Premium: Brawler stats & trophies
+            # Premium: Brawler stats & trophies (sync with match_controller history)
             try:
+                mc = getattr(w, 'match_controller', None)
+                if mc and mc.history:
+                    for m in mc.history.matches:
+                        self.brawler_tracker.record_match(
+                            brawler=m.brawler,
+                            map_name=getattr(m, 'game_mode', ''),
+                            result=m.result,
+                            kills=getattr(m, 'kills', 0),
+                            deaths=0,
+                            duration=getattr(m, 'duration_seconds', 0.0),
+                        )
                 kwargs["brawler_stats"] = self.brawler_tracker.get_all_stats()
                 kwargs["total_trophies"] = self.brawler_tracker.get_total_trophies()
                 kwargs["unlocked_brawlers"] = self.brawler_tracker.get_unlocked_count()
-                kwargs["total_brawlers"] = 80  # Brawl Stars total brawlers
+                kwargs["total_brawlers"] = max(80, self.brawler_tracker.get_unlocked_count())
                 kwargs["trophy_history"] = self.trophy_tracker.get_trophy_history(30)
                 kwargs["daily_evolution"] = self.trophy_tracker.get_daily_evolution(14)
                 kwargs["weekly_progress"] = self.trophy_tracker.get_weekly_progress()
@@ -1023,8 +1034,25 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         if path == "/" or path == "/dashboard":
             self._send_html(_DASHBOARD_HTML)
+        elif path == "/api/health":
+            self._send_json({
+                "ok": True,
+                "dashboard": True,
+                "bot_connected": bool(self.wrapper_ref),
+                "timestamp": time.time(),
+            })
         elif path == "/api/live":
             data = self.bridge.get_snapshot() if self.bridge else {}
+            # Merge wrapper_ref running state when bridge is stale
+            w = self.wrapper_ref
+            if w and not data.get("running"):
+                data["running"] = getattr(w, 'running', False)
+                sm = getattr(w, 'state_manager', None)
+                if sm:
+                    data["current_state"] = data.get("current_state") or sm.current_state
+                    brawler = getattr(sm, 'current_brawler', None)
+                    if brawler:
+                        data["brawler"] = data.get("brawler") or brawler
             self._send_json(data)
         elif path == "/api/history":
             data = self.bridge.get_history() if self.bridge else []
@@ -1216,6 +1244,93 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     self._send_json({"error": str(e)}, 500)
             else:
                 self._send_json({"enabled": False, "error": "Anti-ban not available"})
+        elif path == "/api/training/models":
+            # Training & Models data: registry + dataset + last training report
+            training_data = {"models": [], "dataset": {}, "last_training": None}
+            try:
+                # Model Registry
+                from core.model_registry import ModelRegistry
+                registry = ModelRegistry()
+                models_list = []
+                for name, versions in registry._models.items():
+                    for ver_str, ver in versions.items():
+                        models_list.append({
+                            "name": name,
+                            "version": ver_str,
+                            "schema": ver.metadata.get("training_data", "—") if ver.metadata else "—",
+                            "map50": ver.metrics.get("mAP50", 0.0),
+                            "map50_95": ver.metrics.get("mAP50-95", 0.0),
+                            "is_active": registry._active.get(name) == ver_str,
+                            "created": ver.created_at,
+                        })
+                training_data["models"] = sorted(models_list, key=lambda x: x["created"], reverse=True)
+
+                # Scan models/ directory if requested
+                if "scan" in self.path:
+                    models_dir = Path("models")
+                    scanned = 0
+                    if models_dir.exists():
+                        for pt_file in models_dir.glob("*.pt"):
+                            if pt_file.stem not in ["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"]:
+                                try:
+                                    registry.register(f"yolo_scanned", pt_file, version=None, metrics={})
+                                    scanned += 1
+                                except Exception:
+                                    pass
+                    training_data["scanned"] = scanned
+            except Exception as e:
+                logger.debug(f"[DASHBOARD] Training models error: {e}")
+
+            # Dataset stats from last derived dataset
+            try:
+                datasets = sorted(Path("dataset").glob("roboflow_raw_v2_*"), key=lambda p: p.stat().st_mtime, reverse=True)
+                if datasets:
+                    ds = datasets[0]
+                    total_imgs = 0
+                    total_boxes = 0
+                    class_dist = {}
+                    for split in ("train", "val"):
+                        lbl_dir = ds / split / "labels"
+                        if lbl_dir.exists():
+                            for lbl in lbl_dir.glob("*.txt"):
+                                total_imgs += 1
+                                for line in lbl.read_text(encoding="utf-8").splitlines():
+                                    parts = line.strip().split()
+                                    if len(parts) >= 5:
+                                        try:
+                                            cls_id = int(parts[0])
+                                            total_boxes += 1
+                                            class_dist[str(cls_id)] = class_dist.get(str(cls_id), 0) + 1
+                                        except ValueError:
+                                            pass
+                    training_data["dataset"] = {
+                        "total_images": total_imgs,
+                        "total_boxes": total_boxes,
+                        "num_classes": len(class_dist),
+                        "class_distribution": dict(sorted(class_dist.items())),
+                    }
+            except Exception:
+                pass
+
+            # Last training report
+            try:
+                reports = sorted(Path("runs").glob("*/training_report.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+                if reports:
+                    with open(reports[0], "r", encoding="utf-8") as f:
+                        import json as _json
+                        report = _json.load(f)
+                    training_data["last_training"] = {
+                        "run_id": report.get("run_id"),
+                        "timestamp": report.get("timestamp"),
+                        "schema": report.get("config", {}).get("schema"),
+                        "map50": report.get("validation_metrics", {}).get("mAP50"),
+                        "map50_95": report.get("validation_metrics", {}).get("mAP50-95"),
+                        "duration_seconds": report.get("duration_seconds"),
+                    }
+            except Exception:
+                pass
+
+            self._send_json(training_data)
         elif path == "/api/export/stats":
             # Export all stats as JSON
             w = self.wrapper_ref
@@ -1258,6 +1373,71 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if w and hasattr(w, 'v2_integrator') and w.v2_integrator and w.v2_integrator._checkpointer:
                 cp = w.v2_integrator._checkpointer.get_stats()
             self._send_json(cp)
+        # Learning Mode endpoints
+        elif path == '/api/learning-mode/status':
+            w = self.wrapper_ref
+            data = {"active": False, "metrics": {}}
+            if w and hasattr(w, 'learning_mode_controller') and w.learning_mode_controller:
+                try:
+                    data = w.learning_mode_controller.get_live_metrics()
+                except Exception as e:
+                    logger.debug(f"[DASHBOARD] Learning mode metrics error: {e}")
+            self._send_json(data)
+        elif path == '/api/learning-mode/history':
+            w = self.wrapper_ref
+            history = []
+            if w and hasattr(w, 'learning_mode_controller') and w.learning_mode_controller and w.learning_mode_controller.metrics:
+                try:
+                    history = w.learning_mode_controller.metrics.get_session_history()
+                except Exception as e:
+                    logger.debug(f"[DASHBOARD] Learning mode history error: {e}")
+            self._send_json({"matches": history})
+        elif path == '/api/esp/frame':
+            # Retorna screenshot anotado + detecoes JSON
+            w = self.wrapper_ref
+            data = {"detections": [], "vision_stats": {}, "screenshot_b64": ""}
+            if w and hasattr(w, 'get_detection_snapshot'):
+                try:
+                    data = w.get_detection_snapshot()
+                except Exception as e:
+                    logger.debug(f"[DASHBOARD] ESP frame error: {e}")
+            self._send_json(data)
+        elif path == '/api/vision/stats':
+            w = self.wrapper_ref
+            stats = {}
+            if w and hasattr(w, 'get_detection_snapshot'):
+                try:
+                    stats = w.get_detection_snapshot().get("vision_stats", {})
+                except Exception as e:
+                    logger.debug(f"[DASHBOARD] Vision stats error: {e}")
+            self._send_json(stats)
+        elif path == '/api/detections/live':
+            w = self.wrapper_ref
+            detections = []
+            if w and hasattr(w, 'get_detection_snapshot'):
+                try:
+                    detections = w.get_detection_snapshot().get("detections", [])
+                except Exception as e:
+                    logger.debug(f"[DASHBOARD] Detections live error: {e}")
+            self._send_json({"detections": detections, "timestamp": time.time()})
+        elif path == '/api/mode/status':
+            w = self.wrapper_ref
+            status = {"available": False}
+            if w and hasattr(w, 'get_mode_status'):
+                try:
+                    status = w.get_mode_status()
+                except Exception as e:
+                    logger.debug(f"[DASHBOARD] Mode status error: {e}")
+            self._send_json(status)
+        elif path == '/api/rl/metrics':
+            w = self.wrapper_ref
+            metrics = {}
+            if w and hasattr(w, 'get_rl_metrics'):
+                try:
+                    metrics = w.get_rl_metrics()
+                except Exception as e:
+                    logger.debug(f"[DASHBOARD] RL metrics error: {e}")
+            self._send_json(metrics)
         elif path == '/api/logs':
             # Phase 2: Log viewer endpoint
             if self.log_buffer:
@@ -1377,10 +1557,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if w:
                 try:
                     if not getattr(w, 'running', False):
-                        if not w.setup():
-                            self._send_json({"ok": False, "error": "Setup failed - emulator not running?"})
+                        setup_ok = True
+                        if hasattr(w, 'setup'):
+                            setup_ok = w.setup()
+                        if not setup_ok:
+                            self._send_json({"ok": False, "error": "Setup failed - verify emulator, window focus and config"})
                             return
-                        w.start()
+                        started = w.start()
+                        if not started:
+                            self._send_json({"ok": False, "error": "Failed to start bot - safety, anti-ban or runtime block"})
+                            return
                         self._send_json({"ok": True, "status": "started"})
                     else:
                         self._send_json({"ok": True, "status": "already_running"})
@@ -1590,6 +1776,104 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "error": str(e)}, 500)
             else:
                 self._send_json({"ok": False, "error": "NotificationManager not available"}, 500)
+        elif path == "/api/learning-mode/start":
+            w = self.wrapper_ref
+            if w and hasattr(w, 'toggle_learning_mode'):
+                try:
+                    max_matches = payload.get("max_matches", 5)
+                    result = w.toggle_learning_mode(enabled=True, max_matches=max_matches)
+                    self._send_json({"ok": result, "status": "started" if result else "failed"})
+                except Exception as e:
+                    self._send_json({"ok": False, "error": str(e)}, 500)
+            else:
+                self._send_json({"ok": False, "error": "Bot not connected or learning mode unavailable"}, 500)
+        elif path == "/api/learning-mode/stop":
+            w = self.wrapper_ref
+            if w and hasattr(w, 'toggle_learning_mode'):
+                try:
+                    result = w.toggle_learning_mode(enabled=False)
+                    self._send_json({"ok": result, "status": "stopped" if result else "failed"})
+                except Exception as e:
+                    self._send_json({"ok": False, "error": str(e)}, 500)
+            else:
+                self._send_json({"ok": False, "error": "Bot not connected or learning mode unavailable"}, 500)
+        elif path == "/api/esp/toggle":
+            w = self.wrapper_ref
+            if w and hasattr(w, 'toggle_esp'):
+                try:
+                    enabled = payload.get("enabled", None)
+                    result = w.toggle_esp(enabled)
+                    self._send_json({"ok": result, "status": "on" if result else "off"})
+                except Exception as e:
+                    self._send_json({"ok": False, "error": str(e)}, 500)
+            else:
+                self._send_json({"ok": False, "error": "ESP not available"}, 500)
+        elif path == "/api/mode/training/start":
+            w = self.wrapper_ref
+            if w and hasattr(w, 'start_mode'):
+                try:
+                    config = payload.get("config", {})
+                    result = w.start_mode("training", config)
+                    self._send_json({"ok": result, "status": "started" if result else "failed"})
+                except Exception as e:
+                    self._send_json({"ok": False, "error": str(e)}, 500)
+            else:
+                self._send_json({"ok": False, "error": "Mode controller not available"}, 500)
+        elif path == "/api/mode/training/stop":
+            w = self.wrapper_ref
+            if w and hasattr(w, 'stop_mode'):
+                try:
+                    result = w.stop_mode("training")
+                    self._send_json({"ok": result, "status": "stopped" if result else "failed"})
+                except Exception as e:
+                    self._send_json({"ok": False, "error": str(e)}, 500)
+            else:
+                self._send_json({"ok": False, "error": "Mode controller not available"}, 500)
+        elif path == "/api/mode/farm/start":
+            w = self.wrapper_ref
+            if w and hasattr(w, 'start_mode'):
+                try:
+                    config = payload.get("config", {})
+                    result = w.start_mode("farm", config)
+                    self._send_json({"ok": result, "status": "started" if result else "failed"})
+                except Exception as e:
+                    self._send_json({"ok": False, "error": str(e)}, 500)
+            else:
+                self._send_json({"ok": False, "error": "Mode controller not available"}, 500)
+        elif path == "/api/mode/farm/stop":
+            w = self.wrapper_ref
+            if w and hasattr(w, 'stop_mode'):
+                try:
+                    result = w.stop_mode("farm")
+                    self._send_json({"ok": result, "status": "stopped" if result else "failed"})
+                except Exception as e:
+                    self._send_json({"ok": False, "error": str(e)}, 500)
+            else:
+                self._send_json({"ok": False, "error": "Mode controller not available"}, 500)
+        elif path == "/api/mode/learn/start":
+            w = self.wrapper_ref
+            if w and hasattr(w, 'start_mode'):
+                try:
+                    config = payload.get("config", {})
+                    result = w.start_mode("learn", config)
+                    self._send_json({"ok": result, "status": "started" if result else "failed"})
+                except Exception as e:
+                    self._send_json({"ok": False, "error": str(e)}, 500)
+            else:
+                self._send_json({"ok": False, "error": "Mode controller not available"}, 500)
+        elif path == "/api/mode/learn/stop":
+            w = self.wrapper_ref
+            if w and hasattr(w, 'stop_mode'):
+                try:
+                    result = w.stop_mode("learn")
+                    self._send_json({"ok": result, "status": "stopped" if result else "failed"})
+                except Exception as e:
+                    self._send_json({"ok": False, "error": str(e)}, 500)
+            else:
+                self._send_json({"ok": False, "error": "Mode controller not available"}, 500)
+        elif path == "/api/rl/config":
+            # Atualiza hiperparametros RL (placeholder — engine ajusta dinamicamente)
+            self._send_json({"ok": True, "message": "RL config update not yet implemented"})
         elif path == "/api/config":
             # Phase 4: Save config.json
             try:
@@ -1720,6 +2004,12 @@ _DASHBOARD_HTML = '''<!DOCTYPE html>
   }
   /* Toast */
   @keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+  /* Start button pulse animation */
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.6)}70%{box-shadow:0 0 0 10px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+  .btn-start{animation:pulse 2s infinite}
+  .btn-start.disabled{opacity:.5;cursor:not-allowed;animation:none}
+  .btn-start.running{background:#64748b;animation:none}
+  .btn.disabled{opacity:.5;cursor:not-allowed;pointer-events:none}
 </style>
 </head>
 <body>
@@ -1748,6 +2038,11 @@ _DASHBOARD_HTML = '''<!DOCTYPE html>
   <div class="tab" onclick="showTab('config')">Config <span class="badge green">NEW</span></div>
   <div class="tab" onclick="showTab('antiban')">Anti-Ban <span class="badge green">NEW</span></div>
   <div class="tab" onclick="showTab('analytics')">Analytics <span class="badge green">NEW</span></div>
+  <div class="tab" onclick="showTab('learning')">Modo Teste <span class="badge green">LIVE</span></div>
+  <div class="tab" onclick="showTab('farm')">Executar Bot <span class="badge green">LIVE</span></div>
+  <div class="tab" onclick="showTab('learn')">Modo Aprender <span class="badge purple">AI</span></div>
+  <div class="tab" onclick="showTab('detections')">Visao <span class="badge green">ESP</span></div>
+  <div class="tab premium" onclick="showTab('training')">Training <span class="badge gold">PRO</span></div>
 </div>
 
 <div id="tab-live" class="tab-content active">
@@ -1759,10 +2054,10 @@ _DASHBOARD_HTML = '''<!DOCTYPE html>
         <div class="metric small" id="stateVal">—</div>
         <div class="label" id="brawlerVal">—</div>
         <div style="margin-top:.5rem">
-          <span class="btn" style="background:#22c55e" onclick="botStart()">Iniciar</span>
-          <span class="btn danger" onclick="botStop()">Parar</span>
-          <span class="btn warn" onclick="botRestart()">Reiniciar</span>
-          <span class="btn" id="pauseBtn" style="background:#f59e0b" onclick="botPauseToggle()">Pausar</span>
+          <span class="btn btn-start" id="startBtn" style="background:#22c55e" onclick="botStart()">Iniciar</span>
+          <span class="btn danger disabled" id="stopBtn" onclick="botStop()">Parar</span>
+          <span class="btn warn disabled" id="restartBtn" onclick="botRestart()">Reiniciar</span>
+          <span class="btn disabled" id="pauseBtn" style="background:#f59e0b" onclick="botPauseToggle()">Pausar</span>
         </div>
         <div style="margin-top:.3rem">
           <span class="btn" onclick="fetch('/api/replay/start',{method:'POST',body:'{}'})">Gravar Replay</span>
@@ -2258,6 +2553,232 @@ _DASHBOARD_HTML = '''<!DOCTYPE html>
 </div>
 </div>
 
+<div id="tab-learning" class="tab-content">
+<div class="grid">
+  <div class="card" style="grid-column:1 / -1">
+    <h2>Controlo Modo Teste <span class="badge green">LIVE</span></h2>
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center">
+      <div style="flex:1;min-width:200px">
+        <div class="metric small" id="lmStatusVal">Inativo</div>
+        <div class="label">Partida <span id="lmMatchVal">0</span> / <span id="lmMaxVal">0</span></div>
+      </div>
+      <div>
+        <span class="btn" style="background:#22c55e" onclick="startLearningMode()">Iniciar Modo Teste</span>
+        <span class="btn danger" onclick="stopLearningMode()">Parar Modo Teste</span>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Kills</h2>
+    <div class="metric" id="lmKillsVal">0</div>
+    <div class="label">Mortes: <span id="lmDeathsVal">0</span></div>
+  </div>
+  <div class="card">
+    <h2>Detecoes</h2>
+    <div class="metric" id="lmDetectVal">0</div>
+    <div class="label">Player: <span id="lmPlayerVal">0</span></div>
+  </div>
+  <div class="card">
+    <h2>Precisao</h2>
+    <div class="metric" id="lmAccuracyVal">0%</div>
+    <div class="label">Kills / Ataques</div>
+  </div>
+  <div class="card">
+    <h2>Dano</h2>
+    <div class="metric small" id="lmDamageVal">0</div>
+    <div class="label">Infligido</div>
+  </div>
+  <div class="card">
+    <h2>Sobrevivencia</h2>
+    <div class="metric small" id="lmSurvivalVal">0s</div>
+    <div class="label">Duracao atual</div>
+  </div>
+  <div class="card">
+    <h2>Brawler</h2>
+    <div class="metric small" id="lmBrawlerVal">—</div>
+    <div class="label">Em teste</div>
+  </div>
+  <div class="card" style="grid-column:1 / -1">
+    <h2>Grafico Deteccoes (ultimos 60s)</h2>
+    <canvas id="lmDetectChart" height="200"></canvas>
+  </div>
+  <div class="card" style="grid-column:1 / -1">
+    <h2>Kills por Partida</h2>
+    <canvas id="lmKillsChart" height="200"></canvas>
+  </div>
+  <div class="card" style="grid-column:1 / -1">
+    <h2>Historico de Treino</h2>
+    <table><thead><tr><th>Brawler</th><th>Resultado</th><th>Kills</th><th>Mortes</th><th>Duracao</th></tr></thead>
+    <tbody id="lmHistoryTable"><tr><td colspan="5">Sem dados</td></tr></tbody></table>
+  </div>
+</div>
+</div>
+
+<div id="tab-farm" class="tab-content">
+<div class="grid">
+  <div class="card" style="grid-column:1 / -1">
+    <h2>Controlo Modo Executar <span class="badge green">LIVE</span></h2>
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center">
+      <div style="flex:1;min-width:200px">
+        <div class="metric small" id="farmStatusVal">Inativo</div>
+        <div class="label">Partidas: <span id="farmMatchVal">0</span> / <span id="farmTargetVal">0</span></div>
+      </div>
+      <div>
+        <span class="btn" style="background:#22c55e" onclick="startFarmMode()">Iniciar Farm</span>
+        <span class="btn danger" onclick="stopFarmMode()">Parar Farm</span>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Trofeus Sessao</h2>
+    <div class="metric" id="farmTrophiesVal">0</div>
+    <div class="label">Ganhos/perdidos</div>
+  </div>
+  <div class="card">
+    <h2>Win Rate</h2>
+    <div class="metric" id="farmWinRateVal">0%</div>
+    <div class="label">W / L / D</div>
+  </div>
+  <div class="card">
+    <h2>Tempo Medio</h2>
+    <div class="metric small" id="farmAvgTimeVal">0s</div>
+    <div class="label">Por partida</div>
+  </div>
+  <div class="card">
+    <h2>APM</h2>
+    <div class="metric small" id="farmApmVal">0</div>
+    <div class="label">Acoes/min</div>
+  </div>
+  <div class="card">
+    <h2>Estado</h2>
+    <div class="metric small" id="farmStateVal">—</div>
+    <div class="label">Atual</div>
+  </div>
+  <div class="card">
+    <h2>Brawler</h2>
+    <div class="metric small" id="farmBrawlerVal">—</div>
+    <div class="label">Em uso</div>
+  </div>
+  <div class="card" style="grid-column:1 / -1">
+    <h2>Grafico de Trofeus</h2>
+    <canvas id="farmTrophyChart" height="200"></canvas>
+  </div>
+</div>
+</div>
+
+<div id="tab-learn" class="tab-content">
+<div class="grid">
+  <div class="card" style="grid-column:1 / -1">
+    <h2>Controlo Modo Aprender <span class="badge purple">AI</span></h2>
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center">
+      <div style="flex:1;min-width:200px">
+        <div class="metric small" id="learnStatusVal">Inativo</div>
+        <div class="label">Motor: <span id="learnEngineVal">—</span></div>
+      </div>
+      <div>
+        <span class="btn" style="background:#7c3aed" onclick="startLearnMode()">Iniciar Aprender</span>
+        <span class="btn danger" onclick="stopLearnMode()">Parar Aprender</span>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Q-Table</h2>
+    <div class="metric" id="learnQTableVal">0</div>
+    <div class="label">Estados</div>
+  </div>
+  <div class="card">
+    <h2>Epsilon</h2>
+    <div class="metric" id="learnEpsilonVal">0.0</div>
+    <div class="label">Exploracao</div>
+  </div>
+  <div class="card">
+    <h2>Reward</h2>
+    <div class="metric small" id="learnRewardVal">0</div>
+    <div class="label">Ultimo / Episodio</div>
+  </div>
+  <div class="card">
+    <h2>PPO Loss</h2>
+    <div class="metric small" id="learnPpoLossVal">0</div>
+    <div class="label">Policy / Value</div>
+  </div>
+  <div class="card">
+    <h2>Buffer</h2>
+    <div class="metric small" id="learnBufferVal">0</div>
+    <div class="label">Experiencias</div>
+  </div>
+  <div class="card">
+    <h2>Acao</h2>
+    <div class="metric small" id="learnActionVal">—</div>
+    <div class="label">Ultima escolhida</div>
+  </div>
+  <div class="card" style="grid-column:1 / -1">
+    <h2>Rewards por Episodio</h2>
+    <canvas id="learnRewardChart" height="200"></canvas>
+  </div>
+  <div class="card" style="grid-column:1 / -1">
+    <h2>Contagem de Acoes</h2>
+    <canvas id="learnActionChart" height="200"></canvas>
+  </div>
+</div>
+</div>
+
+<div id="tab-detections" class="tab-content">
+<div class="grid">
+  <div class="card" style="grid-column:1 / -1">
+    <h2>ESP / Visao em Tempo Real <span class="badge green">ESP</span></h2>
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center">
+      <div style="flex:1;min-width:200px">
+        <div class="metric small" id="espStatusVal">OFF</div>
+        <div class="label">FPS: <span id="espFpsVal">0</span> | Objetos: <span id="espObjectsVal">0</span></div>
+      </div>
+      <div>
+        <span class="btn" style="background:#22c55e" onclick="toggleESP()">Ligar ESP</span>
+        <span class="btn danger" onclick="toggleESP(false)">Desligar ESP</span>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="grid-column:1 / -1">
+    <h2>Lista de Deteccoes</h2>
+    <table><thead><tr><th>Classe</th><th>Conf</th><th>X</th><th>Y</th><th>W</th><th>H</th></tr></thead>
+    <tbody id="detectionsTable"><tr><td colspan="6">Sem dados</td></tr></tbody></table>
+  </div>
+  <div class="card">
+    <h2>Inimigos</h2>
+    <div class="metric" id="detEnemyVal">0</div>
+    <div class="label">Detetados</div>
+  </div>
+  <div class="card">
+    <h2>Aliados</h2>
+    <div class="metric" id="detTeamVal">0</div>
+    <div class="label">Detetados</div>
+  </div>
+  <div class="card">
+    <h2>Paredes</h2>
+    <div class="metric" id="detWallVal">0</div>
+    <div class="label">Obstaculos</div>
+  </div>
+  <div class="card">
+    <h2>Arbustos</h2>
+    <div class="metric" id="detBushVal">0</div>
+    <div class="label">Esconderijos</div>
+  </div>
+  <div class="card">
+    <h2>Powerups</h2>
+    <div class="metric" id="detPowerVal">0</div>
+    <div class="label">Itens</div>
+  </div>
+  <div class="card">
+    <h2>Modelo</h2>
+    <div class="metric small" id="detModelVal">—</div>
+    <div class="label">Ativo</div>
+  </div>
+  <div class="card" style="grid-column:1 / -1">
+    <h2>Estatisticas de Visao</h2>
+    <div id="visionStats">A carregar...</div>
+  </div>
+</div>
+</div>
+
 <div id="tab-analytics" class="tab-content">
 <div class="grid">
   <div class="card" style="grid-column:1 / -1">
@@ -2293,6 +2814,37 @@ _DASHBOARD_HTML = '''<!DOCTYPE html>
 </div>
 </div>
 
+
+<div id="tab-training" class="tab-content">
+<div class="grid">
+  <div class="card" style="grid-column:1 / -1">
+    <h2>Model Registry <span class="badge gold">PRO</span></h2>
+    <div style="display:flex;gap:.5rem;margin-bottom:.5rem">
+      <span class="btn btn-sm" onclick="refreshTrainingModels()">Atualizar</span>
+      <span class="btn btn-sm" style="background:#7c3aed" onclick="rescanModels()">Scan Models/</span>
+    </div>
+    <table><thead><tr><th>Modelo</th><th>Versao</th><th>Schema</th><th>mAP50</th><th>Status</th></tr></thead>
+    <tbody id="modelsTable"><tr><td colspan="5">A carregar...</td></tr></tbody></table>
+  </div>
+  <div class="card">
+    <h2>Dataset Stats</h2>
+    <div class="row"><span class="label">Total Imagens</span><span id="dsImages" class="metric small">—</span></div>
+    <div class="row"><span class="label">Total Boxes</span><span id="dsBoxes" class="metric small">—</span></div>
+    <div class="row"><span class="label">Classes</span><span id="dsClasses" class="metric small">—</span></div>
+  </div>
+  <div class="card">
+    <h2>Class Distribution</h2>
+    <div id="dsClassDist" style="font-size:.75rem;max-height:200px;overflow-y:auto">—</div>
+  </div>
+  <div class="card" style="grid-column:1 / -1">
+    <h2>Ultimo Treino</h2>
+    <div id="lastTraining" style="font-family:monospace;font-size:.78rem;max-height:200px;overflow-y:auto">
+      <div class="label">Nenhum treino registado. Execute <code>python train.py</code></div>
+    </div>
+  </div>
+</div>
+</div>
+
 <script>
 const API = '';
 let lastEvents = [];
@@ -2306,9 +2858,17 @@ function showTab(id) {
 
 async function poll() {
   try {
+    const health = await fetch(API + '/api/health');
+    if (!health.ok) throw new Error('health check failed');
+
     const res = await fetch(API + '/api/live');
+    if (!res.ok) throw new Error('live endpoint failed');
     const d = await res.json();
-    document.getElementById('connStatus').innerHTML = '<span class="status-dot status-online"></span>Online';
+    const botConnected = !!d.running || !!d.current_state || !!d.brawler;
+    updateBotButtons(!!d.running);
+    document.getElementById('connStatus').innerHTML = botConnected
+      ? '<span class="status-dot status-online"></span>Online'
+      : '<span class="status-dot status-warning"></span>Dashboard OK • Bot Offline';
     document.getElementById('stateVal').textContent = d.current_state || '—';
     document.getElementById('brawlerVal').textContent = (d.brawler || '—') + ' @ ' + (d.map_name || '—');
     document.getElementById('matchesVal').textContent = d.matches_total || 0;
@@ -2453,26 +3013,44 @@ async function stopAB() {
 
 // Bot control functions
 async function botStart() {
+  const btn = document.getElementById('startBtn');
+  btn.classList.add('disabled'); btn.textContent = 'A iniciar...';
   try {
     const res = await fetch(API + '/api/bot/start', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
     const d = await res.json();
-    alert(d.ok ? 'Bot iniciado!' : 'Erro: ' + (d.error || 'falha'));
-  } catch(e) { alert('Erro ao iniciar: ' + e); }
+    if (d.ok) { toast('Bot iniciado!', 'success'); updateBotButtons(true); }
+    else { toast('Erro: ' + (d.error || 'falha'), 'error'); btn.classList.remove('disabled'); btn.textContent = 'Iniciar'; }
+  } catch(e) { toast('Erro ao iniciar: ' + e, 'error'); btn.classList.remove('disabled'); btn.textContent = 'Iniciar'; }
 }
 async function botStop() {
+  const btn = document.getElementById('stopBtn');
+  btn.classList.add('disabled'); btn.textContent = 'A parar...';
   try {
     const res = await fetch(API + '/api/bot/stop', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
     const d = await res.json();
-    alert(d.ok ? 'Bot parado!' : 'Erro: ' + (d.error || 'falha'));
-  } catch(e) { alert('Erro ao parar: ' + e); }
+    if (d.ok) { toast('Bot parado!', 'info'); updateBotButtons(false); }
+    else { toast('Erro: ' + (d.error || 'falha'), 'error'); btn.classList.remove('disabled'); btn.textContent = 'Parar'; }
+  } catch(e) { toast('Erro ao parar: ' + e, 'error'); btn.classList.remove('disabled'); btn.textContent = 'Parar'; }
 }
 async function botRestart() {
   if (!confirm('Reiniciar o bot?')) return;
+  toast('A reiniciar bot...', 'warning', 2000);
   try {
     const res = await fetch(API + '/api/bot/restart', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
     const d = await res.json();
-    alert(d.ok ? 'Bot reiniciado!' : 'Erro: ' + (d.error || 'falha'));
-  } catch(e) { alert('Erro ao reiniciar: ' + e); }
+    if (d.ok) { toast('Bot reiniciado!', 'success'); updateBotButtons(true); }
+    else { toast('Erro: ' + (d.error || 'falha'), 'error'); }
+  } catch(e) { toast('Erro ao reiniciar: ' + e, 'error'); }
+}
+function updateBotButtons(running) {
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const restartBtn = document.getElementById('restartBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  if (startBtn) { startBtn.classList.toggle('disabled', running); startBtn.classList.toggle('running', running); startBtn.textContent = 'Iniciar'; }
+  if (stopBtn) { stopBtn.classList.toggle('disabled', !running); stopBtn.textContent = 'Parar'; }
+  if (restartBtn) { restartBtn.classList.toggle('disabled', !running); }
+  if (pauseBtn) { pauseBtn.classList.toggle('disabled', !running); }
 }
 
 // Phase 1: Pause/Resume toggle
@@ -2536,7 +3114,6 @@ async function toggleSystem(system, enabled) {
   } catch(e) { console.warn('Toggle error:', e); }
 }
 
-// Phase 1: Update system toggles from status
 async function pollSystemStatus() {
   try {
     const res = await fetch(API + '/api/system/status');
@@ -2563,7 +3140,9 @@ async function pollSystemStatus() {
     if (botD.brawler_queue && botD.brawler_queue.length > 0) {
       const sel = document.getElementById('brawlerSelect');
       const currentVal = sel.value;
-      const options = botD.brawler_queue.map(b => `<option value="${b}">${b}</option>`).join('');
+      const options = botD.brawler_queue
+        .filter(b => b && (b.enabled === undefined || b.enabled))
+        .map(b => `<option value="${b.name || b}">${b.name || b}</option>`).join('');
       if (sel.innerHTML.indexOf(options) === -1) {
         sel.innerHTML = '<option value="">— Escolher —</option>' + options;
         sel.value = currentVal;
@@ -2643,7 +3222,7 @@ async function _startLogStream() {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n\n');
+      const lines = buffer.split('\\n\\n');
       buffer = lines.pop() || '';
       for (const chunk of lines) {
         const match = chunk.match(/^data: (.+)$/m);
@@ -2957,6 +3536,141 @@ async function pollAntiBan() {
   } catch(e){}
 }
 
+// Learning Mode Dashboard Functions
+let _lmHistory = [];
+
+async function pollLearningMode() {
+  try {
+    const res = await fetch(API + '/api/learning-mode/status');
+    const d = await res.json();
+    const active = d.active || false;
+    document.getElementById('lmStatusVal').textContent = active ? 'ATIVO' : 'Inativo';
+    document.getElementById('lmStatusVal').style.color = active ? '#22c55e' : '#94a3b8';
+    document.getElementById('lmMatchVal').textContent = d.current_match || 0;
+    document.getElementById('lmMaxVal').textContent = d.max_matches || 0;
+    document.getElementById('lmKillsVal').textContent = d.kills || 0;
+    document.getElementById('lmDeathsVal').textContent = d.deaths || 0;
+    document.getElementById('lmDetectVal').textContent = d.detections_enemies || 0;
+    document.getElementById('lmPlayerVal').textContent = d.detections_player || 0;
+    document.getElementById('lmAccuracyVal').textContent = (d.accuracy_percent || 0).toFixed(1) + '%';
+    document.getElementById('lmDamageVal').textContent = (d.damage_dealt || 0).toFixed(0);
+    document.getElementById('lmSurvivalVal').textContent = (d.match_duration_seconds || 0).toFixed(0) + 's';
+    document.getElementById('lmBrawlerVal').textContent = d.current_brawler || '—';
+
+    // Atualizar gráfico de detecções
+    drawLearningDetectChart(d.frames_history || []);
+  } catch(e) {}
+}
+
+async function pollLearningHistory() {
+  try {
+    const res = await fetch(API + '/api/learning-mode/history');
+    const d = await res.json();
+    const matches = d.matches || [];
+    _lmHistory = matches;
+    // Tabela
+    const tbody = document.getElementById('lmHistoryTable');
+    tbody.innerHTML = matches.slice().reverse().map(m =>
+      `<tr><td>${m.brawler || '—'}</td><td>${m.result || '—'}</td><td>${m.kills || 0}</td><td>${m.deaths || 0}</td><td>${(m.duration_seconds || 0).toFixed(0)}s</td></tr>`
+    ).join('') || '<tr><td colspan="5">Sem dados</td></tr>';
+    // Gráfico kills
+    drawLearningKillsChart(matches);
+  } catch(e) {}
+}
+
+function drawLearningDetectChart(frames) {
+  try {
+    const canvas = document.getElementById('lmDetectChart');
+    if (!canvas || !canvas.getContext) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width = canvas.offsetWidth;
+    const h = canvas.height = 200;
+    ctx.clearRect(0, 0, w, h);
+    if (frames.length < 2) {
+      ctx.fillStyle = '#64748b'; ctx.font = '12px sans-serif';
+      ctx.fillText('A aguardar dados...', w/2 - 60, h/2);
+      return;
+    }
+    const vals = frames.map(f => f.enemies_detected || 0);
+    const maxV = Math.max(...vals, 1);
+    ctx.strokeStyle = '#22c55e'; ctx.lineWidth = 2; ctx.beginPath();
+    frames.forEach((f, i) => {
+      const x = (i / (frames.length - 1)) * w;
+      const y = h - ((f.enemies_detected || 0) / maxV) * h;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.fillStyle = '#64748b'; ctx.font = '10px sans-serif';
+    ctx.fillText('Inimigos detetados / frame', 4, 12);
+  } catch(e) {}
+}
+
+function drawLearningKillsChart(matches) {
+  try {
+    const canvas = document.getElementById('lmKillsChart');
+    if (!canvas || !canvas.getContext) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width = canvas.offsetWidth;
+    const h = canvas.height = 200;
+    ctx.clearRect(0, 0, w, h);
+    if (matches.length < 1) {
+      ctx.fillStyle = '#64748b'; ctx.font = '12px sans-serif';
+      ctx.fillText('Sem partidas registadas', w/2 - 70, h/2);
+      return;
+    }
+    const barW = Math.max(20, (w / matches.length) * 0.7);
+    const spacing = w / matches.length;
+    const maxKills = Math.max(...matches.map(m => m.kills || 0), 1);
+    matches.forEach((m, i) => {
+      const kills = m.kills || 0;
+      const barH = (kills / maxKills) * (h - 30);
+      const x = i * spacing + (spacing - barW) / 2;
+      const y = h - barH - 20;
+      ctx.fillStyle = kills > 0 ? '#22c55e' : '#334155';
+      ctx.fillRect(x, y, barW, barH);
+      ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif';
+      ctx.fillText(kills.toString(), x + barW/2 - 4, y - 4);
+      ctx.fillStyle = '#64748b'; ctx.font = '9px sans-serif';
+      ctx.fillText((m.brawler || '').slice(0,4), x + 2, h - 4);
+    });
+  } catch(e) {}
+}
+
+async function startLearningMode() {
+  try {
+    const res = await fetch(API + '/api/learning-mode/start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({max_matches: 5})
+    });
+    const d = await res.json();
+    if (d.ok) {
+      toast('Modo Teste iniciado!', 'success');
+      pollLearningMode();
+    } else {
+      toast('Erro: ' + (d.error || 'falha'), 'error');
+    }
+  } catch(e) { toast('Erro: ' + e, 'error'); }
+}
+
+async function stopLearningMode() {
+  if (!confirm('Parar o Modo Teste?')) return;
+  try {
+    const res = await fetch(API + '/api/learning-mode/stop', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: '{}'
+    });
+    const d = await res.json();
+    if (d.ok) {
+      toast('Modo Teste parado!', 'info');
+      pollLearningMode();
+    } else {
+      toast('Erro: ' + (d.error || 'falha'), 'error');
+    }
+  } catch(e) { toast('Erro: ' + e, 'error'); }
+}
+
 // Phase 5: Analytics
 function showAnalyticsTab(id) {
   ['maps','perf','rl','sessions'].forEach(k => {
@@ -3136,14 +3850,27 @@ let _darkMode = true;
 function toggleDarkMode() {
   _darkMode = !_darkMode;
   const btn = document.getElementById('darkModeBtn');
+  const root = document.documentElement;
   if (_darkMode) {
+    root.style.setProperty('--bg', '#0f172a');
+    root.style.setProperty('--card-bg', '#1e293b');
+    root.style.setProperty('--text', '#e2e8f0');
+    root.style.setProperty('--text-muted', '#94a3b8');
+    root.style.setProperty('--border', '#334155');
+    root.style.setProperty('--input-bg', '#0f172a');
     document.body.style.background = '#0f172a';
     document.body.style.color = '#e2e8f0';
-    if (btn) btn.textContent = 'Tema';
+    if (btn) btn.textContent = 'Light';
   } else {
-    document.body.style.background = '#f1f5f9';
+    root.style.setProperty('--bg', '#f8fafc');
+    root.style.setProperty('--card-bg', '#ffffff');
+    root.style.setProperty('--text', '#1e293b');
+    root.style.setProperty('--text-muted', '#64748b');
+    root.style.setProperty('--border', '#e2e8f0');
+    root.style.setProperty('--input-bg', '#f1f5f9');
+    document.body.style.background = '#f8fafc';
     document.body.style.color = '#1e293b';
-    if (btn) btn.textContent = 'Tema';
+    if (btn) btn.textContent = 'Dark';
   }
 }
 
@@ -3194,10 +3921,124 @@ poll = async function() {
   }
 };
 
+// Mode Control Center Functions
+async function startFarmMode() { try { const res=await fetch(API+'/api/mode/farm/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({config:{}})}); const d=await res.json(); toast(d.status==='started'?'Farm iniciado':'Falha ao iniciar farm',d.ok?'success':'error'); } catch(e){ toast('Erro: '+e,'error'); } }
+async function stopFarmMode() { try { const res=await fetch(API+'/api/mode/farm/stop',{method:'POST',headers:{'Content-Type':'application/json'}}); const d=await res.json(); toast(d.status==='stopped'?'Farm parado':'Falha','info'); } catch(e){} }
+async function startLearnMode() { try { const res=await fetch(API+'/api/mode/learn/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({config:{}})}); const d=await res.json(); toast(d.status==='started'?'Aprender iniciado':'Falha',d.ok?'success':'error'); } catch(e){ toast('Erro: '+e,'error'); } }
+async function stopLearnMode() { try { const res=await fetch(API+'/api/mode/learn/stop',{method:'POST',headers:{'Content-Type':'application/json'}}); const d=await res.json(); toast(d.status==='stopped'?'Aprender parado':'Falha','info'); } catch(e){} }
+async function toggleESP(force) { try { const enabled = force !== undefined ? force : true; const res=await fetch(API+'/api/esp/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})}); const d=await res.json(); toast('ESP '+d.status,d.ok?'success':'error'); } catch(e){} }
+
+async function pollModeStatus() {
+  try {
+    const res=await fetch(API+'/api/mode/status'); const d=await res.json();
+    // Farm
+    const farmActive = d.active_mode==='farm';
+    document.getElementById('farmStatusVal').textContent = farmActive?'ATIVO':'Inativo';
+    document.getElementById('farmStatusVal').style.color = farmActive?'#22c55e':'#94a3b8';
+    document.getElementById('farmMatchVal').textContent = d.matches_completed||0;
+    document.getElementById('farmTargetVal').textContent = d.matches_target||0;
+    document.getElementById('farmBrawlerVal').textContent = d.current_brawler||'—';
+    // Learn
+    const learnActive = d.active_mode==='learn';
+    document.getElementById('learnStatusVal').textContent = learnActive?'ATIVO':'Inativo';
+    document.getElementById('learnStatusVal').style.color = learnActive?'#7c3aed':'#94a3b8';
+  } catch(e){}
+}
+
+async function pollRLMetrics() {
+  try {
+    const res=await fetch(API+'/api/rl/metrics'); const d=await res.json();
+    document.getElementById('learnEngineVal').textContent = d.engine_type||'—';
+    document.getElementById('learnQTableVal').textContent = d.q_table_size||0;
+    document.getElementById('learnEpsilonVal').textContent = (d.epsilon||0).toFixed(3);
+    document.getElementById('learnRewardVal').textContent = (d.last_reward||0).toFixed(2)+' / '+(d.episode_reward||0).toFixed(2);
+    document.getElementById('learnPpoLossVal').textContent = (d.policy_loss||0).toFixed(4)+' / '+(d.value_loss||0).toFixed(4);
+    document.getElementById('learnBufferVal').textContent = (d.buffer_size||0)+' / '+(d.buffer_capacity||0);
+    document.getElementById('learnActionVal').textContent = d.last_action||'—';
+  } catch(e){}
+}
+
+async function pollDetections() {
+  try {
+    const res=await fetch(API+'/api/detections/live'); const d=await res.json();
+    const detections = d.detections||[];
+    // ESP
+    document.getElementById('espFpsVal').textContent = (d.fps||0).toFixed(1);
+    document.getElementById('espObjectsVal').textContent = detections.length;
+    // Table
+    const tbody = document.getElementById('detectionsTable');
+    if (!detections.length) { tbody.innerHTML='<tr><td colspan="6">Sem dados</td></tr>'; }
+    else { tbody.innerHTML=detections.slice(0,20).map(det=>`<tr><td>${det.class_name}</td><td>${(det.confidence||0).toFixed(2)}</td><td>${det.x}</td><td>${det.y}</td><td>${det.width}</td><td>${det.height}</td></tr>`).join(''); }
+    // Counters
+    const counts={}; detections.forEach(d=>counts[d.class_name]=(counts[d.class_name]||0)+1);
+    document.getElementById('detEnemyVal').textContent = counts['enemy']||0;
+    document.getElementById('detTeamVal').textContent = counts['teammate']||0;
+    document.getElementById('detWallVal').textContent = counts['wall']||0;
+    document.getElementById('detBushVal').textContent = counts['bush']||0;
+    document.getElementById('detPowerVal').textContent = counts['powerup']||0;
+  } catch(e){}
+}
+
+async function pollVisionStats() {
+  try {
+    const res=await fetch(API+'/api/vision/stats'); const d=await res.json();
+    document.getElementById('detModelVal').textContent = (d.device||'—')+' / '+(d.models_loaded||0)+' modelos';
+    const statsDiv = document.getElementById('visionStats');
+    statsDiv.innerHTML = '<div class="row"><span>Initialized</span><span>'+d.initialized+'</span></div>'
+      +'<div class="row"><span>Frame count</span><span>'+(d.frame_count||0)+'</span></div>'
+      +'<div class="row"><span>Avg confidence</span><span>'+((d.avg_confidence||0).toFixed(3))+'</span></div>'
+      +'<div class="row"><span>Loaded classes</span><span>'+(d.loaded_classes?d.loaded_classes.join(', '):'—')+'</span></div>';
+  } catch(e){}
+}
+
 // CSS animation for toasts
 const toastStyle = document.createElement('style');
 toastStyle.textContent = '@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}';
 document.head.appendChild(toastStyle);
+
+
+async function refreshTrainingModels() {
+  try {
+    const res = await fetch(API + '/api/training/models');
+    const d = await res.json();
+    const tbody = document.getElementById('modelsTable');
+    const models = d.models || [];
+    if (!models.length) {
+      tbody.innerHTML = '<tr><td colspan="5">Nenhum modelo registado. Execute <code>python train.py</code></td></tr>';
+    } else {
+      tbody.innerHTML = models.map(m =>
+        '<tr><td>' + (m.name || '—') + '</td><td>' + (m.version || '—') + '</td><td>' + (m.schema || '—') + '</td><td>' + ((m.map50 || 0).toFixed(3)) + '</td><td>' + (m.is_active ? '<span style="color:#22c55e">Ativo</span>' : '<span style="color:#64748b">Inativo</span>') + '</td></tr>'
+      ).join('');
+    }
+    // Dataset
+    document.getElementById('dsImages').textContent = d.dataset?.total_images || '—';
+    document.getElementById('dsBoxes').textContent = d.dataset?.total_boxes || '—';
+    document.getElementById('dsClasses').textContent = d.dataset?.num_classes || '—';
+    const dist = d.dataset?.class_distribution || {};
+    document.getElementById('dsClassDist').innerHTML = Object.entries(dist).map(([k, v]) =>
+      '<div class="row"><span>' + k + '</span><span>' + v + '</span></div>'
+    ).join('') || '—';
+    // Last training
+    const lt = d.last_training;
+    if (lt) {
+      document.getElementById('lastTraining').innerHTML =
+        '<div class="row"><span>Run ID</span><span>' + (lt.run_id || '—') + '</span></div>' +
+        '<div class="row"><span>Data</span><span>' + (lt.timestamp || '—') + '</span></div>' +
+        '<div class="row"><span>Schema</span><span>' + (lt.schema || '—') + '</span></div>' +
+        '<div class="row"><span>mAP50</span><span>' + ((lt.map50 || 0).toFixed(4)) + '</span></div>' +
+        '<div class="row"><span>mAP50-95</span><span>' + ((lt.map50_95 || 0).toFixed(4)) + '</span></div>' +
+        '<div class="row"><span>Duracao</span><span>' + (lt.duration_seconds || 0).toFixed(0) + 's</span></div>';
+    }
+  } catch(e) {}
+}
+async function rescanModels() {
+  try {
+    const res = await fetch(API + '/api/training/models?scan=1');
+    const d = await res.json();
+    toast(d.scanned + ' modelos encontrados', 'info');
+    refreshTrainingModels();
+  } catch(e) { toast('Erro ao scan', 'error'); }
+}
 
 setInterval(poll, 2000);
 setInterval(pollReplays, 5000);
@@ -3216,13 +4057,20 @@ setInterval(pollAntiBan, 10000);
 setInterval(pollAnalytics, 10000);
 setInterval(pollQueue, 5000);
 setInterval(pollHealth, 3000);
+setInterval(pollLearningMode, 2000);
+setInterval(pollLearningHistory, 10000);
+setInterval(pollModeStatus, 2000);
+setInterval(pollRLMetrics, 2000);
+setInterval(pollDetections, 1000);
+setInterval(pollVisionStats, 5000);
+setInterval(refreshTrainingModels, 15000);
 poll(); pollReplays(); pollAB(); pollRecovery(); drawRewardChart();
-pollBrawlers(); pollMatchAnalysis(); pollAICoach(); drawTrophyChart(); pollWeekly(); pollSystemStatus(); refreshLogs(); pollNotifications(); pollAntiBan(); pollAnalytics(); pollQueue(); pollHealth();
+pollBrawlers(); pollMatchAnalysis(); pollAICoach(); drawTrophyChart(); pollWeekly(); pollSystemStatus(); refreshLogs(); pollNotifications(); pollAntiBan(); pollAnalytics(); pollQueue(); pollHealth(); pollLearningMode(); pollLearningHistory();
+pollModeStatus(); pollRLMetrics(); pollDetections(); pollVisionStats(); refreshTrainingModels();
 </script>
 </body>
 </html>
 '''
-
 
 # ---------------------------------------------------------------------------
 # DASHBOARD SERVER (orquestrador)

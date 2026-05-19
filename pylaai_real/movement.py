@@ -271,8 +271,8 @@ class Movement:
                     try:
                         import pyautogui
                         pyautogui.mouseUp(button='middle')
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[MOVEMENT] pyautogui mouseUp failed: {e}")
             except Exception as e:
                 logger.debug(f"[MOVEMENT] Erro ao parar: {e}")
             self._is_moving = False

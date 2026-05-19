@@ -10,7 +10,9 @@ Inclui:
 - Treino otimizado com early stopping
 - Validação e relatórios
 
-Classes padronizadas (8 classes para melhor cobertura):
+Classes padronizadas:
+    - core: 4 classes presentes no dataset atual
+    - extended: 8 classes para evolução futura sem quebrar produção
     0: Player   - Jogador controlado
     1: Enemy    - Inimigos
     2: Bush     - Arbustos (cover)
@@ -42,6 +44,7 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from training.class_schema import CORE_CLASSES, EXTENDED_CLASSES, get_schema
 
 logging.basicConfig(
     level=logging.INFO,
@@ -51,18 +54,10 @@ logging.basicConfig(
 logger = logging.getLogger("enhanced_training")
 
 # ============================================================
-# CLASSES EXPANDIDAS (8 classes)
+# CLASSES PADRONIZADAS
 # ============================================================
-STANDARD_CLASSES = {
-    0: "Player",
-    1: "Bush",
-    2: "Enemy",
-    3: "Cubebox",
-    4: "Wall",
-    5: "Powerup",
-    6: "Bullet",
-    7: "Super",
-}
+STANDARD_CLASSES = EXTENDED_CLASSES
+CORE_STANDARD_CLASSES = CORE_CLASSES
 NC = len(STANDARD_CLASSES)
 
 # HSV ranges for Brawl Stars elements
@@ -177,6 +172,28 @@ class EnhancedAutoLabeler:
     def __init__(self, target_size: Tuple[int, int] = (640, 640)):
         self.target_size = target_size
 
+    def _merge_masks(self, *masks: np.ndarray) -> np.ndarray:
+        """Combina múltiplas máscaras sem depender de uma única paleta de cor."""
+        valid_masks = [mask for mask in masks if mask is not None]
+        if not valid_masks:
+            return np.zeros((self.target_size[1], self.target_size[0]), dtype=np.uint8)
+        merged = valid_masks[0].copy()
+        for mask in valid_masks[1:]:
+            merged = cv2.bitwise_or(merged, mask)
+        return merged
+
+    def _lab_mask(self, image: np.ndarray, lower: Tuple, upper: Tuple) -> np.ndarray:
+        """Cria máscara no espaço LAB para reforçar a segmentação HSV."""
+        lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+        return cv2.inRange(lab, np.array(lower), np.array(upper))
+
+    def _postprocess_mask(self, mask: np.ndarray) -> np.ndarray:
+        """Suaviza ruído e fecha buracos pequenos antes do contour extraction."""
+        kernel = np.ones((3, 3), dtype=np.uint8)
+        cleaned = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel, iterations=2)
+        return cleaned
+
     def _hsv_mask(self, image: np.ndarray, lower: Tuple, upper: Tuple) -> np.ndarray:
         """Cria máscara HSV."""
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
@@ -276,12 +293,14 @@ class EnhancedAutoLabeler:
         return results
 
     def detect_bushes(self, image: np.ndarray) -> List[Tuple[int, Tuple[float, ...]]]:
-        """Deteta Bush (classe 2) via cor verde escura."""
+        """Deteta Bush (classe 2) via verde escuro + faixa LAB de vegetação."""
         results = []
         h, w = image.shape[:2]
 
         mask_green = self._hsv_mask(image, *BRAWLSTARS_HSV["bush_dark_green"])
-        bboxes = self._find_contours_filtered(mask_green, min_area=200, max_area=50000)
+        mask_lab = self._lab_mask(image, (20, 90, 80), (200, 150, 170))
+        mask = self._postprocess_mask(self._merge_masks(mask_green, mask_lab))
+        bboxes = self._find_contours_filtered(mask, min_area=200, max_area=50000)
 
         for x, y, bw, bh in bboxes:
             expanded = self._expand_bbox((x, y, bw, bh), factor=1.1, img_w=w, img_h=h)
@@ -311,12 +330,17 @@ class EnhancedAutoLabeler:
         return results
 
     def detect_walls(self, image: np.ndarray) -> List[Tuple[int, Tuple[float, ...]]]:
-        """Deteta Wall (classe 4) via cor cinza."""
+        """Deteta Wall (classe 4) via baixa saturação + bordas fortes."""
         results = []
         h, w = image.shape[:2]
 
         mask_gray = self._hsv_mask(image, *BRAWLSTARS_HSV["wall_gray"])
-        bboxes = self._find_contours_filtered(mask_gray, min_area=500, max_area=100000,
+        lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+        low_chroma = cv2.inRange(lab[:, :, 1], 100, 150)
+        edges = cv2.Canny(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), 50, 140)
+        mask = self._merge_masks(mask_gray, low_chroma, edges)
+        mask = self._postprocess_mask(mask)
+        bboxes = self._find_contours_filtered(mask, min_area=500, max_area=100000,
                                                aspect_range=(0.05, 20.0))
 
         for x, y, bw, bh in bboxes:
@@ -345,12 +369,16 @@ class EnhancedAutoLabeler:
         return results
 
     def detect_bullets(self, image: np.ndarray) -> List[Tuple[int, Tuple[float, ...]]]:
-        """Deteta Bullet (classe 6) via cor laranja."""
+        """Deteta Bullet (classe 6) via laranja/amarelo + brilho local."""
         results = []
         h, w = image.shape[:2]
 
         mask_orange = self._hsv_mask(image, *BRAWLSTARS_HSV["bullet_orange"])
-        bboxes = self._find_contours_filtered(mask_orange, min_area=10, max_area=500)
+        mask_yellow = self._hsv_mask(image, *BRAWLSTARS_HSV["powerup_yellow"])
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        _, bright = cv2.threshold(gray, 190, 255, cv2.THRESH_BINARY)
+        mask = self._postprocess_mask(self._merge_masks(mask_orange, mask_yellow, bright))
+        bboxes = self._find_contours_filtered(mask, min_area=10, max_area=500)
 
         for x, y, bw, bh in bboxes:
             expanded = self._expand_bbox((x, y, bw, bh), factor=1.5, img_w=w, img_h=h)
@@ -361,13 +389,15 @@ class EnhancedAutoLabeler:
         return results
 
     def detect_supers(self, image: np.ndarray) -> List[Tuple[int, Tuple[float, ...]]]:
-        """Deteta Super (classe 7) via brilho amarelo intenso."""
+        """Deteta Super (classe 7) via brilho amarelo intenso e HUD linear."""
         results = []
         h, w = image.shape[:2]
 
-        # Super é um amarelo muito brilhante
-        mask_yellow = self._hsv_mask(image, (20, 200, 200), (35, 255, 255))
-        bboxes = self._find_contours_filtered(mask_yellow, min_area=50, max_area=2000)
+        # Super costuma aparecer em elementos HUD brilhantes; combinamos HSV + LAB.
+        mask_yellow = self._hsv_mask(image, (18, 160, 170), (40, 255, 255))
+        mask_lab = self._lab_mask(image, (180, 110, 150), (255, 145, 220))
+        mask = self._postprocess_mask(self._merge_masks(mask_yellow, mask_lab))
+        bboxes = self._find_contours_filtered(mask, min_area=50, max_area=2000)
 
         for x, y, bw, bh in bboxes:
             expanded = self._expand_bbox((x, y, bw, bh), factor=1.3, img_w=w, img_h=h)
@@ -449,8 +479,9 @@ class EnhancedAutoLabeler:
         if not bboxes:
             return []
 
-        # Sort by area (smaller first)
-        sorted_bboxes = sorted(enumerate(bboxes), key=lambda x: x[1][2] * x[1][3])
+        # Sort by area (larger first) so the fallback behaves closer to
+        # a conventional "keep the strongest box" NMS strategy.
+        sorted_bboxes = sorted(enumerate(bboxes), key=lambda x: x[1][2] * x[1][3], reverse=True)
 
         keep = []
         while sorted_bboxes:
@@ -509,22 +540,49 @@ class EnhancedAutoLabeler:
 class ScreenCapturer:
     """Captura screenshots do emulador."""
 
-    def __init__(self, window_title: str = "BlueStacks App Player",
+    def __init__(self, window_title: str = "auto",
                  output_dir: str = "dataset/captured"):
         self.window_title = window_title
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.screenshot_taker = None
 
+    def _candidate_window_titles(self) -> List[str]:
+        """Lista ordenada de títulos de janela para vários emuladores."""
+        candidates = []
+        if self.window_title and self.window_title != "auto":
+            candidates.append(self.window_title)
+        candidates.extend([
+            "BlueStacks App Player",
+            "BlueStacks",
+            "LDPlayer",
+            "NoxPlayer",
+            "MEmu",
+            "MuMuPlayer",
+            "GameLoop",
+        ])
+        # Remove duplicados preservando ordem
+        seen = set()
+        ordered = []
+        for title in candidates:
+            if title not in seen:
+                ordered.append(title)
+                seen.add(title)
+        return ordered
+
     def _init_screenshot(self) -> bool:
         """Inicializa screenshot taker."""
         try:
             from pylaai_real.screenshot_taker import ScreenshotTaker
-            self.screenshot_taker = ScreenshotTaker(self.window_title)
-            if not self.screenshot_taker.find_window():
-                logger.error(f"Window '{self.window_title}' not found")
-                return False
-            return True
+            for title in self._candidate_window_titles():
+                candidate = ScreenshotTaker(title)
+                if candidate.find_window():
+                    self.screenshot_taker = candidate
+                    logger.info(f"Screenshot source initialized with window title: {title}")
+                    return True
+
+            logger.error("No compatible emulator window found")
+            return False
         except Exception as e:
             logger.error(f"Failed to initialize screenshot: {e}")
             return False
@@ -678,15 +736,16 @@ def prepare_dataset(raw_dir: Path, output_dir: Path,
     return stats
 
 
-def create_data_yaml(dataset_dir: Path) -> Path:
+def create_data_yaml(dataset_dir: Path, schema: str = "core") -> Path:
     """Cria data.yaml para treino YOLO."""
+    names = get_schema(schema)
     data_config = {
         "path": str(dataset_dir.absolute()),
         "train": "train/images",
         "val": "val/images",
         "test": "test/images",
-        "names": STANDARD_CLASSES,
-        "nc": NC,
+        "names": names,
+        "nc": len(names),
     }
 
     yaml_path = dataset_dir / "data.yaml"
@@ -702,6 +761,22 @@ def create_data_yaml(dataset_dir: Path) -> Path:
     return yaml_path
 
 
+def _load_dataset_names(data_yaml: Path) -> Dict[int, str]:
+    """Load class names from a YOLO dataset YAML if possible."""
+    try:
+        import yaml
+        with open(data_yaml, "r", encoding="utf-8") as handle:
+            cfg = yaml.safe_load(handle) or {}
+        names = cfg.get("names", {})
+        if isinstance(names, dict):
+            return {int(k): v for k, v in names.items()}
+        if isinstance(names, list):
+            return {i: name for i, name in enumerate(names)}
+    except Exception:
+        pass
+    return STANDARD_CLASSES
+
+
 # ============================================================
 # MODEL TRAINING
 # ============================================================
@@ -711,7 +786,11 @@ def train_yolo(data_yaml: Path,
                img_size: int = 640,
                device: str = "cpu",
                pretrained: Optional[str] = None,
-               output_name: str = "brawlstars_yolo11") -> Optional[str]:
+               output_name: str = "brawlstars_yolo11",
+               freeze: int = 0,
+               cos_lr: bool = True,
+               resume: bool = False,
+               hyperparams: Optional[Dict[str, object]] = None) -> Optional[str]:
     """Treina modelo YOLO com otimizações."""
     try:
         from ultralytics import YOLO
@@ -757,60 +836,73 @@ def train_yolo(data_yaml: Path,
     logger.info("=" * 60)
     logger.info("TRAINING CONFIGURATION")
     logger.info("=" * 60)
+    dataset_names = _load_dataset_names(Path(data_yaml))
     logger.info(f"  Data:       {data_yaml}")
     logger.info(f"  Epochs:     {epochs}")
     logger.info(f"  Batch:      {batch_size}")
     logger.info(f"  Image size: {img_size}")
     logger.info(f"  Device:     {device}")
-    logger.info(f"  Classes:    {NC} - {STANDARD_CLASSES}")
+    logger.info(f"  Classes:    {len(dataset_names)} - {dataset_names}")
+    logger.info(f"  Freeze:     {freeze}")
+    logger.info(f"  Cos LR:     {cos_lr}")
+    logger.info(f"  Resume:     {resume}")
+    if hyperparams:
+        logger.info(f"  Hyperparams: {hyperparams}")
     logger.info("=" * 60)
 
     # Training with augmentation
     # NOTE: ultralytics appends project/name to create save_dir.
     # We use absolute project path to avoid double-nesting.
-    _results = model.train(
-        data=str(data_yaml),
-        epochs=epochs,
-        batch=batch_size,
-        imgsz=img_size,
-        device=device,
-        project=str(Path.cwd() / "runs" / "detect"),
-        name=output_name,
-        exist_ok=True,
-        patience=15,
-        save=True,
-        plots=True,
-        verbose=True,
+    training_kwargs = {
+        "data": str(data_yaml),
+        "epochs": epochs,
+        "batch": batch_size,
+        "imgsz": img_size,
+        "device": device,
+        "project": str(Path.cwd() / "runs" / "detect"),
+        "name": output_name,
+        "exist_ok": True,
+        "patience": 15,
+        "save": True,
+        "plots": True,
+        "verbose": True,
         # Optimizer settings
-        optimizer="AdamW",
-        lr0=0.001,
-        lrf=0.01,
-        momentum=0.937,
-        weight_decay=0.0005,
+        "optimizer": "AdamW",
+        "lr0": 0.001,
+        "lrf": 0.01,
+        "momentum": 0.937,
+        "weight_decay": 0.0005,
         # Loss settings - FIX #6: Class-weighted loss for rare classes
-        box=7.5,  # box loss gain
-        cls=0.5,  # cls loss gain (reduced to prevent overfitting on common classes)
-        dfl=1.5,  # dfl loss gain
+        "box": 7.5,
+        "cls": 0.5,
+        "dfl": 1.5,
         # Augmentation - data augmentation pipeline
-        hsv_h=0.015,
-        hsv_s=0.7,
-        hsv_v=0.4,
-        degrees=10.0,
-        translate=0.1,
-        scale=0.5,
-        shear=2.0,
-        perspective=0.0002,
-        flipud=0.0,
-        fliplr=0.5,
-        mosaic=1.0,
-        mixup=0.15,  # Increased mixup for better class balance
-        erasing=0.4,
-        copy_paste=0.0,
+        "hsv_h": 0.015,
+        "hsv_s": 0.7,
+        "hsv_v": 0.4,
+        "degrees": 10.0,
+        "translate": 0.1,
+        "scale": 0.5,
+        "shear": 2.0,
+        "perspective": 0.0002,
+        "flipud": 0.0,
+        "fliplr": 0.5,
+        "mosaic": 1.0,
+        "mixup": 0.15,
+        "erasing": 0.4,
+        "copy_paste": 0.0,
+        "freeze": freeze,
+        "cos_lr": cos_lr,
+        "resume": resume,
         # Multi-GPU (if available)
-        workers=4 if device != "cpu" else 2,
-        amp=True,
-        cache="disk",  # disk cache for deterministic training
-    )
+        "workers": 4 if device != "cpu" else 2,
+        "amp": True,
+        "cache": "disk",
+    }
+    if hyperparams:
+        training_kwargs.update(hyperparams)
+
+    _results = model.train(**training_kwargs)
 
     # Save best model
     best_pt = output_dir / "weights" / "best.pt"
@@ -855,7 +947,7 @@ def validate_model(model_path: Path, data_yaml: Path) -> Dict:
         # Per-class metrics
         if hasattr(metrics.box, 'maps') and metrics.box.maps is not None:
             logger.info("  Per-class mAP@50:")
-            for i, name in STANDARD_CLASSES.items():
+            for i, name in dataset_names.items():
                 if i < len(metrics.box.maps):
                     logger.info(f"    {name}: {metrics.box.maps[i]:.4f}")
 
@@ -881,6 +973,13 @@ def main():
     parser.add_argument("--img-size", type=int, default=640, help="Image size")
     parser.add_argument("--device", type=str, default="cpu", help="Device (cpu or 0 for GPU)")
     parser.add_argument("--pretrained", type=str, default=None, help="Pretrained model path")
+    parser.add_argument(
+        "--schema",
+        type=str,
+        default="core",
+        choices=["core", "extended"],
+        help="Class schema for dataset generation and training (default: core)",
+    )
     parser.add_argument("--curate", action="store_true", help="Curate existing dataset")
     parser.add_argument("--dataset", type=str, default="dataset/yolo_final",
                        help="Dataset directory with data.yaml (default: dataset/yolo_final)")
@@ -933,7 +1032,7 @@ def main():
         logger.info("STEP 3: PREPARING DATASET")
         logger.info("=" * 60)
         prepare_dataset(use_dir / "images", output_dir)
-        create_data_yaml(output_dir)
+        create_data_yaml(output_dir, schema=args.schema)
 
     # Step 4: Train
     if args.train_only or (not args.capture_only and not args.label_only):
@@ -951,7 +1050,7 @@ def main():
             batch_size=args.batch,
             img_size=args.img_size,
             device=args.device,
-            pretrained=args.pretrained or "models/brawlstars_yolov8.pt"
+            pretrained=args.pretrained or f"models/brawlstars_{args.schema}.pt"
         )
 
         if model_path:

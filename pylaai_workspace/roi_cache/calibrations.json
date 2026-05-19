@@ -1,0 +1,91 @@
+{
+  "2560x1440": {
+    "hp_bar": {
+      "name": "hp_bar",
+      "x": 93,
+      "y": 1306,
+      "w": 266,
+      "h": 40,
+      "source_resolution": [
+        1920,
+        1080
+      ],
+      "target_resolution": [
+        2560,
+        1440
+      ],
+      "scale_x": 1.3333333333333333,
+      "scale_y": 1.3333333333333333
+    },
+    "play_button": {
+      "name": "play_button",
+      "x": 2066,
+      "y": 1200,
+      "w": 400,
+      "h": 160,
+      "source_resolution": [
+        1920,
+        1080
+      ],
+      "target_resolution": [
+        2560,
+        1440
+      ],
+      "scale_x": 1.3333333333333333,
+      "scale_y": 1.3333333333333333
+    }
+  },
+  "1920x1080": {
+    "play_button": {
+      "name": "play_button",
+      "x": 1550,
+      "y": 900,
+      "w": 300,
+      "h": 120,
+      "source_resolution": [
+        1920,
+        1080
+      ],
+      "target_resolution": [
+        1920,
+        1080
+      ],
+      "scale_x": 1.0,
+      "scale_y": 1.0
+    },
+    "custom_test": {
+      "name": "custom_test",
+      "x": 100,
+      "y": 200,
+      "w": 50,
+      "h": 60,
+      "source_resolution": [
+        1920,
+        1080
+      ],
+      "target_resolution": [
+        1920,
+        1080
+      ],
+      "scale_x": 1.0,
+      "scale_y": 1.0
+    },
+    "huge": {
+      "name": "huge",
+      "x": 1800,
+      "y": 1000,
+      "w": 120,
+      "h": 80,
+      "source_resolution": [
+        1920,
+        1080
+      ],
+      "target_resolution": [
+        1920,
+        1080
+      ],
+      "scale_x": 1.0,
+      "scale_y": 1.0
+    }
+  }
+}

@@ -57,3 +57,7 @@ _spec.loader.exec_module(_real_wrapper)
 
 # Re-export the public API
 PylaAIEnhanced = _real_wrapper.PylaAIEnhanced
+main = _real_wrapper.main
+
+if __name__ == "__main__":
+    main()

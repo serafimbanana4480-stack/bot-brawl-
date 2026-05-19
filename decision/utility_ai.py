@@ -14,7 +14,7 @@ This is MUCH better than Q-Learning for this type of game because:
 - Naturally handles context (health, ammo, enemies, map, phase)
 - Can be weighted by behavioral profiles
 
-Actions:
+Actions (UnifiedAction from core.class_registry):
 - ATTACK: Shoot at a target
 - RETREAT: Move away from threats
 - COLLECT_CUBE: Pick up a power cube
@@ -25,6 +25,11 @@ Actions:
 - CHASE: Pursue a low-health enemy
 - KITE: Attack while moving away (shoot-and-scoot)
 - USE_SUPER: Activate super ability
+
+Migration:
+    This module now uses UnifiedAction from core.class_registry for
+    consistency with rl_engine.py and future neural policy.
+    The old Action enum is deprecated; use UnifiedAction directly.
 """
 
 import math
@@ -32,23 +37,15 @@ import logging
 import time
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
-from enum import Enum
+
+# Import unified action space
+from core.class_registry import UnifiedAction as Action
+from core.class_registry import UnifiedAction
 
 logger = logging.getLogger(__name__)
 
-
-class Action(Enum):
-    """Available actions the bot can take."""
-    ATTACK = "attack"
-    RETREAT = "retreat"
-    COLLECT_CUBE = "collect_cube"
-    TAKE_COVER = "take_cover"
-    HOLD_POSITION = "hold_position"
-    HEAL_UP = "heal_up"
-    AMBUSH = "ambush"
-    CHASE = "chase"
-    KITE = "kite"
-    USE_SUPER = "use_super"
+# Re-export Action as UnifiedAction for backward compatibility
+__all__ = ["UtilityAI", "Action", "ActionScore", "UnifiedAction"]
 
 
 @dataclass
@@ -162,6 +159,7 @@ class UtilityAI:
         phase = context.get("match_phase", "early")
         role = context.get("brawler_role", "damage")
         intent = context.get("intent", None)
+        game_mode = context.get("game_mode", "showdown")
 
         # --- Score each action ---
 
@@ -244,6 +242,12 @@ class UtilityAI:
             for s in scores:
                 s.score *= intent_bonus.get(s.action, 1.0)
 
+        # Apply game mode bonuses (objective-aware tactical bias)
+        mode_bonus = self._get_mode_bonus(game_mode)
+        if mode_bonus:
+            for s in scores:
+                s.score *= mode_bonus.get(s.action, 1.0)
+
         # Select best action
         scores.sort(key=lambda s: s.score, reverse=True)
         best = scores[0]
@@ -262,6 +266,53 @@ class UtilityAI:
             self._action_history = self._action_history[-100:]
 
         return best
+
+    def _get_mode_bonus(self, game_mode: str) -> Dict[Action, float]:
+        """Return lightweight action multipliers for the current game mode."""
+        mode = (game_mode or "showdown").lower().replace(" ", "_")
+        bonuses: Dict[str, Dict[Action, float]] = {
+            "showdown": {
+                Action.COLLECT_CUBE: 1.30,
+                Action.RETREAT: 1.15,
+                Action.TAKE_COVER: 1.10,
+                Action.HEAL_UP: 1.10,
+            },
+            "gem_grab": {
+                Action.HOLD_POSITION: 1.45,
+                Action.TAKE_COVER: 1.20,
+                Action.RETREAT: 1.10,
+                Action.AMBUSH: 1.10,
+            },
+            "brawl_ball": {
+                Action.ATTACK: 1.20,
+                Action.CHASE: 1.15,
+                Action.USE_SUPER: 1.15,
+                Action.HOLD_POSITION: 1.05,
+            },
+            "heist": {
+                Action.ATTACK: 1.25,
+                Action.CHASE: 1.15,
+                Action.USE_SUPER: 1.20,
+            },
+            "bounty": {
+                Action.RETREAT: 1.20,
+                Action.TAKE_COVER: 1.20,
+                Action.HEAL_UP: 1.15,
+                Action.HOLD_POSITION: 1.10,
+            },
+            "knockout": {
+                Action.RETREAT: 1.20,
+                Action.TAKE_COVER: 1.15,
+                Action.HEAL_UP: 1.15,
+                Action.HOLD_POSITION: 1.10,
+            },
+            "hot_zone": {
+                Action.HOLD_POSITION: 1.45,
+                Action.TAKE_COVER: 1.15,
+                Action.AMBUSH: 1.10,
+            },
+        }
+        return bonuses.get(mode, {})
 
     def get_last_action(self) -> Optional[Action]:
         return self._last_action

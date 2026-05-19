@@ -220,6 +220,14 @@ class StateManager:
         self._in_game_lock = False  # Quando True, só sai de in_game para end/connection_lost
         self._in_game_min_duration = 5.0  # Mínimo de segundos em in_game antes de permitir saída
         
+        # Continuous Improvement System
+        try:
+            from core.continuous_improvement import ContinuousImprovement
+            self.improvement_system = ContinuousImprovement()
+            logger.info("[STATE] Sistema de Melhoria Contínua ativado")
+        except ImportError:
+            self.improvement_system = None
+        
         self.state_timeouts = {
             'loading': 30,    # 30 seconds max in loading
             'lobby': 60,     # 60 seconds max in lobby
@@ -440,6 +448,11 @@ class StateManager:
                 if self.state_start_time:
                     time_in_previous_state = time.time() - self.state_start_time
                     logger.debug(f"[STATE] Tempo no estado anterior: {time_in_previous_state:.1f}s")
+                    # Track transition for continuous improvement
+                    if self.improvement_system:
+                        self.improvement_system.record_state_transition(
+                            self.current_state, detected_state, time_in_previous_state
+                        )
                 self._diag(f"transition_to={detected_state}, from={self.current_state}, reason={screen_state_hint}")
                 # Reset state start time on transition
                 self.state_start_time = time.time()
@@ -1271,6 +1284,8 @@ class StateManager:
             if action_taken:
                 self._last_combat_action_time = current_time
                 logger.info(f"[STATE] Ação de combate registrada: {result}")
+                if self.improvement_system:
+                    self.improvement_system.record_combat_action('attack' if result.get('attacked') else 'move')
             else:
                 time_since_last_action = current_time - self._last_combat_action_time
                 if time_since_last_action > 3.0:
@@ -1333,7 +1348,17 @@ class StateManager:
                     logger.debug(f"[STATE] Falha ao atualizar reward_bridge: {e}")
         else:
             logger.warning("[STATE] Screenshot é None!")
-
+        
+        # Continuous Improvement: periodic check and save
+        if self.improvement_system:
+            try:
+                self.improvement_system.periodic_save()
+                adjustments = self.improvement_system.check_and_adjust()
+                if adjustments:
+                    logger.info(f"[IMPROVEMENT] Ajustes recomendados: {adjustments}")
+            except Exception as e:
+                logger.debug(f"[IMPROVEMENT] Erro no periodic check: {e}")
+        
         time.sleep(0.1)
 
     def _handle_end_game(self):

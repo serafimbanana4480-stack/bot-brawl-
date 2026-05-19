@@ -31,7 +31,7 @@ class PlayerState(Enum):
 
 @dataclass
 class EnemyInfo:
-    """Information about an enemy player."""
+    """Information about an enemy player with enriched tracking."""
     track_id: int
     position: Tuple[float, float]
     bbox: Tuple[int, int, int, int]
@@ -41,6 +41,12 @@ class EnemyInfo:
     threat_level: float  # calculated threat score
     visible: bool = True
     in_bush: bool = False
+    # NEW enriched fields
+    has_super: bool = False  # NEW: enemy super ready
+    is_attacking: bool = False  # NEW: currently attacking
+    angle: float = 0.0  # NEW: direction in radians
+    last_seen: float = 0.0  # NEW: timestamp of last detection
+    hp_estimate_confidence: float = 0.5  # NEW: confidence in HP estimate
     
     @property
     def is_dangerous(self) -> bool:
@@ -69,34 +75,73 @@ class BushInfo:
 
 @dataclass
 class GameState:
-    """Complete structured game state."""
+    """Complete structured game state with 30+ features for neural policy."""
     # Game metadata
     phase: GamePhase = GamePhase.UNKNOWN
     match_time_remaining: Optional[float] = None
+    ocr_match_timer_text: Optional[str] = None
+    ocr_match_time_seconds: Optional[float] = None
+    ocr_score_text: Optional[str] = None
+    ocr_match_score: Optional[Tuple[int, int]] = None
+    ocr_ability_texts: Dict[str, str] = field(default_factory=dict)
+    ocr_ability_states: Dict[str, Optional[bool]] = field(default_factory=dict)
     
-    # Player info
+    # Player info - Self-state (8 features)
     player_position: Optional[Tuple[float, float]] = None
     player_bbox: Optional[Tuple[int, int, int, int]] = None
     player_health: float = 1.0
     player_state: PlayerState = PlayerState.UNKNOWN
     player_ammo: int = 3  # Default for most brawlers
     player_super_charged: bool = False
+    gadget_ready: bool = False  # NEW: gadget availability
+    hypercharge_ready: bool = False  # NEW: hypercharge availability
+    cooldown_attack: float = 0.0  # NEW: 0-1 progress
+    cooldown_super: float = 0.0  # NEW: 0-1 progress
+    is_moving: bool = False  # NEW: movement flag
+    is_in_bush: bool = False  # NEW: bush status
+    velocity: Tuple[float, float] = (0.0, 0.0)  # NEW: velocity vector
+    current_tactic: int = 0  # NEW: high-level tactic encoding
     
     # Environment
     enemies: List[EnemyInfo] = field(default_factory=list)
     walls: List[WallInfo] = field(default_factory=list)
     bushes: List[BushInfo] = field(default_factory=list)
     
+    # Spatial features (9 features) - NEW
+    dist_nearest_cube: Optional[float] = None  # NEW: distance to nearest power cube
+    dist_nearest_cover: Optional[float] = None  # NEW: distance to nearest cover
+    dist_nearest_safezone: Optional[float] = None  # NEW: distance to safe zone
+    line_of_sight_free: bool = True  # NEW: line of sight to enemy
+    safe_direction: Tuple[float, float] = (0.0, 0.0)  # NEW: safe direction vector
+    wall_proximity: Dict[str, bool] = field(default_factory=lambda: {"left": False, "right": False, "up": False, "down": False})  # NEW
+    bush_nearby: bool = False  # NEW: bush within tactical radius
+    projectile_threat: float = 0.0  # NEW: incoming projectile danger score
+    objective_pressure: float = 0.0  # NEW: pressure from objective mode
+    cover_pressure: float = 0.0  # NEW: pressure to seek cover
+    
     # Strategic info
     nearest_enemy: Optional[EnemyInfo] = None
     lowest_hp_enemy: Optional[EnemyInfo] = None
     biggest_threat: Optional[EnemyInfo] = None
     safe_bushes: List[BushInfo] = field(default_factory=list)
+    enemy_history: List[EnemyInfo] = field(default_factory=list)  # recent enemy snapshot ordering
     
     # Danger assessment
     danger_score: float = 0.0  # 0.0 to 1.0
     enemies_in_range: int = 0
     escape_routes: int = 0
+    dist_nearest_enemy: Optional[float] = None
+    
+    # Temporal memory (4 features) - NEW
+    previous_action: Optional[str] = None  # NEW: last action taken
+    previous_position: Optional[Tuple[float, float]] = None  # NEW: previous player position
+    time_since_enemy_seen: float = 0.0  # NEW: seconds since last enemy detection
+    enemy_last_seen_x: Optional[float] = None  # NEW: last seen enemy offset x
+    enemy_last_seen_y: Optional[float] = None  # NEW: last seen enemy offset y
+    enemy_last_hp: Optional[float] = None  # NEW: hp ratio when last seen
+    enemy_last_super: bool = False  # NEW: enemy super state when last seen
+    enemy_last_angle: float = 0.0  # NEW: enemy angle when last seen
+    enemy_last_attack: bool = False  # NEW: enemy was attacking when last seen
     
     @property
     def is_in_danger(self) -> bool:
@@ -117,26 +162,52 @@ class GameState:
 class StateExtractor:
     """
     Extracts structured game state from vision detections and tracks.
+
+    Uses canonical class names from core.class_registry for consistency
+    across all vision and decision modules.
     """
-    
-    # Class names expected from YOLO model
+
+    # Import canonical class names from registry
+    from core.class_registry import VISUAL_CLASSES
+
+    # Core classes (always available)
     CLASS_PLAYER = "player"
     CLASS_ENEMY = "enemy"
+
+    # Extended classes (schema-dependent)
     CLASS_WALL = "wall"
     CLASS_BUSH = "bush"
     CLASS_HEALTH_BAR = "health_bar"
     CLASS_AMMO = "ammo"
-    CLASS_SUPER = "super"
+    CLASS_SUPER = "super_area"  # canonical name from registry
+    CLASS_CUBEBOX = "cubebox"
+    CLASS_POWERUP = "powerup"
+
+    # All canonical class names for reference
+    @classmethod
+    def get_canonical_classes(cls, schema: str = "full") -> dict:
+        """Get canonical class mapping for a schema."""
+        from core.class_registry import get_schema
+        return get_schema(schema)
     
     def __init__(
         self,
         screen_width: int = 1920,
         screen_height: int = 1080,
-        danger_distance: float = 300.0
+        danger_distance: float = 300.0,
+        ocr_detector: Optional[object] = None
     ):
         self.screen_width = screen_width
         self.screen_height = screen_height
         self.danger_distance = danger_distance
+        self.ocr_detector = ocr_detector
+        
+        # Initialize HUD feature extractors
+        try:
+            from vision.feature_extractors import HUDFeatureExtractor
+            self.hud_extractor = HUDFeatureExtractor()
+        except ImportError:
+            self.hud_extractor = None
         
     def _calculate_distance(
         self,
@@ -197,27 +268,41 @@ class StateExtractor:
         
         return min(1.0, threat)
     
+    def _normalize_class_name(self, name: str) -> str:
+        """Normalize class name to canonical form using registry."""
+        from core.class_registry import get_canonical
+        return get_canonical(name)
+
     def extract_state(
         self,
         tracks: List[TrackedObject],
-        raw_detections: Optional[List] = None
+        raw_detections: Optional[List] = None,
+        screenshot: Optional = None
     ) -> GameState:
         """
         Extract structured game state from tracking data.
-        
+
+        Uses canonical class names from core.class_registry for consistent
+        matching across different model outputs.
+
         Args:
             tracks: List of tracked objects
             raw_detections: Optional raw YOLO detections for additional info
-            
+
         Returns:
             Structured GameState object
         """
+        from core.class_registry import get_canonical
+        import time
+
         state = GameState()
-        
-        # Find player
+        current_time = time.time()
+
+        # Find player (normalized class name matching)
         player_track = None
         for track in tracks:
-            if track.class_name == self.CLASS_PLAYER:
+            canonical_name = get_canonical(track.class_name)
+            if canonical_name == self.CLASS_PLAYER:
                 player_track = track
                 break
         
@@ -225,6 +310,39 @@ class StateExtractor:
             state.player_position = player_track.center
             state.player_bbox = player_track.bbox
             state.player_state = PlayerState.ALIVE
+            
+            # Extract HUD features if screenshot available
+            if self.hud_extractor and screenshot is not None:
+                import time
+                hud_features = self.hud_extractor.extract_all(
+                    screenshot,
+                    player_bbox=player_track.bbox,
+                    player_position=player_track.center,
+                    timestamp=time.time()
+                )
+                state.gadget_ready = hud_features.gadget_ready
+                state.hypercharge_ready = hud_features.hypercharge_ready
+                state.cooldown_attack = hud_features.cooldown_attack
+
+            # Optional OCR enrichment for HUD text like timer/score/ability indicators.
+            if self.ocr_detector and screenshot is not None:
+                try:
+                    if hasattr(self.ocr_detector, "extract_hud_text"):
+                        ocr_hud = self.ocr_detector.extract_hud_text(screenshot)
+                        state.ocr_match_timer_text = ocr_hud.get("match_timer_text")
+                        state.ocr_match_time_seconds = ocr_hud.get("match_time_remaining")
+                        state.ocr_score_text = ocr_hud.get("score_text")
+                        state.ocr_ability_texts = ocr_hud.get("ability_texts", {}) or {}
+                        state.ocr_match_score = ocr_hud.get("match_score")
+                        state.ocr_ability_states = ocr_hud.get("ability_states", {}) or {}
+                        if state.match_time_remaining is None:
+                            state.match_time_remaining = ocr_hud.get("match_time_remaining")
+                except Exception:
+                    # OCR is best-effort; keep state extraction resilient.
+                    pass
+                state.cooldown_super = hud_features.cooldown_super
+                state.velocity = hud_features.velocity
+                state.is_moving = abs(hud_features.velocity[0]) > 2.0 or abs(hud_features.velocity[1]) > 2.0
             
             # Try to estimate health from health bar detections
             if raw_detections:
@@ -243,9 +361,10 @@ class StateExtractor:
         else:
             state.player_state = PlayerState.DEAD  # Or loading/unknown
         
-        # Process enemies
+        # Process enemies (normalized class name matching)
         for track in tracks:
-            if track.class_name == self.CLASS_ENEMY:
+            canonical_name = get_canonical(track.class_name)
+            if canonical_name == self.CLASS_ENEMY:
                 if state.player_position:
                     distance = self._calculate_distance(track.center, state.player_position)
                     threat = self._calculate_threat_level(
@@ -254,7 +373,7 @@ class StateExtractor:
                 else:
                     distance = float('inf')
                     threat = 0.0
-                
+
                 enemy = EnemyInfo(
                     track_id=track.id,
                     position=track.center,
@@ -264,13 +383,16 @@ class StateExtractor:
                     velocity=track.velocity,
                     threat_level=threat,
                     visible=True,
-                    in_bush=False  # Would need specific detection
+                    in_bush=False,  # Would need specific detection
+                    last_seen=track.last_seen,
+                    hp_estimate_confidence=min(1.0, 0.35 + 0.05 * min(track.hits, 6)),
                 )
                 state.enemies.append(enemy)
-        
-        # Process walls
+
+        # Process walls (normalized class name matching)
         for track in tracks:
-            if track.class_name == self.CLASS_WALL:
+            canonical_name = get_canonical(track.class_name)
+            if canonical_name == self.CLASS_WALL:
                 wall = WallInfo(
                     track_id=track.id,
                     bbox=track.bbox,
@@ -278,62 +400,152 @@ class StateExtractor:
                     blocks_line_of_sight=False  # Would need ray-casting
                 )
                 state.walls.append(wall)
-        
-        # Process bushes
+
+        # Process bushes (normalized class name matching)
         for track in tracks:
-            if track.class_name == self.CLASS_BUSH:
+            canonical_name = get_canonical(track.class_name)
+            if canonical_name == self.CLASS_BUSH:
                 bush = BushInfo(
                     track_id=track.id,
                     bbox=track.bbox,
                     center=track.center,
                     occupied=False,
-                    enemies_nearby=0
+                    enemies_nearby=0,
                 )
                 state.bushes.append(bush)
-        
-        # Calculate strategic info
-        if state.enemies:
-            # Sort by distance
-            state.enemies.sort(key=lambda e: e.distance)
-            state.nearest_enemy = state.enemies[0]
-            
-            # Find lowest HP enemy
-            state.lowest_hp_enemy = min(state.enemies, key=lambda e: e.health_estimate)
-            
-            # Find biggest threat
-            state.biggest_threat = max(state.enemies, key=lambda e: e.threat_level)
-            
-            # Count enemies in attack range
-            state.enemies_in_range = sum(
-                1 for e in state.enemies if e.distance < self.danger_distance
-            )
-        
-        # Find safe bushes (not near enemies)
-        for bush in state.bushes:
-            if state.player_position:
-                dist_to_player = self._calculate_distance(bush.center, state.player_position)
-                # Bush is safe if no enemies nearby
-                enemies_near = sum(
-                    1 for e in state.enemies
-                    if self._calculate_distance(bush.center, e.position) < 150
+
+        # Aggregate spatial/tactical features when we know the player position
+        if state.player_position:
+            if state.enemies:
+                nearest = min(state.enemies, key=lambda e: e.distance)
+                state.dist_nearest_enemy = nearest.distance
+                state.nearest_enemy = nearest
+                state.time_since_enemy_seen = max(0.0, current_time - nearest.last_seen)
+                state.enemy_last_seen_x = nearest.position[0] - state.player_position[0]
+                state.enemy_last_seen_y = nearest.position[1] - state.player_position[1]
+                state.enemy_last_hp = nearest.health_estimate
+                state.enemy_last_super = nearest.has_super
+                state.enemy_last_angle = nearest.angle
+                state.enemy_last_attack = nearest.is_attacking
+                state.enemy_history = sorted(
+                    state.enemies,
+                    key=lambda e: e.last_seen,
+                    reverse=True,
+                )[:3]
+
+                # Find lowest HP enemy
+                state.lowest_hp_enemy = min(state.enemies, key=lambda e: e.health_estimate)
+
+                # Find biggest threat
+                state.biggest_threat = max(state.enemies, key=lambda e: e.threat_level)
+
+                # Count enemies in attack range
+                state.enemies_in_range = sum(
+                    1 for e in state.enemies if e.distance < self.danger_distance
                 )
-                bush.enemies_nearby = enemies_near
-                if enemies_near == 0 and dist_to_player > 50:
-                    state.safe_bushes.append(bush)
+
+            if state.walls:
+                nearest_wall = min(
+                    state.walls,
+                    key=lambda w: self._calculate_distance(w.center, state.player_position)
+                )
+                state.dist_nearest_cover = self._calculate_distance(nearest_wall.center, state.player_position)
+                px, py = state.player_position
+                wx, wy = nearest_wall.center
+                state.wall_proximity = {
+                    "left": wx < px,
+                    "right": wx > px,
+                    "up": wy < py,
+                    "down": wy > py,
+                }
+
+            if state.enemies:
+                # Safe direction: average vector away from enemies weighted by inverse distance
+                sx, sy, sw = 0.0, 0.0, 0.0
+                for enemy in state.enemies:
+                    dx = state.player_position[0] - enemy.position[0]
+                    dy = state.player_position[1] - enemy.position[1]
+                    dist = max(enemy.distance, 1.0)
+                    weight = 1.0 / dist
+                    sx += dx * weight
+                    sy += dy * weight
+                    sw += weight
+                if sw > 0:
+                    norm = max((sx * sx + sy * sy) ** 0.5, 1e-6)
+                    state.safe_direction = (sx / norm, sy / norm)
+
+                # Simple line-of-sight heuristic: blocked if there is a wall closer to player than nearest enemy
+                if state.walls:
+                    nearest_enemy_dist = min(e.distance for e in state.enemies)
+                    nearest_wall_dist = min(
+                        self._calculate_distance(w.center, state.player_position)
+                        for w in state.walls
+                    )
+                    state.line_of_sight_free = nearest_wall_dist > nearest_enemy_dist
+
+            cube_like = [
+                track for track in tracks
+                if get_canonical(track.class_name) in {self.CLASS_CUBEBOX, self.CLASS_POWERUP}
+            ]
+            if cube_like:
+                state.dist_nearest_cube = min(
+                    self._calculate_distance(track.center, state.player_position)
+                    for track in cube_like
+                )
+
+            if state.bushes:
+                nearest_bush = min(
+                    state.bushes,
+                    key=lambda b: self._calculate_distance(b.center, state.player_position)
+                )
+                dist_to_nearest_bush = self._calculate_distance(nearest_bush.center, state.player_position)
+                state.bush_nearby = dist_to_nearest_bush < 180
+                state.is_in_bush = dist_to_nearest_bush < 40
+                for bush in state.bushes:
+                    dist_to_player = self._calculate_distance(bush.center, state.player_position)
+                    enemies_near = sum(
+                        1 for e in state.enemies
+                        if self._calculate_distance(bush.center, e.position) < 150
+                    )
+                    bush.enemies_nearby = enemies_near
+                    if enemies_near == 0 and dist_to_player > 50:
+                        state.safe_bushes.append(bush)
+
+                state.cover_pressure = 1.0 if state.safe_bushes else 0.0
+
+            state.projectile_threat = min(
+                1.0,
+                sum(
+                    1 for det in (raw_detections or [])
+                    if hasattr(det, 'class_name') and get_canonical(det.class_name) in {"bullet_enemy", "incoming_threat"}
+                ) / 5.0,
+            )
         
         # Calculate overall danger score
         if state.enemies:
             avg_threat = sum(e.threat_level for e in state.enemies) / len(state.enemies)
             proximity_factor = min(1.0, state.enemies_in_range / 3.0)
             health_factor = 1.0 - state.player_health
+            projectile_factor = state.projectile_threat
             
             state.danger_score = (
                 avg_threat * 0.4 +
                 proximity_factor * 0.35 +
-                health_factor * 0.25
+                health_factor * 0.2 +
+                projectile_factor * 0.05
             )
         else:
             state.danger_score = 0.0
+
+        # Tactical objective encoding after danger score is known
+        if state.danger_score > 0.7:
+            state.current_tactic = 1  # retreat
+        elif state.safe_bushes:
+            state.current_tactic = 3  # hide / take cover
+        elif state.dist_nearest_cube is not None:
+            state.current_tactic = 4  # collect objective
+        elif state.enemies:
+            state.current_tactic = 2  # chase / engage
         
         # Calculate escape routes (simplified)
         state.escape_routes = len(state.safe_bushes)

@@ -16,17 +16,31 @@ import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-BRAWL_STARS_CLASSES = {
+BRAWL_STARS_CORE_CLASSES = {
     "player", "enemy", "bush", "cubebox", "wall",
     "powerup", "bullet", "super",
     # Legacy/alternative names
     "teammate", "box", "super_indicator",
     "health_bar", "joystick", "attack_button"
 }
+
+# Backwards-compatible alias used by older tests and tooling.
+BRAWL_STARS_CLASSES = (
+    "player", "enemy", "cubebox", "powerup",
+    "bush", "wall", "bullet", "super",
+    "teammate", "box", "super_indicator",
+    "health_bar", "joystick", "attack_button",
+)
+
+# Core production schema used by the currently deployed dataset/model.
+# The validator accepts the 4-class core set as valid and logs the optional
+# 8-class extensions when present.
+BRAWL_STARS_CORE_4_CLASSES = {"player", "enemy", "cubebox", "powerup"}
 
 COCO_CLASSES_SAMPLE = {
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
@@ -41,8 +55,16 @@ MODELS_DIR = Path(__file__).parent / "models"
 REGISTRY_PATH = MODELS_DIR / "model_registry.json"
 
 
-def sha256_file(path: Path) -> str:
+PathLike = Union[str, Path]
+
+
+def _coerce_path(path: PathLike) -> Path:
+    return path if isinstance(path, Path) else Path(path)
+
+
+def sha256_file(path: PathLike) -> str:
     """Compute SHA-256 hash of a file."""
+    path = _coerce_path(path)
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
@@ -50,13 +72,42 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def get_model_classes(model_path: Path) -> Optional[List[str]]:
+def _extract_names_from_yaml(model_path: Path) -> Optional[List[str]]:
+    """Fallback class extraction from sidecar YAML files."""
+    sidecar_paths = [
+        model_path.with_suffix(".yaml"),
+        model_path.with_suffix(".yml"),
+        model_path.parent / "data.yaml",
+        model_path.parent / "data.yml",
+    ]
+    for candidate in sidecar_paths:
+        if not candidate.exists():
+            continue
+        try:
+            import yaml
+            with open(candidate, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+            names = data.get("names")
+            if isinstance(names, dict):
+                try:
+                    return [names[k] for k in sorted(names, key=lambda value: int(value))]
+                except Exception:
+                    return [names[k] for k in sorted(names)]
+            if isinstance(names, list):
+                return list(names)
+        except Exception as exc:
+            logger.debug(f"Could not read sidecar metadata {candidate.name}: {exc}")
+    return None
+
+
+def get_model_classes(model_path: PathLike) -> Optional[List[str]]:
     """
     Extract class names from a YOLO .pt file without running inference.
     Returns None if model cannot be loaded.
     """
     try:
         import torch
+        model_path = _coerce_path(model_path)
         try:
             checkpoint = torch.load(str(model_path), map_location="cpu", weights_only=True)
         except Exception:
@@ -75,6 +126,8 @@ def get_model_classes(model_path: Path) -> Optional[List[str]]:
         elif hasattr(checkpoint, "names"):
             names = checkpoint.names
 
+        if names is None:
+            names = _extract_names_from_yaml(model_path)
         if names is None:
             return None
 
@@ -99,12 +152,13 @@ def is_coco_model(classes: List[str]) -> bool:
 
 
 def is_brawl_stars_model(classes: List[str]) -> bool:
-    """Returns True if at least 2 Brawl Stars classes are present."""
+    """Returns True if the core 4-class Brawl Stars schema is present."""
     if not classes:
         return False
     class_set = {c.lower() for c in classes}
-    overlap = class_set & {c.lower() for c in BRAWL_STARS_CLASSES}
-    return len(overlap) >= 2
+    required = {c.lower() for c in BRAWL_STARS_CORE_4_CLASSES}
+    overlap = class_set & required
+    return overlap == required
 
 
 class ModelValidationResult:
@@ -133,7 +187,7 @@ class ModelValidationResult:
         }
 
 
-def validate_all_models(delete_fakes: bool = False) -> Dict:
+def validate_all_models(delete_fakes: bool = False, models_dir: Optional[PathLike] = None) -> Dict:
     """
     Validate all .pt files in the models directory.
 
@@ -149,8 +203,9 @@ def validate_all_models(delete_fakes: bool = False) -> Dict:
           "registry_written": bool,
         }
     """
+    models_dir = _coerce_path(models_dir or MODELS_DIR)
     results: List[ModelValidationResult] = []
-    pt_files = list(MODELS_DIR.glob("*.pt"))
+    pt_files = list(models_dir.glob("*.pt"))
 
     if not pt_files:
         logger.warning("No .pt model files found in models directory.")
@@ -173,7 +228,7 @@ def validate_all_models(delete_fakes: bool = False) -> Dict:
 
     # Identify the yolov8n baseline hash (the model everyone copies from)
     baseline_hash: Optional[str] = None
-    yolov8n_path = MODELS_DIR / "yolov8n.pt"
+    yolov8n_path = models_dir / "yolov8n.pt"
     if yolov8n_path.exists():
         try:
             baseline_hash = sha256_file(yolov8n_path)
@@ -263,7 +318,7 @@ def validate_all_models(delete_fakes: bool = False) -> Dict:
     # Delete fakes if requested
     deleted = []
     if delete_fakes:
-        quarantine_dir = MODELS_DIR / "quarantine"
+        quarantine_dir = models_dir / "quarantine"
         quarantine_dir.mkdir(exist_ok=True)
         for r in fake:
             if r.path.name == "yolov8n.pt":
@@ -279,15 +334,16 @@ def validate_all_models(delete_fakes: bool = False) -> Dict:
 
     # Write registry
     registry_written = False
+    registry_path = models_dir / "model_registry.json"
     registry = {
-        "generated_at": __import__("datetime").datetime.utcnow().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "models": {r.path.name: r.to_dict() for r in results},
         "quarantined": deleted,
     }
     try:
-        REGISTRY_PATH.write_text(json.dumps(registry, indent=2))
+        registry_path.write_text(json.dumps(registry, indent=2))
         registry_written = True
-        logger.info(f"Model registry written to {REGISTRY_PATH}")
+        logger.info(f"Model registry written to {registry_path}")
     except Exception as e:
         logger.error(f"Failed to write model registry: {e}")
 

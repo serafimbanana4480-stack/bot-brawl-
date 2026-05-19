@@ -20,9 +20,11 @@ import zipfile
 from pathlib import Path
 from urllib.request import urlretrieve
 from urllib.error import URLError
+from typing import Union
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from training.enhanced_training_pipeline import STANDARD_CLASSES
+from training.class_schema import CORE_CLASSES, EXTENDED_CLASSES
+from core.class_registry import ROBOFLOW_TO_CANONICAL, get_class_id
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)-8s | %(message)s")
 logger = logging.getLogger("roboflow_download")
@@ -32,27 +34,29 @@ ROBOFLOW_URLS = {
     "bloxxy": "https://universe.roboflow.com/ds/bloxxy/brawl-stars-dataset/download?format=yolov8",
 }
 
-# Classe mapping: Roboflow -> nosso formato
-# Roboflow: Ball, Enemy, Friendly, Gem, Hot_Zone, Me, PP, PP_Box, Safe_Enemy, Safe_Friendly
-# Nosso:     Player, Bush, Enemy, Cubebox, Wall, Powerup, Bullet, Super
-CLASS_MAP = {
-    "Enemy": 2,        # Enemy -> Enemy (index 2)
-    "Safe_Enemy": 2,   # Safe_Enemy -> Enemy
-    "Friendly": 0,     # Friendly -> Player
-    "Me": 0,           # Me -> Player
-    "Safe_Friendly": 0,# Safe_Friendly -> Player
-    "Ball": 3,         # Ball -> Cubebox (aproximado)
-    "Gem": 3,          # Gem -> Cubebox (power cube)
-    "PP": 5,           # PP -> Powerup
-    "PP_Box": 5,       # PP_Box -> Powerup
-    "Hot_Zone": -1,    # Hot_Zone -> skip (nao existe no nosso)
-}
+# Classe mapping: Roboflow -> nosso formato (using unified registry)
+# Maps Roboflow class names to canonical class IDs in core schema
+CLASS_MAP = {}
+for roboflow_name, canonical_name in ROBOFLOW_TO_CANONICAL.items():
+    if canonical_name is not None:
+        class_id = get_class_id(canonical_name, schema="core")
+        if class_id is not None:
+            CLASS_MAP[roboflow_name] = class_id
+        else:
+            CLASS_MAP[roboflow_name] = -1  # Skip if not in core schema
+    else:
+        CLASS_MAP[roboflow_name] = -1  # Skip explicitly marked classes
 
 # Roboflow class names in order (from dataset)
 ROBOFLOW_CLASS_NAMES = ["Ball", "Enemy", "Friendly", "Gem", "Hot_Zone", "Me", "PP", "PP_Box", "Safe_Enemy", "Safe_Friendly"]
 
 # Classes que queremos manter
-KEEP_CLASSES = {0, 2, 3, 5}  # Player, Enemy, Cubebox, Powerup
+KEEP_CLASSES = set(CORE_CLASSES.keys())  # Player, Enemy, Cubebox, Powerup
+STANDARD_CLASSES = EXTENDED_CLASSES
+
+
+def _coerce_path(path: Union[str, Path]) -> Path:
+    return path if isinstance(path, Path) else Path(path)
 
 
 def download_dataset(url: str, output_dir: Path, api_key: str) -> bool:
@@ -100,6 +104,7 @@ def remap_classes(dataset_dir: Path, roboflow_class_names: list = None) -> int:
         roboflow_class_names: Optional list of Roboflow class names in index order.
                               If None, reads from data.yaml in the parent directory.
     """
+    dataset_dir = _coerce_path(dataset_dir)
     labels_dir = dataset_dir / "labels"
     if not labels_dir.exists():
         logger.error(f"Labels directory not found: {labels_dir}")
@@ -162,6 +167,7 @@ def remap_classes(dataset_dir: Path, roboflow_class_names: list = None) -> int:
 
 def get_classes(dataset_dir: Path) -> set:
     """Get all class IDs from dataset."""
+    dataset_dir = _coerce_path(dataset_dir)
     labels_dir = dataset_dir / "labels"
     classes = set()
     if labels_dir.exists():
@@ -177,9 +183,12 @@ def get_classes(dataset_dir: Path) -> set:
 
 def verify_compatibility(local_dir: Path, roboflow_dir: Path) -> bool:
     """Verify datasets have compatible classes."""
+    local_dir = _coerce_path(local_dir)
+    roboflow_dir = _coerce_path(roboflow_dir)
+
     _local_classes = get_classes(local_dir)  # reserved for future cross-validation
     robo_classes = get_classes(roboflow_dir)
-    required = {0, 2, 3, 5}  # Player, Enemy, Cubebox, Powerup
+    required = set(CORE_CLASSES.keys())  # Player, Enemy, Cubebox, Powerup
     
     if not required.issubset(robo_classes):
         logger.error(f"Roboflow dataset missing required classes: {required - robo_classes}")
@@ -313,15 +322,17 @@ def _copy_split(source_dir: Path, dest_dir: Path, append: bool = False) -> dict:
     return stats
 
 
-def create_merged_yaml(dataset_dir: Path) -> Path:
+def create_merged_yaml(dataset_dir: Path, schema: str = "core") -> Path:
     """Cria data.yaml para dataset mesclado."""
     import yaml
+    from training.class_schema import get_schema
 
     # Detect actual classes in dataset
     actual_classes = get_classes(dataset_dir)
     
-    # Only include classes that actually exist
-    classes = {i: name for i, name in STANDARD_CLASSES.items() if i in actual_classes}
+    expected_schema = get_schema(schema)
+    # Only include classes that actually exist and are expected in the target schema.
+    classes = {i: name for i, name in expected_schema.items() if i in actual_classes}
     
     config = {
         "path": str(dataset_dir.absolute()),
@@ -336,7 +347,7 @@ def create_merged_yaml(dataset_dir: Path) -> Path:
     with open(yaml_path, 'w') as f:
         yaml.dump(config, f, default_flow_style=False)
 
-    logger.info(f"Created {yaml_path} with {len(classes)} classes: {classes}")
+    logger.info(f"Created {yaml_path} with {len(classes)} classes for schema={schema}: {classes}")
     return yaml_path
 
 
@@ -354,8 +365,84 @@ def main():
                        help="Local dataset to merge with")
     parser.add_argument("--remap-only", action="store_true",
                        help="Only remap classes in existing dataset")
+    parser.add_argument(
+        "--schema",
+        type=str,
+        default="core",
+        choices=["core", "extended", "full"],
+        help="Target class schema for remap/merge (default: core)",
+    )
+    parser.add_argument("--dataset", type=str, action="append", default=None,
+                       help="Additional dataset(s) to download in format workspace/project (can be used multiple times). Delegates to multi-downloader.")
+    parser.add_argument("--discover", action="store_true",
+                       help="Auto-discover compatible datasets from Roboflow Universe and download them. Delegates to multi-downloader.")
+    parser.add_argument("--no-merge", action="store_true",
+                       help="Skip merging datasets after multi-download")
+    parser.add_argument("--merge-output-dir", type=str, default="dataset/merged",
+                       help="Output directory for merged dataset in multi-download mode")
     args = parser.parse_args()
 
+    # Multi-dataset mode: delegate to roboflow_multi_downloader
+    if args.dataset or args.discover:
+        try:
+            from training.roboflow_multi_downloader import run_multi_download
+            from training.roboflow_dataset_discoverer import (
+                DatasetInfo,
+                filter_compatible,
+                score_dataset,
+                search_universe,
+                KNOWN_DATASETS,
+            )
+        except ImportError as e:
+            logger.error(f"Multi-downloader not available: {e}")
+            return 1
+
+        datasets = []
+        if args.discover:
+            all_datasets = list(KNOWN_DATASETS)
+            try:
+                web_results = search_universe(query="brawl stars", max_results=50)
+                all_datasets.extend(web_results)
+            except Exception as e:
+                logger.warning(f"Web search failed: {e}")
+            seen = {}
+            for ds in all_datasets:
+                key = f"{ds.workspace}/{ds.project}"
+                if key not in seen:
+                    seen[key] = ds
+            for ds in seen.values():
+                score_dataset(ds, schema=args.schema)
+            datasets = filter_compatible(list(seen.values()), min_score=0.0)
+            logger.info(f"Discovered {len(datasets)} compatible datasets")
+
+        if args.dataset:
+            for ds_str in args.dataset:
+                if "/" not in ds_str:
+                    logger.error(f"Invalid dataset format: {ds_str}")
+                    continue
+                workspace, project = ds_str.split("/", 1)
+                datasets.append(DatasetInfo(workspace=workspace, project=project, source="cli"))
+
+        if not datasets:
+            logger.error("No datasets to download.")
+            return 1
+
+        if not args.api_key:
+            logger.error("Roboflow API key is REQUIRED for multi-download")
+            return 1
+
+        results = run_multi_download(
+            datasets=datasets,
+            output_dir=Path(args.output),
+            api_key=args.api_key,
+            schema=args.schema,
+            merge=not args.no_merge,
+            merge_output_dir=Path(args.merge_output_dir) if args.merge_output_dir else None,
+        )
+        logger.info(f"Multi-download complete. Prepared: {len(results.get('prepared_dirs', []))} datasets")
+        return
+
+    # Legacy single-dataset mode
     output_dir = Path(args.output)
 
     # Remap only mode
@@ -397,7 +484,7 @@ def main():
         local_dir = Path(args.local_dataset)
         if local_dir.exists():
             merge_with_local(local_dir, output_dir, Path("dataset/merged"))
-            create_merged_yaml(Path("dataset/merged"))
+            create_merged_yaml(Path("dataset/merged"), schema=args.schema)
         else:
             logger.warning(f"Local dataset not found: {local_dir}")
 

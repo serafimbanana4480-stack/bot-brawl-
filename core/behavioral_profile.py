@@ -30,11 +30,13 @@ Profiles can:
 - Be influenced by brawler type (tank → more aggressive)
 """
 
+import json
 import logging
 import math
 import random
 import time
 import threading
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
@@ -315,6 +317,77 @@ class BehavioralProfile:
                 "blend_target": self._blend_target.value if self._blend_target else None,
                 "blend_ratio": round(self._blend_ratio, 2),
             }
+
+    def save(self, filepath: Optional[str] = None) -> bool:
+        """Save behavioral profile data to file."""
+        if filepath is None:
+            filepath = Path("data/behavioral_profiles.json")
+
+        try:
+            Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+            data = {
+                "current_type": self._current_type.value,
+                "brawler_role": self.brawler_role,
+                "params": {
+                    "reaction_time_min": self._params.reaction_time_min,
+                    "reaction_time_max": self._params.reaction_time_max,
+                    "reaction_time_mean": self._params.reaction_time_mean,
+                    "apm_target": self._params.apm_target,
+                    "apm_variance": self._params.apm_variance,
+                    "movement_aggression": self._params.movement_aggression,
+                    "movement_smoothness": self._params.movement_smoothness,
+                    "strafe_frequency": self._params.strafe_frequency,
+                    "retreat_threshold": self._params.retreat_threshold,
+                    "fight_willingness": self._params.fight_willingness,
+                    "target_switch_tolerance": self._params.target_switch_tolerance,
+                    "super_usage_eagerness": self._params.super_usage_eagerness,
+                    "chase_willingness": self._params.chase_willingness,
+                    "preferred_range": self._params.preferred_range,
+                    "zone_commitment": self._params.zone_commitment,
+                    "bush_usage": self._params.bush_usage,
+                    "burst_pattern": self._params.burst_pattern,
+                    "pause_frequency": self._params.pause_frequency,
+                    "pause_duration_min": self._params.pause_duration_min,
+                    "pause_duration_max": self._params.pause_duration_max,
+                },
+                "blend_ratio": self._blend_ratio,
+                "blend_target": self._blend_target.value if self._blend_target else None,
+            }
+            with open(filepath, 'w') as f:
+                json.dump(data, f, indent=2)
+            logger.info("[BEHAVIORAL_PROFILE] Saved to %s", filepath)
+            return True
+        except Exception as e:
+            logger.error("[BEHAVIORAL_PROFILE] Failed to save: %s", e)
+            return False
+
+    def load(self, filepath: Optional[str] = None) -> bool:
+        """Load behavioral profile data from file."""
+        if filepath is None:
+            filepath = Path("data/behavioral_profiles.json")
+
+        if not Path(filepath).exists():
+            logger.debug("[BEHAVIORAL_PROFILE] No save file found at %s", filepath)
+            return False
+
+        try:
+            with open(filepath, 'r') as f:
+                data = json.load(f)
+
+            self._current_type = ProfileType(data["current_type"])
+            self.brawler_role = data["brawler_role"]
+            self._blend_ratio = data.get("blend_ratio", 0.0)
+            blend_target = data.get("blend_target")
+            self._blend_target = ProfileType(blend_target) if blend_target else None
+
+            params_data = data["params"]
+            self._params = ProfileParams(**params_data)
+
+            logger.info("[BEHAVIORAL_PROFILE] Loaded from %s", filepath)
+            return True
+        except Exception as e:
+            logger.error("[BEHAVIORAL_PROFILE] Failed to load: %s", e)
+            return False
 
     # --- Internal ---
 

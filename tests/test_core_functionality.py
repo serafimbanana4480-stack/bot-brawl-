@@ -20,6 +20,7 @@ if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
 import pytest
+import torch
 
 # ---------------------------------------------------------------------------
 # VISION / STATE TESTS
@@ -29,6 +30,8 @@ from vision.state import (
     GameState, StateExtractor
 )
 from vision.tracker import TrackedObject, ByteTracker
+from core.class_registry import STATE_FEATURE_DIM
+from decision.utility_ai import UtilityAI, Action
 
 
 class TestGameState:
@@ -44,6 +47,18 @@ class TestGameState:
         assert not state.is_in_danger
         assert not state.should_retreat
         assert state.can_engage
+        assert state.dist_nearest_enemy is None
+        assert state.enemy_history == []
+        assert state.time_since_enemy_seen == 0.0
+
+    def test_enemy_history_fields(self):
+        state = GameState(enemy_history=[
+            EnemyInfo(track_id=1, position=(10, 10), bbox=(0, 0, 10, 10),
+                      health_estimate=0.9, distance=120, velocity=(0, 0), threat_level=0.4,
+                      last_seen=time.time()),
+        ])
+        assert len(state.enemy_history) == 1
+        assert state.enemy_history[0].last_seen > 0
 
     def test_is_in_danger(self):
         state = GameState(danger_score=0.8)
@@ -122,6 +137,31 @@ class TestStateExtractor:
         assert state.enemies[0].track_id == 2
         assert state.nearest_enemy is not None
         assert state.nearest_enemy.distance > 0
+        assert state.dist_nearest_enemy == state.nearest_enemy.distance
+        assert len(state.enemy_history) == 1
+        assert state.time_since_enemy_seen >= 0.0
+
+    def test_extract_enemy_history_orders_recent_first(self):
+        extractor = StateExtractor()
+        now = time.time()
+        player_track = TrackedObject(
+            id=1, class_name="player", bbox=(100, 100, 150, 150),
+            confidence=0.9, center=(125, 125), velocity=(0, 0),
+            age=0, hits=5, last_seen=now
+        )
+        enemy_old = TrackedObject(
+            id=2, class_name="enemy", bbox=(300, 300, 330, 330),
+            confidence=0.85, center=(315, 315), velocity=(5, 0),
+            age=0, hits=3, last_seen=now - 5
+        )
+        enemy_new = TrackedObject(
+            id=3, class_name="enemy", bbox=(340, 340, 370, 370),
+            confidence=0.85, center=(355, 355), velocity=(3, 2),
+            age=0, hits=4, last_seen=now - 1
+        )
+        state = extractor.extract_state([player_track, enemy_old, enemy_new])
+        assert len(state.enemy_history) == 2
+        assert state.enemy_history[0].track_id == 3
 
     def test_threat_calculation(self):
         extractor = StateExtractor()
@@ -137,6 +177,59 @@ class TestStateExtractor:
         assert 0.0 <= threat <= 1.0
         # Enemy close and moving fast should be high threat
         assert threat > 0.3
+
+    def test_extract_state_with_ocr_enrichment(self):
+        class _FakeOCRDetector:
+            def extract_hud_text(self, screenshot):
+                return {
+                    "match_timer_text": "1:23",
+                    "match_time_remaining": 83.0,
+                    "score_text": "2-1",
+                    "match_score": (2, 1),
+                    "ability_texts": {"ability_super": "READY"},
+                    "ability_states": {"ability_super": True},
+                }
+
+        extractor = StateExtractor(ocr_detector=_FakeOCRDetector())
+        player_track = TrackedObject(
+            id=1, class_name="player", bbox=(100, 100, 150, 150),
+            confidence=0.9, center=(125, 125), velocity=(0, 0),
+            age=0, hits=5, last_seen=time.time()
+        )
+        state = extractor.extract_state([player_track], screenshot=np.zeros((64, 64, 3), dtype=np.uint8))
+
+        assert state.ocr_match_timer_text == "1:23"
+        assert state.match_time_remaining == 83.0
+        assert state.ocr_score_text == "2-1"
+        assert state.ocr_match_score == (2, 1)
+        assert state.ocr_ability_texts["ability_super"] == "READY"
+        assert state.ocr_ability_states["ability_super"] is True
+
+
+class TestNeuralStateEncoding:
+    """Testes para o vetor de estado neural."""
+
+    def test_state_feature_dimension_constant(self):
+        assert STATE_FEATURE_DIM == 44
+
+    def test_state_encoder_accepts_new_feature_dim(self):
+        from neural.state_encoder import StateEncoder
+
+        encoder = StateEncoder(input_dim=STATE_FEATURE_DIM, output_dim=16)
+        x = torch.zeros(1, STATE_FEATURE_DIM)
+        out = encoder(x)
+        assert out.shape == (1, 16)
+
+    def test_neural_policy_state_vector_matches_registry(self):
+        from neural.neural_policy import NeuralPolicy
+
+        policy = NeuralPolicy(schema="core", spatial_dim=16, state_dim=16, temporal_dim=16, fusion_dim=16)
+        state = GameState()
+        vector = policy.extract_state_vector(state)
+        assert vector.shape == (STATE_FEATURE_DIM,)
+        assert len(vector) == 44
+        assert np.all(vector >= -1.0)
+        assert np.all(vector <= 1.0)
 
 
 class TestByteTracker:

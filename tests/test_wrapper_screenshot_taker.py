@@ -11,6 +11,14 @@ if _soberana_root not in sys.path:
 from backend.brawl_bot.pylaai_real.screenshot_taker import ScreenshotTaker
 
 
+def test_candidate_titles_include_common_emulators():
+    taker = ScreenshotTaker()
+    titles = taker._candidate_titles()
+    assert "LDPlayer" in titles
+    assert "BlueStacks App Player" in titles
+    assert len(titles) == len(set(titles))
+
+
 def test_dynamic_title(monkeypatch):
     """Verify that the wrapper picks a dynamic window title from the emulator detector and passes it to ScreenshotTaker."""
     # Create a fake emulator info object similar to EmulatorInfo

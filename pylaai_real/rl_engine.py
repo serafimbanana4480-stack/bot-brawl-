@@ -23,6 +23,7 @@ Migration:
 
 import json
 import logging
+import os
 import pickle
 import random
 import time
@@ -161,7 +162,7 @@ class CombatQLearning:
 
     # --- Decisao ---
 
-    def get_action(self, state: Tuple, force_explore: bool = False) -> Tuple[str, float]:
+    def get_action(self, state: Tuple, force_explore: bool = False, **kwargs) -> Tuple[str, float]:
         """
         Retorna acao recomendada e confianca (Q-value normalizada).
         force_explore=True ignora epsilon (para treino manual).
@@ -263,6 +264,18 @@ class CombatQLearning:
         self.last_action = None
         self._save()
 
+    def get_live_metrics(self) -> Dict:
+        """Retorna métricas live para a dashboard."""
+        return {
+            "engine": "q_learning",
+            "q_table_size": len(self.q_table),
+            "epsilon": round(self.epsilon, 4),
+            "total_updates": self.total_updates,
+            "actions": self.ACTIONS,
+            "last_state": str(self.last_state) if self.last_state else None,
+            "last_action": self.last_action,
+        }
+
     def get_policy_summary(self) -> Dict:
         """Retorna resumo da politica atual para diagnostico."""
         if not self.q_table:
@@ -309,7 +322,7 @@ class CombatQLearning:
             temp_path = self.save_path.with_suffix('.tmp')
             with open(temp_path, "wb") as f:
                 pickle.dump(data, f)
-            temp_path.rename(self.save_path)  # Atomic on POSIX, nearly atomic on Windows
+            os.replace(str(temp_path), str(self.save_path))  # Atomic on both POSIX and Windows
             logger.debug(f"[RL] Q-table salva: {self.save_path} ({len(self.q_table)} estados)")
         except Exception as e:
             logger.warning(f"[RL] Falha ao salvar Q-table: {e}")

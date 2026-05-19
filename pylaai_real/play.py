@@ -45,7 +45,7 @@ except ImportError:
     logger.warning("[PLAY] EnemyTracker não disponível, usando enemy_history fallback")
 
 try:
-    from ..realtime_logs import get_log_manager
+    from realtime_logs import get_log_manager
     log_manager = get_log_manager()
 except ImportError:
     log_manager = None
@@ -1068,10 +1068,16 @@ class PlayLogic:
             rl_confidence = 0.0
             if rl_state and self.rl_engine:
                 # v2.3: Passar dados extras para NeuralPolicy (player_pos, enemies, detections)
-                player_center = (
-                    ((player[0] + player[2]) / 2) / self._get_safe_resolution()[0],
-                    ((player[1] + player[3]) / 2) / self._get_safe_resolution()[1],
-                ) if player else (0.5, 0.5)
+                if player and len(player) >= 4:
+                    player_center = (
+                        ((player[0] + player[2]) / 2) / self._get_safe_resolution()[0],
+                        ((player[1] + player[3]) / 2) / self._get_safe_resolution()[1],
+                    )
+                elif player and len(player) >= 2:
+                    res = self._get_safe_resolution()
+                    player_center = (player[0] / res[0], player[1] / res[1])
+                else:
+                    player_center = (0.5, 0.5)
                 detections = {"enemy": enemies, "player": [player] if player else []}
                 rl_action, rl_confidence = self.rl_engine.get_action(
                     rl_state,
@@ -1328,10 +1334,16 @@ class PlayLogic:
                     can_attack=True, can_super=self.super_ready,
                 )
                 # v2.3: Guardar transição com dados extras para NeuralPolicy
-                player_center = (
-                    ((player[0] + player[2]) / 2) / self._get_safe_resolution()[0],
-                    ((player[1] + player[3]) / 2) / self._get_safe_resolution()[1],
-                ) if player else (0.5, 0.5)
+                if player and len(player) >= 4:
+                    player_center = (
+                        ((player[0] + player[2]) / 2) / self._get_safe_resolution()[0],
+                        ((player[1] + player[3]) / 2) / self._get_safe_resolution()[1],
+                    )
+                elif player and len(player) >= 2:
+                    res = self._get_safe_resolution()
+                    player_center = (player[0] / res[0], player[1] / res[1])
+                else:
+                    player_center = (0.5, 0.5)
                 detections = {"enemy": enemies, "player": [player] if player else []}
                 self.last_rl_transition = {
                     "state": rl_state,

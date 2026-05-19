@@ -27,9 +27,18 @@ except ImportError:
 class GameFeatureExtractor:
     """Extract game features from raw screenshots using pixel analysis."""
 
-    # Brawl Stars color ranges (RGB)
-    WALL_COLOR_LOW = np.array([120, 90, 60])
-    WALL_COLOR_HIGH = np.array([180, 150, 120])
+    # Brawl Stars color ranges (RGB) - expanded to cover more map themes
+    # Note: These ranges are BROAD approximations. Walls in Brawl Stars vary widely
+    # by map theme (industrial gray, ice blue, forest green, desert gold, purple arcade, etc.)
+    # This detection is BEST-EFFORT only - always pair with confidence scoring.
+    WALL_COLOR_RANGES = [
+        ((120, 90, 60), (180, 150, 120)),   # Brown/gray (original)
+        ((80, 80, 80), (200, 200, 200)),    # Neutral gray
+        ((100, 120, 140), (160, 180, 200)),  # Ice blue
+        ((60, 100, 60), (100, 140, 100)),    # Forest green
+        ((180, 160, 100), (220, 200, 140)),  # Desert gold
+        ((140, 100, 160), (180, 140, 200)),  # Purple arcade
+    ]
 
     # Bush color (dark green)
     BUSH_COLOR_LOW = np.array([30, 100, 30])
@@ -38,25 +47,58 @@ class GameFeatureExtractor:
     def __init__(self, resolution: Tuple[int, int] = (1920, 1080)):
         self.w, self.h = resolution
 
+    def _create_wall_mask(self, screenshot: np.ndarray) -> Tuple[np.ndarray, float]:
+        """
+        Create combined wall mask from multiple color ranges.
+        Returns (mask, confidence) where confidence is 0.0-1.0 based on
+        how much of the image matches wall colors.
+        """
+        if not HAS_CV2:
+            return np.array([]), 0.0
+
+        combined_mask = None
+        total_match_pixels = 0
+
+        for low, high in self.WALL_COLOR_RANGES:
+            mask = cv2.inRange(screenshot, np.array(low), np.array(high))
+            if combined_mask is None:
+                combined_mask = mask
+            else:
+                combined_mask = cv2.bitwise_or(combined_mask, mask)
+            total_match_pixels += int(np.sum(mask > 0))
+
+        total_pixels = screenshot.shape[0] * screenshot.shape[1]
+        confidence = min(1.0, total_match_pixels / (total_pixels * 0.1))  # 10% of image = full confidence
+
+        return combined_mask, confidence
+
     def detect_walls(self, screenshot: np.ndarray) -> List[Dict]:
         """
         Detect walls/obstacles using color analysis + edge detection.
 
         Strategy:
-        1. Filter pixels in wall color range (brown/gray)
+        1. Create combined mask from multiple wall color ranges
         2. Apply morphological operations to connect nearby wall pixels
         3. Find contours and bounding boxes
-        4. Filter by minimum size
+        4. Filter by minimum size and aspect ratio
+        5. Return with confidence score
+
+        Note: This is BEST-EFFORT detection. Map themes vary significantly.
+        Use the 'confidence' field to gauge reliability.
         """
         if not HAS_CV2 or screenshot is None or screenshot.size == 0:
             return []
 
         try:
-            mask = cv2.inRange(screenshot, self.WALL_COLOR_LOW, self.WALL_COLOR_HIGH)
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
-            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+            wall_mask, color_confidence = self._create_wall_mask(screenshot)
 
-            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if wall_mask is None or color_confidence < 0.1:
+                return []
+
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+            wall_mask = cv2.morphologyEx(wall_mask, cv2.MORPH_CLOSE, kernel)
+
+            contours, _ = cv2.findContours(wall_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
             walls = []
             min_area = 500
@@ -76,10 +118,11 @@ class GameFeatureExtractor:
                     "center": (x + w // 2, y + h // 2),
                     "area": area,
                     "blocks_los": True,
+                    "confidence": color_confidence,  # Indicate detection confidence
                 })
 
             if walls:
-                logger.debug(f"[WALLS] Detected {len(walls)} wall segments")
+                logger.debug(f"[WALLS] Detected {len(walls)} wall segments (color_confidence={color_confidence:.2f})")
             return walls
 
         except Exception as e:
@@ -91,11 +134,13 @@ class GameFeatureExtractor:
         Extract player HP from the health bar above the player character.
 
         Strategy:
-        1. Locate HP bar region above player bbox
-        2. Analyze green vs red pixels in the bar
+        1. Locate HP bar region above player bbox (enlarged search window)
+        2. Analyze green/red/blue pixels in the bar
         3. HP ratio = green_pixels / (green_pixels + red_pixels)
+        4. Handle shields (blue bars) as potential confusion
 
-        Returns HP as float 0.0-1.0.
+        Returns HP as float 0.0-1.0 with 1.0 = full HP or shield-only bar.
+        Note: This is BEST-EFFORT. Shields, poison, and burn effects can affect accuracy.
         """
         if screenshot is None or screenshot.size == 0 or player_bbox is None:
             return 1.0
@@ -104,11 +149,13 @@ class GameFeatureExtractor:
             x1, y1, x2, y2 = player_bbox
             player_h = y2 - y1
 
-            # HP bar is typically 20-40px above the player
-            bar_y_top = max(0, y1 - int(player_h * 0.15) - 20)
-            bar_y_bot = max(0, y1 - int(player_h * 0.15))
-            bar_x_left = x1
-            bar_x_right = x2
+            # HP bar search window - enlarged to handle variable bar sizes (30-60px)
+            # Brawl Stars HP bars vary by brawler and game mode
+            bar_height = max(30, min(60, player_h))  # Dynamic based on player size
+            bar_y_top = max(0, y1 - int(player_h * 0.2) - bar_height)
+            bar_y_bot = max(0, y1 - int(player_h * 0.1))
+            bar_x_left = max(0, x1 - 10)
+            bar_x_right = min(screenshot.shape[1], x2 + 10)
 
             if bar_y_bot <= bar_y_top or bar_x_right <= bar_x_left:
                 return 1.0
@@ -117,27 +164,46 @@ class GameFeatureExtractor:
             if bar_region.size == 0:
                 return 1.0
 
-            # Count green and red pixels
+            # Count green (HP), red (damage), and blue (shield) pixels
+            # Use more permissive thresholds to catch variations
             green_mask = (
-                (bar_region[:, :, 1] > 150) &
-                (bar_region[:, :, 0] < 100) &
-                (bar_region[:, :, 2] < 100)
+                (bar_region[:, :, 1] > 100) &   # High green
+                (bar_region[:, :, 0] < 150) &   # Low red
+                (bar_region[:, :, 2] < 150)     # Low blue
             )
             red_mask = (
-                (bar_region[:, :, 0] > 150) &
-                (bar_region[:, :, 1] < 100) &
-                (bar_region[:, :, 2] < 100)
+                (bar_region[:, :, 0] > 100) &  # High red
+                (bar_region[:, :, 1] < 150) &   # Low green
+                (bar_region[:, :, 2] < 150)     # Low blue
+            )
+            blue_mask = (
+                (bar_region[:, :, 2] > 100) &  # High blue (shield)
+                (bar_region[:, :, 0] < 150) &  # Low red
+                (bar_region[:, :, 1] < 150)    # Low green
             )
 
             green_count = int(np.sum(green_mask))
             red_count = int(np.sum(red_mask))
-            total = green_count + red_count
+            blue_count = int(np.sum(blue_mask))
+            total_colored = green_count + red_count
 
-            if total == 0:
+            # If we only see blue (shield) and no green/red, assume full HP
+            # This handles Rosa's shield, 8-Bit's extra life, etc.
+            if total_colored == 0 and blue_count > 50:
+                logger.debug(f"[HP] Shield-only bar detected (blue={blue_count}), returning 1.0")
                 return 1.0
 
-            hp = green_count / total
-            logger.debug(f"[HP] Extracted HP: {hp:.2f} (green={green_count}, red={red_count})")
+            if total_colored == 0:
+                return 1.0
+
+            hp = green_count / total_colored
+
+            # Sanity check: HP extraction should not return values too close to 0
+            # unless there's actual damage. A bar that's mostly red means low HP.
+            if green_count < 10 and red_count > 100:
+                hp = min(hp, 0.2)  # At most 20% if almost all red
+
+            logger.debug(f"[HP] Extracted HP: {hp:.2f} (green={green_count}, red={red_count}, blue={blue_count})")
             return float(np.clip(hp, 0.0, 1.0))
 
         except Exception as e:

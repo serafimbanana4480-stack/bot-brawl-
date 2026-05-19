@@ -15,25 +15,105 @@ logger = logging.getLogger(__name__)
 class ScreenshotTaker:
     """Captura screenshots da janela do emulador"""
 
-    def __init__(self, window_title="LDPlayer"):
+    DEFAULT_TITLES = (
+        "BlueStacks App Player",
+        "BlueStacks",
+        "HD-Player",
+        "LDPlayer",
+        "NoxPlayer",
+        "MEmu",
+        "MuMuPlayer",
+        "GameLoop",
+    )
+
+    def __init__(self, window_title="auto"):
         self.window_title = window_title
         self.window_handle = None
 
+    def _candidate_titles(self):
+        """Return window titles to probe, preserving caller preference first."""
+        titles = []
+        if self.window_title and self.window_title != "auto":
+            titles.append(self.window_title)
+        titles.extend(self.DEFAULT_TITLES)
+        seen = set()
+        ordered = []
+        for title in titles:
+            if title not in seen:
+                ordered.append(title)
+                seen.add(title)
+        return ordered
+
+    def _is_likely_emulator_process(self, hwnd: int) -> bool:
+        """Verifica se o processo da janela é realmente um emulador conhecido."""
+        try:
+            import win32process
+            import psutil
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+            proc = psutil.Process(pid)
+            exe = proc.name().lower()
+            known_exes = {
+                "hd-player.exe", "bluestacks.exe", "bstacks.exe",
+                "ldplayer.exe", "ldplayer9.exe", "ldplayer64.exe",
+                "nox.exe", "noxplayer.exe", "noxvmhandle.exe",
+                "memu.exe", "memuc.exe", "memuplayer.exe",
+                "mumuplayer.exe", "mumuvm.exe",
+                "appmarket.exe", "appplayer.exe",
+            }
+            return exe in known_exes
+        except Exception:
+            return False
+
+    def _reject_title(self, title: str) -> bool:
+        """Rejeita títulos que claramente NÃO são a janela principal do emulador."""
+        t = title.lower()
+        # Janelas de sistema
+        if title in ["Program Manager", "Start", "Taskbar", "Settings", "Microsoft Store"]:
+            return True
+        # Instaladores, updaters, notificações, overlays
+        rejection_keywords = [
+            "installer", "update", "updater", "download", "setup",
+            "notification", "toast", "overlay", "tooltip",
+            "settings", "configur", "preferences",
+            "chrome", "firefox", "edge", "opera", "brave",
+            "explorer", "file explorer", "notepad", "cmd", "powershell",
+            "discord", "telegram", "whatsapp", "teams", "skype",
+            "spotify", "vlc", "media player",
+        ]
+        for kw in rejection_keywords:
+            if kw in t:
+                return True
+        return False
+
+    def _match_score(self, title: str) -> int:
+        """Devolve um score de correspondência; maior = melhor match."""
+        t = title.lower()
+        # Correspondência exata com título configurado
+        if self.window_title and self.window_title != "auto":
+            if self.window_title.lower() == t:
+                return 1000
+            if self.window_title.lower() in t:
+                return 500
+        # Correspondência exata com títulos conhecidos
+        for known in self.DEFAULT_TITLES:
+            if known.lower() == t:
+                return 900
+        # Substring com títulos conhecidos (preferir início do título)
+        for known in self.DEFAULT_TITLES:
+            kl = known.lower()
+            if t.startswith(kl):
+                return 400
+            if kl in t:
+                return 200
+        return 0
+
     def find_window(self) -> bool:
-        """Encontra a janela do emulador"""
+        """Encontra a janela do emulador com validação rigorosa."""
         try:
             import win32gui
-            
-            # Ordem de preferência de títulos para BlueStacks e outros
-            possible_titles = [
-                self.window_title,
-                "BlueStacks App Player",
-                "BlueStacks",
-                "HD-Player",
-                "LDPlayer",
-                "NoxPlayer"
-            ]
-            
+
+            possible_titles = self._candidate_titles()
+
             # 1. Tentar correspondência exata para os títulos possíveis
             for title in possible_titles:
                 hwnd = win32gui.FindWindow(None, title)
@@ -41,44 +121,71 @@ class ScreenshotTaker:
                     self.window_handle = hwnd
                     logger.info(f"Janela encontrada por correspondência exata: {title} (hwnd: {hwnd})")
                     return True
-            
-            # 2. Se não encontrar, procura por janelas que contenham o título
-            def enum_callback(hwnd, result):
-                if win32gui.IsWindowVisible(hwnd):
-                    title = win32gui.GetWindowText(hwnd)
-                    if not title: return True
-                    
-                    # Ignorar janelas de sistema ou do desktop
-                    if title in ["Program Manager", "Start", "Taskbar"]: return True
-                    
-                    # Procurar por títulos que contenham palavras-chave do emulador
-                    keywords = [self.window_title.lower()]
-                    if "bluestacks" in self.window_title.lower():
-                        keywords.extend(["bluestacks app player", "hd-player"])
-                    
-                    for kw in keywords:
-                        if kw in title.lower():
-                            # Verificar se a janela tem um tamanho razoável (evitar janelas de background)
-                            rect = win32gui.GetWindowRect(hwnd)
-                            width = rect[2] - rect[0]
-                            height = rect[3] - rect[1]
-                            if width > 100 and height > 100:
-                                result.append((hwnd, title, width * height))
-                return True
-            
+
+            # 2. Se título foi explicitamente configurado e FindWindow falhou,
+            #    fazemos fallback PARCIAL mas restrito a esse título apenas.
+            if self.window_title and self.window_title != "auto":
+                logger.warning(
+                    f"FindWindow falhou para título configurado '{self.window_title}'. "
+                    f"A procurar janelas que contenham esse título..."
+                )
+            else:
+                logger.info("FindWindow falhou para todos os títulos conhecidos. A procurar emuladores via EnumWindows...")
+
             matches = []
-            win32gui.EnumWindows(enum_callback, matches)
-            
-            if matches:
-                # Ordenar por tamanho da janela (provavelmente a maior é o player principal)
-                matches.sort(key=lambda x: x[2], reverse=True)
-                self.window_handle, found_title, _ = matches[0]
-                logger.info(f"Janela encontrada por título parcial: '{found_title}' (hwnd: {self.window_handle})")
+
+            def enum_callback(hwnd, result):
+                if not win32gui.IsWindowVisible(hwnd):
+                    return True
+                title = win32gui.GetWindowText(hwnd)
+                if not title:
+                    return True
+                if self._reject_title(title):
+                    return True
+
+                score = self._match_score(title)
+                if score == 0:
+                    return True
+
+                rect = win32gui.GetWindowRect(hwnd)
+                width = rect[2] - rect[0]
+                height = rect[3] - rect[1]
+                if width <= 100 or height <= 100:
+                    return True
+
+                # Bonus se o processo for confirmado como emulador
+                proc_confirmed = self._is_likely_emulator_process(hwnd)
+                if proc_confirmed:
+                    score += 100
+
+                area = width * height
+                result.append((hwnd, title, score, area, proc_confirmed, width, height))
                 return True
-            
+
+            win32gui.EnumWindows(enum_callback, matches)
+
+            if matches:
+                # Ordenar por score decrescente, depois por área decrescente
+                matches.sort(key=lambda x: (x[2], x[3]), reverse=True)
+                # Log de todos os candidatos para diagnóstico
+                logger.info(f"[EnumWindows] Candidatos encontrados: {len(matches)}")
+                for m in matches[:10]:
+                    hwnd, title, score, area, proc_confirmed, w, h = m
+                    logger.info(
+                        f"  - hwnd={hwnd} title='{title}' score={score} "
+                        f"area={area} proc_ok={proc_confirmed} dims={w}x{h}"
+                    )
+                self.window_handle, found_title, score, area, proc_confirmed, _, _ = matches[0]
+                logger.info(
+                    f"Janela selecionada: '{found_title}' (hwnd={self.window_handle}, "
+                    f"score={score}, area={area}, proc_ok={proc_confirmed})"
+                )
+                return True
+
+            logger.error("Nenhuma janela de emulador encontrada via EnumWindows.")
             return False
         except Exception as e:
-            logger.error(f"Erro ao encontrar janela: {e}")
+            logger.error(f"Erro ao encontrar janela: {e}", exc_info=True)
             return False
 
     def take(self) -> Optional[np.ndarray]:
@@ -99,8 +206,8 @@ class ScreenshotTaker:
             except (OSError, AttributeError):
                 try:
                     ctypes.windll.user32.SetProcessDPIAware()
-                except (OSError, AttributeError):
-                    pass
+                except (OSError, AttributeError) as e:
+                    logger.debug(f'[SCREENSHOT] DPI awareness fallback unavailable: {e}')
 
             if not self.window_handle or not win32gui.IsWindow(self.window_handle):
                 logger.info("[SCREENSHOT] Janela não encontrada, tentando encontrar...")
@@ -135,8 +242,8 @@ class ScreenshotTaker:
             
             try:
                 win32gui.EnumChildWindows(self.window_handle, find_render_window, None)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[SCREENSHOT] Child window search failed: {e}")
             
             # Se encontrou janela filha de renderização, usar o rect dela
             if child_hwnd != 0:
@@ -167,18 +274,64 @@ class ScreenshotTaker:
                 img = np.flip(img, axis=2) # BGR para RGB (mss retorna BGRA)
                 
                 logger.info(f"[SCREENSHOT] Imagem capturada: shape={img.shape}")
-                
+
+                # VALIDAÇÃO: rejeitar capturas suspeitas (tudo preto, tudo branco, desktop, etc.)
+                if not self._validate_screenshot(img):
+                    logger.error("[SCREENSHOT] Captura rejeitada pela validação — possivelmente janela errada.")
+                    self.window_handle = None  # Forçar re-encontrar janela no próximo tick
+                    return None
+
                 # NORMALIZAÇÃO: Redimensionar para 1920x1080
                 if img.shape[0] != 1080 or img.shape[1] != 1920:
                     logger.info(f"[SCREENSHOT] Redimensionando de {img.shape} para (1080, 1920)")
                     img = cv2.resize(img, (1920, 1080), interpolation=cv2.INTER_AREA)
-                
+
                 logger.info(f"[SCREENSHOT] Captura concluída com sucesso")
                 return img
 
         except Exception as e:
             logger.error(f"[SCREENSHOT] Erro ao capturar screenshot via mss: {e}", exc_info=True)
             return None
+
+    def _validate_screenshot(self, img: np.ndarray) -> bool:
+        """Valida se a screenshot parece ser de um jogo/emulador e não de conteúdo errado."""
+        try:
+            h, w = img.shape[:2]
+            # 1. Dimensões mínimas
+            if h < 200 or w < 200:
+                logger.warning(f"[VALIDATE] Dimensões muito pequenas: {w}x{h}")
+                return False
+
+            # 2. Proporção deve ser landscape (w > h) e não extrema
+            aspect = w / h if h > 0 else 0
+            if aspect < 0.5 or aspect > 4.0:
+                logger.warning(f"[VALIDATE] Proporção inválida: {aspect:.2f}")
+                return False
+
+            # 3. Rejeitar imagem totalmente preta ou totalmente branca
+            mean_val = float(img.mean())
+            if mean_val < 5.0:
+                logger.warning(f"[VALIDATE] Imagem quase totalmente preta (mean={mean_val:.1f})")
+                return False
+            if mean_val > 250.0:
+                logger.warning(f"[VALIDATE] Imagem quase totalmente branca (mean={mean_val:.1f})")
+                return False
+
+            # 4. Rejeitar se 95%+ dos pixels são exatamente a mesma cor (desktop sólido?)
+            # Converte para um hash simples: modo de cor mais comum
+            # Usar amostra para performance
+            sample = img[::10, ::10]
+            unique_colors = len(np.unique(sample.reshape(-1, sample.shape[2]), axis=0))
+            total_pixels = sample.shape[0] * sample.shape[1]
+            if unique_colors < max(50, total_pixels * 0.001):
+                logger.warning(f"[VALIDATE] Imagem com pouquíssima variedade de cores ({unique_colors} únicas)")
+                return False
+
+            return True
+        except Exception as e:
+            logger.warning(f"[VALIDATE] Erro na validação: {e}")
+            # Em caso de erro na validação, permite a captura (fail-open)
+            return True
 
     def take_pil(self) -> Optional[Image.Image]:
         """Captura screenshot como PIL Image"""

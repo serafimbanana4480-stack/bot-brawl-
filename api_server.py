@@ -16,6 +16,8 @@ Fixes Applied:
 import asyncio
 import json
 import logging
+import os
+import socket
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from pathlib import Path
@@ -66,15 +68,36 @@ class MatchHistory(BaseModel):
 # Global state
 # ---------------------------------------------------------------------------
 _bot_instance = None
-_match_history: List[MatchHistory] = []
 _setup_complete = False
+
+
+def _get_bot_match_history() -> list:
+    """Return match history from the bot's MatchController (real persistent data)."""
+    try:
+        bot = get_bot()
+        if bot and bot.match_controller and bot.match_controller.history:
+            return [m.to_dict() for m in bot.match_controller.history.matches]
+    except Exception:
+        pass
+    return []
+
+
+def _get_bot_match_stats(last_n: int = None) -> dict:
+    """Return match stats from the bot's MatchController."""
+    try:
+        bot = get_bot()
+        if bot and bot.match_controller and bot.match_controller.history:
+            return bot.match_controller.history.get_stats(last_n=last_n)
+    except Exception:
+        pass
+    return {"total": 0, "wins": 0, "losses": 0, "win_rate": 0}
 
 
 def get_bot():
     """Get or create bot instance. Calls setup() on first creation (Fix Error #9)."""
     global _bot_instance, _setup_complete
     if _bot_instance is None:
-        from .wrapper import PylaAIEnhanced
+        from wrapper import PylaAIEnhanced
         _bot_instance = PylaAIEnhanced()
         _bot_instance.setup()  # ✅ Call setup after creation
         logger.info("Bot instance created and setup completed")
@@ -220,21 +243,28 @@ async def emit_telemetry_update(telemetry_data: Dict[str, Any]):
 
 
 def record_match(brawler: str, result: str, trophies: int, duration: int):
-    """Record a match result (Fix Error #22 - now populated)."""
-    global _match_history
-    entry = MatchHistory(
-        brawler=brawler,
-        result=result,
-        trophies_gained=trophies,
-        duration_seconds=duration,
-        timestamp=datetime.now()
-    )
-    _match_history.append(entry)
-    logger.info(f"Match recorded: {brawler} - {result} ({trophies:+d} trophies)")
-
-    # Keep last 500 matches
-    if len(_match_history) > 500:
-        _match_history = _match_history[-500:]
+    """Record a match result via the bot's MatchController (real persistent data)."""
+    try:
+        bot = get_bot()
+        if bot and bot.match_controller:
+            from match_controller import MatchResult
+            match_result = MatchResult(
+                match_id=f"api_match_{int(datetime.now().timestamp())}",
+                timestamp=datetime.now().isoformat(),
+                game_mode="api",
+                brawler=brawler,
+                result=result,
+                trophies_change=trophies,
+                duration_seconds=duration,
+                kills=0,
+                damage_dealt=0,
+                powerups_collected=0,
+                star_player=False,
+            )
+            bot.match_controller.history.add_match(match_result)
+            logger.info(f"Match recorded via bot: {brawler} - {result} ({trophies:+d} trophies)")
+    except Exception as e:
+        logger.warning(f"Failed to record match via bot: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -446,17 +476,18 @@ async def get_telemetry() -> Dict[str, Any]:
             except Exception as e:
                 logger.warning(f"[API] Falha ao obter métricas de treinamento: {e}")
     
-    # Calcular win rate do histórico de partidas
+    # Calcular win rate do histórico de partidas (via bot persistent history)
+    mh = _get_bot_match_history()
     win_rate = 0.0
-    if _match_history:
-        wins = sum(1 for m in _match_history if m.result == "win")
-        win_rate = wins / len(_match_history) * 100
+    if mh:
+        wins = sum(1 for m in mh if m.get("result") == "win")
+        win_rate = wins / len(mh) * 100
     
     # Calcular média de troféus ganhos por partida
     avg_trophies_per_match = 0
-    if _match_history:
-        total_trophies = sum(m.trophies_gained for m in _match_history)
-        avg_trophies_per_match = total_trophies / len(_match_history)
+    if mh:
+        total_trophies = sum(m.get("trophies_change", 0) for m in mh)
+        avg_trophies_per_match = total_trophies / len(mh)
     
     telemetry = {
         "success": True,
@@ -466,17 +497,17 @@ async def get_telemetry() -> Dict[str, Any]:
         "tracker_status": tracker_status,
         "training_metrics": training_metrics,
         "match_statistics": {
-            "total_matches": len(_match_history),
+            "total_matches": len(mh),
             "win_rate": round(win_rate, 2),
             "avg_trophies_per_match": round(avg_trophies_per_match, 2),
             "last_10_matches": [
                 {
-                    "brawler": m.brawler,
-                    "result": m.result,
-                    "trophies_gained": m.trophies_gained,
-                    "timestamp": m.timestamp.isoformat()
+                    "brawler": m.get("brawler"),
+                    "result": m.get("result"),
+                    "trophies_gained": m.get("trophies_change", 0),
+                    "timestamp": m.get("timestamp")
                 }
-                for m in _match_history[-10:]
+                for m in mh[-10:]
             ]
         },
         "performance_metrics": {
@@ -895,15 +926,16 @@ async def update_config(config: BotConfig) -> Dict[str, Any]:
 @app.get("/api/brawl-stars/match-history", summary="Get match history", tags=["Statistics"])
 async def get_match_history(limit: int = 50) -> Dict[str, Any]:
     """
-    Returns the last N matches played. History is populated after each match.
+    Returns the last N matches played from the bot's persistent history.
 
     **Parameters:**
     - limit: Maximum number of matches to return (default: 50)
     """
+    mh = _get_bot_match_history()
     return {
         "success": True,
-        "total": len(_match_history),
-        "matches": [m.dict() for m in _match_history[-limit:]]
+        "total": len(mh),
+        "matches": mh[-limit:]
     }
 
 
@@ -986,9 +1018,10 @@ async def get_performance_metrics() -> Dict[str, Any]:
     (Fix Error #27 - performance metrics endpoint)
     """
     bot = get_bot()
-    total_matches = len(_match_history)
-    wins = sum(1 for m in _match_history if m.result == "win")
-    losses = sum(1 for m in _match_history if m.result == "loss")
+    stats = _get_bot_match_stats()
+    total_matches = stats.get("total", 0)
+    wins = stats.get("wins", 0)
+    losses = stats.get("losses", 0)
 
     return {
         "success": True,
@@ -996,12 +1029,9 @@ async def get_performance_metrics() -> Dict[str, Any]:
             "total_matches": total_matches,
             "wins": wins,
             "losses": losses,
-            "win_rate": (wins / total_matches * 100) if total_matches > 0 else 0,
-            "avg_duration_seconds": (
-                sum(m.duration_seconds for m in _match_history) / total_matches
-                if total_matches > 0 else 0
-            ),
-            "total_trophies_gained": sum(m.trophies_gained for m in _match_history),
+            "win_rate": stats.get("win_rate", 0),
+            "avg_duration_seconds": stats.get("avg_duration", 0),
+            "total_trophies_gained": stats.get("total_trophies", 0),
             "bot_running": bot.running,
             "session_duration_minutes": bot.get_status().get("session_duration_minutes", 0),
         }
@@ -1036,10 +1066,26 @@ async def get_diagnostics() -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
+    
+    host = os.getenv("BRAWL_BOT_API_HOST", "127.0.0.1")
+    port = int(os.getenv("BRAWL_BOT_API_PORT", "8003"))
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(1.0)
+        port_in_use = sock.connect_ex((host, port)) == 0
+
+    if port_in_use:
+        logger.error(
+            "Port %s is already in use on %s. Stop the existing API server or set BRAWL_BOT_API_PORT to a free port.",
+            port,
+            host,
+        )
+        raise SystemExit(1)
+
     logger.info("Starting Brawl Stars Bot API...")
     uvicorn.run(
         app,
-        host="127.0.0.1",
-        port=8003,
+        host=host,
+        port=port,
         log_level="info"
     )

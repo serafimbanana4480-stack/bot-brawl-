@@ -6,6 +6,7 @@ if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
 import importlib.util
+import pytest
 
 _spec = importlib.util.spec_from_file_location("anti_ban", str(_repo_root / "core" / "anti_ban.py"))
 _anti_ban_mod = importlib.util.module_from_spec(_spec)
@@ -18,6 +19,15 @@ WinRateLimiter = _anti_ban_mod.WinRateLimiter
 ScheduleRandomizer = _anti_ban_mod.ScheduleRandomizer
 ActionObfuscator = _anti_ban_mod.ActionObfuscator
 FingerprintRandomizer = _anti_ban_mod.FingerprintRandomizer
+
+_adv_spec = importlib.util.spec_from_file_location(
+    "anti_ban_advanced", str(_repo_root / "pylaai_real" / "anti_ban_advanced.py")
+)
+_adv_mod = importlib.util.module_from_spec(_adv_spec)
+_adv_spec.loader.exec_module(_adv_mod)
+
+AdvancedAntiBanSystem = _adv_mod.AdvancedAntiBanSystem
+SessionOrchestrator = _adv_mod.SessionOrchestrator
 
 
 def test_pattern_detector():
@@ -90,3 +100,47 @@ def test_anti_ban_system():
     status = absys.get_status()
     assert status["enabled"] is True
     assert status["matches_this_hour"] == 2
+
+
+def test_session_orchestrator_pacing_and_pressure():
+    plan = _adv_mod.SessionPlan(
+        warmup_matches=2,
+        fatigue_start_match=4,
+        max_matches_per_hour=10,
+        break_interval_min=999,
+        break_interval_max=999,
+        target_duration_min=999,
+        target_duration_max=999,
+    )
+    orchestrator = SessionOrchestrator(plan)
+
+    base_delay = 0.5
+    warmup_delay = orchestrator.recommend_pacing(base_delay, "menu_nav")
+    orchestrator.record_match_start()
+    orchestrator.record_match_start()
+    fatigue_delay = orchestrator.recommend_pacing(base_delay, "menu_nav")
+
+    assert warmup_delay >= base_delay
+    assert fatigue_delay >= base_delay
+    assert 0.0 <= orchestrator.get_session_pressure() <= 1.0
+
+
+def test_advanced_antiban_adaptive_pacing_responds_to_risk_and_session():
+    system = AdvancedAntiBanSystem({"enabled": True})
+    system.session_orchestrator.plan.warmup_matches = 4
+    system.session_orchestrator.plan.fatigue_start_match = 4
+    system.session_orchestrator.plan.max_matches_per_hour = 2
+
+    base = 0.4
+    initial = system.get_adaptive_pacing(base, "menu_nav")
+
+    system.record_action("tap", (100, 200), interval=0.01)
+    system.record_action("tap", (100, 200), interval=0.01)
+    system.record_action("tap", (100, 200), interval=0.01)
+    system.record_action("tap", (100, 200), interval=0.01)
+    system.record_action("tap", (100, 200), interval=0.01)
+    risk_paced = system.get_adaptive_pacing(base, "menu_nav")
+
+    assert initial > 0
+    assert risk_paced >= base * 0.5
+    assert system.get_status()["session"]["session_pressure"] >= 0

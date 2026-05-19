@@ -11,6 +11,7 @@ K-factor: 32 (padrao), ajusta para 16 quando rating > 1400
 
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Dict, Optional, Tuple, List
@@ -223,8 +224,11 @@ class BrawlerMapELO:
                 "saved_at": time.time(),
                 "ratings": {f"{k[0]}|{k[1]}": asdict(v) for k, v in self.ratings.items()},
             }
-            with open(self.save_path, "w", encoding="utf-8") as f:
+            # FIX #13: Atomic write using temp file + rename (prevents corruption on crash)
+            temp_path = self.save_path.with_suffix('.tmp')
+            with open(temp_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
+            os.replace(str(temp_path), str(self.save_path))  # Atomic on both POSIX and Windows
             logger.debug(f"[ELO] Ratings salvos: {self.save_path}")
         except Exception as e:
             logger.warning(f"[ELO] Falha ao salvar ratings: {e}")

@@ -406,25 +406,25 @@ class SmartPlayButtonDetector:
         Retorna coordenadas + confianca + regiao onde foi encontrado.
         """
         if screenshot is None or cv2 is None or np is None:
+            logger.warning("[PLAY_BTN] Screenshot ou CV2/Numpy indisponivel")
             return PlayButtonResult(found=False, coords=None, region="none", confidence=0.0)
 
         h, w = screenshot.shape[:2]
+        logger.debug(f"[PLAY_BTN] Procurando em screenshot {w}x{h}")
 
         # 1. Verificar cache de posicao recente
         if self._last_known_play_pos and (time.time() - self._last_known_time) < self._position_ttl:
-            # Verificar se o botao ainda esta la
             lx, ly = self._last_known_play_pos
             if 0 <= lx < w and 0 <= ly < h:
-                # Amostra rapida de cor na posicao cached
                 region = screenshot[max(0, ly-20):min(h, ly+20), max(0, lx-30):min(w, lx+30)]
                 if self._is_yellow_play_button(region):
+                    logger.info(f"[PLAY_BTN] Encontrado via cache em ({lx}, {ly})")
                     return PlayButtonResult(
                         found=True, coords=(lx, ly), region="cached",
                         confidence=0.7, screenshot_verified=True
                     )
 
         # 2. Template matching em multiplas regioes
-        # Ordem de prioridade: lobby normal -> evento ativo -> evento screen -> modo espectador
         regions = [
             (0.82, 0.78, 1.0, 1.0, "primary"),      # Lobby normal (canto inferior direito)
             (0.70, 0.72, 0.95, 0.95, "event"),     # Evento ativo (Play pode estar mais a esquerda)
@@ -434,6 +434,11 @@ class SmartPlayButtonDetector:
 
         best_result = None
         best_conf = 0.0
+        template = self._load_template("play_button_real.png")
+        if template is None:
+            logger.warning("[PLAY_BTN] Template 'play_button_real.png' NAO ENCONTRADO")
+        else:
+            logger.debug(f"[PLAY_BTN] Template carregado: {template.shape}")
 
         for rx1_pct, ry1_pct, rx2_pct, ry2_pct, label in regions:
             rx1 = int(rx1_pct * w)
@@ -441,12 +446,11 @@ class SmartPlayButtonDetector:
             rx2 = int(rx2_pct * w)
             ry2 = int(ry2_pct * h)
 
-            # Template matching com play_button_real.png
-            template = self._load_template("play_button_real.png")
             if template is not None:
                 found, conf, pos = self._template_match_in_region(
-                    screenshot, template, (rx1, ry1, rx2, ry2), threshold=0.45
+                    screenshot, template, (rx1, ry1, rx2, ry2), threshold=0.30
                 )
+                logger.debug(f"[PLAY_BTN] Regiao {label}: found={found}, conf={conf:.3f}, pos={pos}")
                 if found and conf > best_conf:
                     best_conf = conf
                     best_result = PlayButtonResult(
@@ -465,11 +469,13 @@ class SmartPlayButtonDetector:
         if fallback:
             self._last_known_play_pos = fallback
             self._last_known_time = time.time()
+            logger.info(f"[PLAY_BTN] Encontrado via fallback de cor em {fallback}")
             return PlayButtonResult(
                 found=True, coords=fallback, region="fallback_color",
                 confidence=0.45, screenshot_verified=False
             )
 
+        logger.warning("[PLAY_BTN] Botao Play NAO ENCONTRADO em nenhuma regiao")
         return PlayButtonResult(found=False, coords=None, region="none", confidence=0.0)
 
     def _template_match_in_region(self, image, template, region, threshold=0.45):
@@ -816,8 +822,8 @@ class BrawlerSelectorFast:
                                 if conf > 0.4:
                                     name = text.strip()
                                     break
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"[BRAWLER] OCR failed: {e}")
 
                 brawlers.append({
                     "x": int(cx),
@@ -866,8 +872,8 @@ class BrawlerSelectorFast:
             for (_, text, conf) in results:
                 if conf > 0.5 and brawler_name.lower() in text.lower():
                     return True
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[BRAWLER] Selection OCR failed: {e}")
         return False
 
     def _try_search_box(self, brawler_name: str, screenshot: np.ndarray,
@@ -952,3 +958,230 @@ class BrawlerSelectorFast:
             logger.warning(f"[BRAWLER] Erro no OCR rapido: {e}")
 
         return None
+
+
+# ---------------------------------------------------------------------------
+# EventSlotNavigator - Navegacao de slots de evento/modo de jogo
+# ---------------------------------------------------------------------------
+
+class EventSlotNavigator:
+    """
+    Navega pelos slots de modo de jogo no lobby.
+
+    Responsabilidades:
+    1. Detetar slots visiveis e seu modo (gem grab, showdown, etc.)
+    2. Clicar no slot desejado se nao estiver ativo
+    3. Swipe horizontal para revelar slots fora da tela
+
+    Uso:
+        slot_nav = EventSlotNavigator(images_path)
+        slot_nav.navigate_to_mode(screenshot, "showdown", click_func=emulator.tap_scaled)
+    """
+
+    SHOWDOWN_COLORS = [(130, 170, 255), (100, 140, 220)]
+    GEM_GRAB_COLORS = [(40, 200, 200), (20, 180, 180)]
+    KNOCKOUT_COLORS = [(200, 100, 255), (180, 80, 230)]
+    HEIST_COLORS = [(200, 180, 60), (180, 160, 40)]
+    HOT_ZONE_COLORS = [(80, 180, 80), (60, 160, 60)]
+    BOUNTY_COLORS = [(220, 180, 60), (200, 160, 40)]
+    BRAWL_BALL_COLORS = [(200, 80, 80), (180, 60, 60)]
+    POWER_LEAGUE_COLORS = [(160, 80, 255), (140, 60, 230)]
+
+    def __init__(self, images_path: Optional[Path] = None):
+        self.images_path = Path(images_path) if images_path else None
+        self._slot_cache: List[Tuple[int, int, int, int]] = []
+        self._last_scan_time: float = 0
+        self._cache_ttl: float = 1.5
+
+    def navigate_to_mode(
+        self,
+        screenshot: np.ndarray,
+        desired_mode: str,
+        click_func,
+        swipe_func=None,
+        max_swipes: int = 3,
+    ) -> bool:
+        """
+        Navega para o modo desejado.
+
+        Args:
+            screenshot: screenshot atual do lobby
+            desired_mode: modo desejado (showdown, gem_grab, knockout, etc.)
+            click_func: funcao(x, y) para clicar
+            swipe_func: funcao(x1, y1, x2, y2, duration) para swipe (opcional)
+            max_swipes: maximo de swipes horizontais para encontrar o slot
+
+        Returns:
+            True se o slot correto esta agora ativo
+        """
+        if screenshot is None or np is None:
+            return False
+
+        h, w = screenshot.shape[:2]
+        target_mode = desired_mode.lower().replace(" ", "_")
+
+        for attempt in range(max_swipes + 1):
+            slots = self._scan_slots(screenshot)
+
+            for idx, (x, y, sw, sh) in enumerate(slots):
+                mode = self._classify_slot(screenshot[y:y+sh, x:x+sw])
+                if mode == target_mode:
+                    center_x, center_y = x + sw // 2, y + sh // 2
+                    is_active = self._is_slot_active(screenshot[y:y+sh, x:x+sw])
+
+                    if is_active:
+                        logger.info(f"[SLOT] Modo '{mode}' ja ativo em ({center_x}, {center_y})")
+                        return True
+
+                    logger.info(f"[SLOT] Clicando slot {idx} -> modo '{mode}' em ({center_x}, {center_y})")
+                    click_func(center_x, center_y)
+                    time.sleep(0.5)
+                    return True
+
+            if swipe_func and attempt < max_swipes:
+                logger.info(f"[SLOT] Slot '{target_mode}' nao visivel, swipe para esquerda (tentativa {attempt + 1}/{max_swipes})")
+                swipe_func(w // 2, h // 2, -300, 0, duration=0.35)
+                time.sleep(0.7)
+
+        logger.warning(f"[SLOT] Modo '{target_mode}' nao encontrado apos {max_swipes} swipes")
+        return False
+
+    def _scan_slots(self, screenshot: np.ndarray) -> List[Tuple[int, int, int, int]]:
+        """Escaneia regioes provaveis de slots na tela."""
+        if screenshot is None or cv2 is None:
+            return []
+
+        now = time.time()
+        if now - self._last_scan_time < self._cache_ttl and self._slot_cache:
+            return self._slot_cache
+
+        h, w = screenshot.shape[:2]
+        regions: List[Tuple[int, int, int, int]] = []
+
+        gray = cv2.cvtColor(screenshot, cv2.COLOR_RGB2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blurred, 40, 120)
+
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        min_area = w * h * 0.008
+        max_area = w * h * 0.18
+
+        for cnt in contours:
+            x, y, cw, ch = cv2.boundingRect(cnt)
+            area = cw * ch
+            aspect = cw / max(ch, 1)
+            if min_area < area < max_area and 1.2 < aspect < 5.0 and ch > h * 0.04:
+                regions.append((x, y, cw, ch))
+
+        if not regions:
+            sw = int(w * 0.16)
+            sh = int(h * 0.08)
+            base_y = int(h * 0.17)
+            gap = int(w * 0.015)
+            for i in range(6):
+                sx = gap + i * (sw + gap)
+                if sx + sw < w - gap:
+                    regions.append((sx, base_y, sw, sh))
+
+        regions.sort(key=lambda r: r[0])
+        self._slot_cache = regions[:5]
+        self._last_scan_time = now
+        return self._slot_cache
+
+    def _is_slot_active(self, slot_region: np.ndarray) -> bool:
+        """Deteta se um slot esta ativo (cor brilhante/amarela)."""
+        if slot_region is None or cv2 is None:
+            return False
+        hsv = cv2.cvtColor(slot_region, cv2.COLOR_RGB2HSV)
+        yellow_mask = ((hsv[:, :, 0] >= 15) & (hsv[:, :, 0] <= 40) &
+                       (hsv[:, :, 1] >= 80) & (hsv[:, :, 2] >= 140))
+        return np.sum(yellow_mask) / max(yellow_mask.size, 1) > 0.01
+
+    def _classify_slot(self, slot_region: np.ndarray) -> Optional[str]:
+        """Classifica o modo de jogo de um slot pela cor dominante."""
+        if slot_region is None or cv2 is None or np is None:
+            return None
+        hsv = cv2.cvtColor(slot_region, cv2.COLOR_RGB2HSV)
+        avg_h = hsv[:, :, 0].mean()
+        avg_s = hsv[:, :, 1].mean()
+        avg_v = hsv[:, :, 2].mean()
+
+        if avg_s < 35:
+            return None
+
+        if 125 <= avg_h <= 175 and avg_s > 45:
+            return "showdown"
+        if 10 <= avg_h <= 50 and avg_s > 60 and avg_v > 130:
+            return "gem_grab"
+        if 160 <= avg_h <= 200 and avg_s > 40:
+            return "knockout"
+        if 40 <= avg_h <= 90 and avg_s > 55:
+            return "hot_zone"
+        if 0 <= avg_h <= 20 and avg_s > 75:
+            return "bounty"
+        if 10 <= avg_h <= 45 and avg_s > 70 and avg_v > 100:
+            return "heist"
+        if 85 <= avg_h <= 130 and avg_s > 50:
+            return "brawl_ball"
+        if 130 <= avg_h <= 175 and avg_s > 60:
+            return "power_league"
+
+        return None
+
+    def get_active_mode(self, screenshot: np.ndarray) -> Optional[str]:
+        """Retorna o modo ativo atualmente ou None."""
+        if screenshot is None:
+            return None
+        for (x, y, sw, sh) in self._scan_slots(screenshot):
+            if self._is_slot_active(screenshot[y:y+sh, x:x+sw]):
+                return self._classify_slot(screenshot[y:y+sh, x:x+sw])
+        return None
+
+    def get_play_button_coords(self, screenshot: np.ndarray) -> Tuple[int, int]:
+        """Retorna coordenadas do botao Play (slot ativo)."""
+        if screenshot is None:
+            return (0, 0)
+        h, w = screenshot.shape[:2]
+        return (int(w * 0.87), int(h * 0.90))
+
+
+# ---------------------------------------------------------------------------
+# GameModeResolver - Utilitario para resolver nomes de modo
+# ---------------------------------------------------------------------------
+
+class GameModeResolver:
+    """Resolve nomes de modo de jogo em varios formatos."""
+
+    MODE_ALIASES = {
+        "sd": "showdown",
+        "solo": "showdown_solo",
+        "solo_sd": "showdown_solo",
+        "duo": "showdown_duo",
+        "duo_sd": "showdown_duo",
+        "gg": "gem_grab",
+        "gemgrab": "gem_grab",
+        "gems": "gem_grab",
+        "bs": "bot_smac",
+        "botsmac": "bot_smac",
+        "ko": "knockout",
+        "knockout": "knockout",
+        "heist": "heist",
+        "bounty": "bounty",
+        "bb": "brawl_ball",
+        "brawlball": "brawl_ball",
+        "ball": "brawl_ball",
+        "hz": "hot_zone",
+        "hotzone": "hot_zone",
+        "pl": "power_league",
+        "powerleague": "power_league",
+        "cl": "club_league",
+        "clubleague": "club_league",
+    }
+
+    @classmethod
+    def resolve(cls, mode: str) -> str:
+        if not mode:
+            return "unknown"
+        normalized = mode.lower().replace(" ", "_").replace("-", "_")
+        return cls.MODE_ALIASES.get(normalized, normalized)
