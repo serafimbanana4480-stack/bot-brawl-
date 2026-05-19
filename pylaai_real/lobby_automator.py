@@ -53,7 +53,7 @@ def _ensure_imports():
             logger.warning(f"[LOBBY] PIL não disponível: {e}")
 
 try:
-    from ..realtime_logs import get_log_manager
+    from realtime_logs import get_log_manager
     log_manager = get_log_manager()
 except ImportError:
     log_manager = None
@@ -305,6 +305,8 @@ class LobbyConfig:
     def __init__(self, window_w: int = 1920, window_h: int = 1080):
         self.w = window_w
         self.h = window_h
+        self.W = window_w  # Alias para compatibilidade com código legado
+        self.H = window_h  # Alias para compatibilidade com código legado
         self.recompute()
 
     def recompute(self):
@@ -1100,7 +1102,24 @@ class LobbyAutomator:
                             self._transition("idle")
                             return True
 
-            # === PASSO 3: Encontrar botao Play com deteccao inteligente ===
+            # === PASSO 2.5: Usar UnifiedStateDetector (mais preciso) ===
+            if self._state_detector and screenshot is not None:
+                try:
+                    det = self._state_detector.detect(screenshot)
+                    if det.state == 'lobby' and det.button_coords and det.confidence > 0.5:
+                        ux, uy = det.button_coords
+                        logger.info(f'[LOBBY] Play detectado via UnifiedStateDetector em ({ux},{uy}) conf={det.confidence:.2f}')
+                        self._click(ux, uy)
+                        time.sleep(random.uniform(1.0, 1.5))
+                        if self._verify_state_changed('lobby'):
+                            logger.info('[LOBBY] Play clicado com sucesso (UnifiedStateDetector)')
+                            self._update_diagnostic('press_play_unified_success', coords=(ux,uy), conf=det.confidence)
+                            self._transition('idle')
+                            return True
+                except Exception as e:
+                    logger.debug(f'[LOBBY] UnifiedStateDetector falhou em press_play: {e}')
+
+            # === PASSO 3: Encontrar botao Play com deteccao inteligente (fallback) ===
             if self._play_detector and screenshot is not None:
                 play_result = self._play_detector.find_play_button(screenshot)
                 if play_result.found and play_result.coords:
@@ -1120,33 +1139,52 @@ class LobbyAutomator:
 
             # === FALLBACK: Metodo legado com coordenadas dinamicas ===
             logger.info("[LOBBY] Deteccao visual falhou, usando fallback legado")
-            logger.info(f"[LOBBY] Fallback: clicando Play em ({cfg.PLAY_BTN_X}, {cfg.PLAY_BTN_Y})")
-            self._click(cfg.PLAY_BTN_X, cfg.PLAY_BTN_Y)
-            time.sleep(random.uniform(1.0, 1.5))
 
-            if self._verify_state_changed("lobby"):
-                logger.info("[LOBBY] Play funcionou (fallback)")
-                self._update_diagnostic("press_play_fallback")
-                self._transition("idle")
-                return True
+            # Tentar múltiplas coordenadas de fallback (Play button pode estar em várias posições)
+            fallback_coords = [
+                (cfg.PLAY_BTN_X, cfg.PLAY_BTN_Y),  # Centro inferior
+                (round(cfg.W * 0.85), round(cfg.H * 0.88)),  # Direita inferior (Starr Nova)
+                (round(cfg.W * 0.75), round(cfg.H * 0.85)),  # Meio-direita
+                (round(cfg.W * 0.5), round(cfg.H * 0.85)),   # Centro
+            ]
 
-            # === ULTIMA TENTATIVA: ESC + retry ===
-            logger.info("[LOBBY] Tentando ESC + Play")
+            for attempt, (fx, fy) in enumerate(fallback_coords, 1):
+                logger.info(f"[LOBBY] Fallback tentativa {attempt}/{len(fallback_coords)}: clicando em ({fx}, {fy})")
+                self._click(fx, fy)
+                time.sleep(random.uniform(1.0, 1.5))
+
+                if self._verify_state_changed("lobby"):
+                    logger.info(f"[LOBBY] Play funcionou (fallback {attempt})")
+                    self._update_diagnostic("press_play_fallback", attempt=attempt, coords=(fx, fy))
+                    self._transition("idle")
+                    return True
+
+            # === ULTIMA TENTATIVA: ESC + retry + múltiplas posições ===
+            logger.info("[LOBBY] Tentando ESC + retry com múltiplas posições")
             self._key_press('esc')
             time.sleep(random.uniform(0.3, 0.6))
-            self._click(cfg.PLAY_BTN_X, cfg.PLAY_BTN_Y)
-            time.sleep(random.uniform(1.0, 1.5))
 
-            success = self._verify_state_changed("lobby")
-            if success:
-                logger.info("[LOBBY] Play funcionou apos ESC + retry")
-                self._update_diagnostic("press_play_esc_retry")
-            else:
-                logger.warning("[LOBBY] press_play falhou apos todas as tentativas")
-                self._update_diagnostic("press_play_all_failed")
+            # Tentar todas as posições novamente após ESC
+            for attempt, (fx, fy) in enumerate(fallback_coords, 1):
+                logger.info(f"[LOBBY] ESC+retry tentativa {attempt}: clicando em ({fx}, {fy})")
+                self._click(fx, fy)
+                time.sleep(random.uniform(1.0, 1.5))
 
+                if self._verify_state_changed("lobby"):
+                    logger.info(f"[LOBBY] Play funcionou apos ESC + retry ({attempt})")
+                    self._update_diagnostic("press_play_esc_retry", attempt=attempt)
+                    self._transition("idle")
+                    return True
+
+                # Se não funcionou, tentar ESC novamente entre cliques
+                if attempt < len(fallback_coords):
+                    self._key_press('esc')
+                    time.sleep(random.uniform(0.2, 0.4))
+
+            logger.warning("[LOBBY] press_play falhou apos TODAS as tentativas")
+            self._update_diagnostic("press_play_all_failed")
             self._transition("idle")
-            return True
+            return False
 
         except Exception as e:
             logger.error(f"[LOBBY] press_play v2 falhou: {e}", exc_info=True)

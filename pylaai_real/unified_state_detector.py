@@ -323,8 +323,8 @@ class UnifiedStateDetector:
             if y >= h or x >= w or y < 0 or x < 0:
                 return False
             pixel = image[y, x]
-            # OpenCV usa BGR, converter para RGB
-            b, g, r = int(pixel[0]), int(pixel[1]), int(pixel[2])
+            # Screenshots vêm da PIL/Win32 em RGB (não BGR)
+            r, g, b = int(pixel[0]), int(pixel[1]), int(pixel[2])
             er, eg, eb = expected_rgb
             return (abs(r - er) <= tolerance and
                     abs(g - eg) <= tolerance and

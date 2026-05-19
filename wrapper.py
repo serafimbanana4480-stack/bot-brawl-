@@ -24,20 +24,20 @@ from pathlib import Path
 from typing import Optional, Dict, List, Any
 import logging
 
-from .pylaai_real.state_finder import StateFinder
-from .pylaai_real.state_manager import StateManager
-from .pylaai_real.screenshot_taker import ScreenshotTaker
-from .pylaai_real.lobby_automator import LobbyAutomator, BrawlerQueue, BrawlerConfig
-from .pylaai_real.progress_observer import ProgressObserver
-from .pylaai_real.play import PlayLogic
-from .pylaai_real.detect import Detect
-from .pylaai_real.movement import Movement
-from .pylaai_real.screen_automation import ScreenAutomation
-from .pylaai_real.unified_state_detector import UnifiedStateDetector
-from .diagnostic_overlay import DiagnosticOverlay
-from .match_controller import MatchController
-from .model_downloader import get_model_downloader
-from .emulator_detector import get_emulator_detector
+from pylaai_real.state_finder import StateFinder
+from pylaai_real.state_manager import StateManager
+from pylaai_real.screenshot_taker import ScreenshotTaker
+from pylaai_real.lobby_automator import LobbyAutomator, BrawlerQueue, BrawlerConfig
+from pylaai_real.progress_observer import ProgressObserver
+from pylaai_real.play import PlayLogic
+from pylaai_real.detect import Detect
+from pylaai_real.movement import Movement
+from pylaai_real.screen_automation import ScreenAutomation
+from pylaai_real.unified_state_detector import UnifiedStateDetector
+from diagnostic_overlay import DiagnosticOverlay
+from match_controller import MatchController
+from model_downloader import get_model_downloader
+from emulator_detector import get_emulator_detector
 
 try:
     from ultralytics import YOLO
@@ -45,10 +45,18 @@ try:
 except ImportError:
     HAS_YOLO = False
 
-from .safety_system import SafetySystem, SafetyConfig
-from .humanization import HumanizationEngine, HumanizationConfig
-from .auto_tuner import AutoTuner, TuningConfig
-from .decision.brawler_selector import BrawlerSelector
+from safety_system import SafetySystem, SafetyConfig
+from humanization import HumanizationEngine, HumanizationConfig
+from auto_tuner import AutoTuner, TuningConfig
+
+# Phase AutoFix: Auto-diagnosis and recovery engine
+try:
+    from core.auto_fix_engine import AutoFixEngine
+    HAS_AUTO_FIX = True
+except ImportError:
+    HAS_AUTO_FIX = False
+    AutoFixEngine = None
+from decision.brawler_selector import BrawlerSelector
 
 # Lazy imports para componentes de ML pipeline (evita circular imports)
 try:
@@ -89,7 +97,7 @@ except ImportError:
     AntiBanConfig = None
 
 try:
-    from .pylaai_real.anti_ban_advanced import AdvancedAntiBanSystem
+    from pylaai_real.anti_ban_advanced import AdvancedAntiBanSystem
     HAS_ADVANCED_ANTIBAN = True
 except ImportError:
     HAS_ADVANCED_ANTIBAN = False
@@ -116,28 +124,28 @@ except ImportError:
         ErrorRecoveryIntegration = None
 
 try:
-    from .pylaai_real.state_recovery import StateRecoverySystem
+    from pylaai_real.state_recovery import StateRecoverySystem
     HAS_STATE_RECOVERY = True
 except ImportError:
     HAS_STATE_RECOVERY = False
     StateRecoverySystem = None
 
 try:
-    from .pylaai_real.auto_calibrator import AutoCalibrator
+    from pylaai_real.auto_calibrator import AutoCalibrator
     HAS_AUTO_CALIBRATOR = True
 except ImportError:
     HAS_AUTO_CALIBRATOR = False
     AutoCalibrator = None
 
 try:
-    from .pylaai_real.ocr_state_detector import OCRStateDetector
+    from pylaai_real.ocr_state_detector import OCRStateDetector
     HAS_OCR_DETECTOR = True
 except ImportError:
     HAS_OCR_DETECTOR = False
     OCRStateDetector = None
 
 try:
-    from .pylaai_real.debug_visualizer import DebugVisualizer, DebugIntegration, DebugMode
+    from pylaai_real.debug_visualizer import DebugVisualizer, DebugIntegration, DebugMode
     HAS_DEBUG_VISUALIZER = True
 except ImportError:
     HAS_DEBUG_VISUALIZER = False
@@ -147,42 +155,42 @@ except ImportError:
 
 # Phase 10: Advanced Core Modules
 try:
-    from .core.central_coordinator import CentralCoordinator
+    from core.central_coordinator import CentralCoordinator
     HAS_CENTRAL_COORDINATOR = True
 except ImportError:
     HAS_CENTRAL_COORDINATOR = False
     CentralCoordinator = None
 
 try:
-    from .core.world_model import WorldModel
+    from core.world_model import WorldModel
     HAS_WORLD_MODEL = True
 except ImportError:
     HAS_WORLD_MODEL = False
     WorldModel = None
 
 try:
-    from .core.pressure_map import PressureMap
+    from core.pressure_map import PressureMap
     HAS_PRESSURE_MAP = True
 except ImportError:
     HAS_PRESSURE_MAP = False
     PressureMap = None
 
 try:
-    from .core.lobby_fsm import HierarchicalFSM as LobbyFSM
+    from core.lobby_fsm import HierarchicalFSM as LobbyFSM
     HAS_LOBBY_FSM = True
 except ImportError:
     HAS_LOBBY_FSM = False
     LobbyFSM = None
 
 try:
-    from .core.behavioral_profile import BehavioralProfile
+    from core.behavioral_profile import BehavioralProfile
     HAS_BEHAVIORAL_PROFILE = True
 except ImportError:
     HAS_BEHAVIORAL_PROFILE = False
     BehavioralProfile = None
 
 try:
-    from .core.cover_system import CoverSystem
+    from core.cover_system import CoverSystem
     HAS_COVER_SYSTEM = True
 except ImportError:
     HAS_COVER_SYSTEM = False
@@ -190,35 +198,35 @@ except ImportError:
 
 # Phase 10: Advanced Decision Modules
 try:
-    from .decision.utility_ai import UtilityAI
+    from decision.utility_ai import UtilityAI
     HAS_UTILITY_AI = True
 except ImportError:
     HAS_UTILITY_AI = False
     UtilityAI = None
 
 try:
-    from .decision.sticky_target import StickyTarget
+    from decision.sticky_target import StickyTarget
     HAS_STICKY_TARGET = True
 except ImportError:
     HAS_STICKY_TARGET = False
     StickyTarget = None
 
 try:
-    from .decision.intent_system import IntentSystem
+    from decision.intent_system import IntentSystem
     HAS_INTENT_SYSTEM = True
 except ImportError:
     HAS_INTENT_SYSTEM = False
     IntentSystem = None
 
 try:
-    from .decision.enemy_intention import EnemyIntentionPredictor
+    from decision.enemy_intention import EnemyIntentionPredictor
     HAS_ENEMY_INTENTION = True
 except ImportError:
     HAS_ENEMY_INTENTION = False
     EnemyIntentionPredictor = None
 
 try:
-    from .decision.meta_awareness import MetaAwareness
+    from decision.meta_awareness import MetaAwareness
     HAS_META_AWARENESS = True
 except ImportError:
     HAS_META_AWARENESS = False
@@ -270,6 +278,36 @@ except ImportError:
     HAS_ORCHESTRATOR = False
     create_orchestrator = None  # type: ignore[misc,assignment]
     BotOrchestrator = None  # type: ignore[misc,assignment]
+
+# Learning Mode (Training Cave test mode)
+try:
+    from core.learning_mode import LearningModeController
+    HAS_LEARNING_MODE = True
+except ImportError:
+    HAS_LEARNING_MODE = False
+    LearningModeController = None  # type: ignore[misc,assignment]
+
+# Dashboard Control Center: Mode Controller, ESP Overlay, RL Metrics
+try:
+    from core.mode_controller import ModeController
+    HAS_MODE_CONTROLLER = True
+except ImportError:
+    HAS_MODE_CONTROLLER = False
+    ModeController = None  # type: ignore[misc,assignment]
+
+try:
+    from core.esp_overlay import ESPOverlay
+    HAS_ESP_OVERLAY = True
+except ImportError:
+    HAS_ESP_OVERLAY = False
+    ESPOverlay = None  # type: ignore[misc,assignment]
+
+try:
+    from core.learning_rl_metrics import LearningRLMetricsCollector
+    HAS_RL_METRICS = True
+except ImportError:
+    HAS_RL_METRICS = False
+    LearningRLMetricsCollector = None  # type: ignore[misc,assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -324,7 +362,8 @@ class PylaAIEnhanced:
         humanization_config: Optional[HumanizationConfig] = None,
         diagnostic_mode: Optional[bool] = None,
         enable_recording: bool = False,
-        enable_error_recovery: bool = True
+        enable_error_recovery: bool = True,
+        learning_mode: bool = False,
     ):
         logger.info("[WRAPPER] Inicializando PylaAIEnhanced")
         self.install_path = install_path
@@ -334,7 +373,9 @@ class PylaAIEnhanced:
         self.diagnostic_mode = diagnostic_mode if diagnostic_mode is not None else bool(
             self.central_config.get("diagnostic_mode", False) or os.getenv("PYLAAI_DIAGNOSTIC", "0") == "1"
         )
+        self.learning_mode = learning_mode
         logger.info(f"[WRAPPER] Diagnostic mode: {self.diagnostic_mode}")
+        logger.info(f"[WRAPPER] Learning mode: {self.learning_mode}")
 
         # Gameplay recording configuration
         self.recording_enabled = enable_recording or bool(self.central_config.get("enable_recording", False))
@@ -684,7 +725,7 @@ class PylaAIEnhanced:
         self.dashboard_enabled = bool(self.central_config.get("dashboard_enabled", True))
         if self.dashboard_enabled:
             try:
-                from .pylaai_real.dashboard_server import DashboardServer
+                from pylaai_real.dashboard_server import DashboardServer
                 self.dashboard = DashboardServer(port=self.central_config.get("dashboard_port", 8765))
                 logger.info("[WRAPPER] Dashboard server inicializado (porta %s)",
                              self.central_config.get("dashboard_port", 8765))
@@ -833,13 +874,23 @@ class PylaAIEnhanced:
             logger.error("ultralytics not installed. pip install ultralytics")
             return False
 
-        # Priority: BrawlStarsBot trained model > PylaAI trained > generic models
+        # Priority: Latest trained model > BrawlStarsBot trained model > PylaAI trained > generic models
         trained_models = {
+            "latest_trained": None,  # Will be discovered dynamically below
             "brawlstars_yolov8_8class": self.models_path / "brawlstars_yolov8_8class.pt",
             "brawlstars_yolov8": self.models_path / "brawlstars_yolov8.pt",
             "main_info": self.models_path / "main_info.pt",
             "brawler_id": self.models_path / "brawler_id.pt",
         }
+
+        # Discover latest trained model from training runs
+        try:
+            yolo_runs = sorted(self.models_path.glob("yolo/*/weights/best.pt"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if yolo_runs:
+                trained_models["latest_trained"] = yolo_runs[0]
+                logger.debug(f"[MODEL] Discovered latest trained model: {yolo_runs[0]}")
+        except Exception:
+            pass
         generic_models = {
             "yolov8n": self.models_path / "yolov8n.pt",
             "yolov8m": self.models_path / "yolov8m.pt",
@@ -847,13 +898,12 @@ class PylaAIEnhanced:
 
         model_loaded = False
 
-        # Try BrawlStarsBot trained model first (prefer 8-class artifact, then legacy 4-class)
-        brawlstars_path = trained_models.get("brawlstars_yolov8_8class") or trained_models.get("brawlstars_yolov8")
-        if brawlstars_path and brawlstars_path.exists():
+        # Try latest trained model first (from training runs)
+        latest_path = trained_models.get("latest_trained")
+        if latest_path and latest_path.exists():
             for attempt in range(1, 4):
                 try:
-                    real_model = YOLO(str(brawlstars_path))
-                    # FIX #1.2: Move model to GPU if CUDA is available
+                    real_model = YOLO(str(latest_path))
                     try:
                         import torch
                         if torch.cuda.is_available():
@@ -861,41 +911,74 @@ class PylaAIEnhanced:
                             logger.info(f"[MODEL] Model moved to GPU: {torch.cuda.get_device_name(0)}")
                     except ImportError:
                         logger.debug("[MODEL] PyTorch/CUDA not available - using CPU")
-                    # Verify model has expected classes using unified class registry
-                    from core.class_registry import get_schema, get_canonical
-                    
-                    schema = "extended" if "8class" in brawlstars_path.name else "core"
-                    expected_classes_raw = get_schema(schema).values()
-                    expected_classes = {get_canonical(name) for name in expected_classes_raw}
+                    from core.class_registry import get_schema
+                    schema = "core"
+                    expected = get_schema(schema)
                     actual_classes = set(real_model.names.values()) if hasattr(real_model, "names") else set()
+                    expected_classes = set(expected.values())
                     if expected_classes.issubset(actual_classes):
                         self.detect_main = Detect(
                             model=real_model,
-                            classes=get_schema(schema),
-                            conf=0.40  # FIX: was 0.25 (75% FP) - now 0.40 (60% FP)
+                            classes=expected,
+                            conf=0.40
                         )
                         self.detect_enemies = self.detect_main
-                        logger.info(f"[MODEL] Loaded BrawlStarsBot TRAINED model: {brawlstars_path.name} (classes: {actual_classes}, attempt={attempt})")
+                        logger.info(f"[MODEL] Loaded LATEST TRAINED model: {latest_path.name} (classes: {actual_classes}, attempt={attempt})")
                         model_loaded = True
                         break
                     else:
-                        missing = expected_classes - actual_classes
-                        logger.warning(f"[MODEL] BrawlStarsBot model missing classes {missing}, got: {actual_classes}")
-                        # Still use it but log warning
-                        self.detect_main = Detect(
-                            model=real_model,
-                            classes=get_schema(schema),
-                            conf=0.40  # FIX: was 0.25 (75% FP) - now 0.40 (60% FP)
-                        )
-                        self.detect_enemies = self.detect_main
-                        model_loaded = True
-                        break
+                        logger.warning(f"[MODEL] Latest trained model missing classes {expected_classes - actual_classes}, got: {actual_classes}")
                 except Exception as e:
-                    logger.error(f"[MODEL] Failed to load BrawlStarsBot model {brawlstars_path} (attempt {attempt}/3): {e}")
+                    logger.error(f"[MODEL] Failed to load latest trained model {latest_path} (attempt {attempt}/3): {e}")
                     if attempt < 3:
                         time.sleep(0.5)
-                    else:
-                        logger.error("[MODEL] BrawlStarsBot model failed after all retries")
+
+        # Try BrawlStarsBot trained model (legacy)
+        if not model_loaded:
+            brawlstars_path = trained_models.get("brawlstars_yolov8_8class") or trained_models.get("brawlstars_yolov8")
+            if brawlstars_path and brawlstars_path.exists():
+                for attempt in range(1, 4):
+                    try:
+                        real_model = YOLO(str(brawlstars_path))
+                        try:
+                            import torch
+                            if torch.cuda.is_available():
+                                real_model.to('cuda')
+                                logger.info(f"[MODEL] Model moved to GPU: {torch.cuda.get_device_name(0)}")
+                        except ImportError:
+                            logger.debug("[MODEL] PyTorch/CUDA not available - using CPU")
+                        from core.class_registry import get_schema, get_canonical
+                        schema = "extended" if "8class" in brawlstars_path.name else "core"
+                        expected_classes_raw = get_schema(schema).values()
+                        expected_classes = {get_canonical(name) for name in expected_classes_raw}
+                        actual_classes = set(real_model.names.values()) if hasattr(real_model, "names") else set()
+                        if expected_classes.issubset(actual_classes):
+                            self.detect_main = Detect(
+                                model=real_model,
+                                classes=get_schema(schema),
+                                conf=0.40
+                            )
+                            self.detect_enemies = self.detect_main
+                            logger.info(f"[MODEL] Loaded BrawlStarsBot TRAINED model: {brawlstars_path.name} (classes: {actual_classes}, attempt={attempt})")
+                            model_loaded = True
+                            break
+                        else:
+                            missing = expected_classes - actual_classes
+                            logger.warning(f"[MODEL] BrawlStarsBot model missing classes {missing}, got: {actual_classes}")
+                            self.detect_main = Detect(
+                                model=real_model,
+                                classes=get_schema(schema),
+                                conf=0.40
+                            )
+                            self.detect_enemies = self.detect_main
+                            model_loaded = True
+                            break
+                    except Exception as e:
+                        logger.error(f"[MODEL] Failed to load BrawlStarsBot model {brawlstars_path} (attempt {attempt}/3): {e}")
+                        if attempt < 3:
+                            time.sleep(0.5)
+                        else:
+                            logger.error("[MODEL] BrawlStarsBot model failed after all retries")
 
         # Try PylaAI trained models if BrawlStarsBot failed
         if not model_loaded:
@@ -1116,6 +1199,25 @@ class PylaAIEnhanced:
                 logger.info("[WRAPPER] Screenshot funcionando, emulador responsivo")
                 logger.info("Emulador conectado via ScreenshotTaker")
 
+                # Verificar se Brawl Stars está aberto (procurar botão Play ou elementos de UI)
+                try:
+                    from pylaai_real.lobby_navigator import SmartPlayButtonDetector
+                    play_det = SmartPlayButtonDetector(self.images_path)
+                    play_result = play_det.find_play_button(test_img)
+                    if play_result.found:
+                        logger.info(f"[WRAPPER] Brawl Stars detectado no lobby (botão Play em {play_result.coords})")
+                    else:
+                        # Verificar se estamos em outra tela do jogo (in_game, loading, etc.)
+                        det = UnifiedStateDetector(images_path=self.images_path)
+                        state_result = det.detect(test_img)
+                        if state_result.state != "unknown":
+                            logger.info(f"[WRAPPER] Brawl Stars detectado (estado: {state_result.state})")
+                        else:
+                            logger.warning("[WRAPPER] Brawl Stars NÃO detectado no emulador! Verifique se o jogo está aberto.")
+                            logger.warning("[WRAPPER] O bot pode não funcionar corretamente se o jogo não estiver aberto.")
+                except Exception as e:
+                    logger.debug(f"[WRAPPER] Verificação de jogo falhou: {e}")
+
             # --- Step 2: Initialize state finder (reads lobby.toml) ---
             self.state_finder = StateFinder(self.images_path)
             self.progress = ProgressObserver()
@@ -1195,6 +1297,59 @@ class PylaAIEnhanced:
                 except Exception as e:
                     logger.warning(f"[WRAPPER] Debug Integration indisponível: {e}")
 
+            # Initialize LearningModeController if active
+            if self.learning_mode and HAS_LEARNING_MODE:
+                try:
+                    self.learning_mode_controller = LearningModeController(
+                        lobby_automator=self.lobby,
+                        emulator_controller=self.emulator_controller,
+                        screenshot_taker=screenshot_source,
+                        state_finder=self.state_finder,
+                        play_logic=self.play_logic,
+                        max_matches=self.central_config.get("learning_max_matches", 5),
+                        match_timeout_seconds=self.central_config.get("learning_match_timeout", 300.0),
+                    )
+                    logger.info("[WRAPPER] LearningModeController inicializado")
+                except Exception as e:
+                    logger.error(f"[WRAPPER] LearningModeController init falhou: {e}")
+                    self.learning_mode_controller = None
+            else:
+                self.learning_mode_controller = None
+
+            # Dashboard Control Center: Mode Controller
+            self.mode_controller: Optional[Any] = None
+            if HAS_MODE_CONTROLLER:
+                try:
+                    self.mode_controller = ModeController(
+                        wrapper_ref=self,
+                        learning_mode_controller=self.learning_mode_controller,
+                        rl_engine=getattr(self, 'online_learner', None),
+                    )
+                    logger.info("[WRAPPER] ModeController inicializado")
+                except Exception as e:
+                    logger.warning(f"[WRAPPER] ModeController init falhou: {e}")
+
+            # ESP Overlay
+            self.esp_overlay: Optional[Any] = None
+            if HAS_ESP_OVERLAY:
+                try:
+                    emulator_title = "BlueStacks"
+                    if self.emulator_controller and hasattr(self.emulator_controller, 'window_title'):
+                        emulator_title = self.emulator_controller.window_title
+                    self.esp_overlay = ESPOverlay(window_title=emulator_title)
+                    logger.info("[WRAPPER] ESPOverlay inicializado")
+                except Exception as e:
+                    logger.warning(f"[WRAPPER] ESPOverlay init falhou: {e}")
+
+            # RL Metrics Collector
+            self.rl_metrics_collector: Optional[Any] = None
+            if HAS_RL_METRICS:
+                try:
+                    self.rl_metrics_collector = LearningRLMetricsCollector()
+                    logger.info("[WRAPPER] LearningRLMetricsCollector inicializado")
+                except Exception as e:
+                    logger.warning(f"[WRAPPER] LearningRLMetricsCollector init falhou: {e}")
+
             # Initialize UnifiedStateDetector (replaces dual ScreenAutomation + StateFinder)
             self.unified_detector = UnifiedStateDetector(
                 self.images_path, window_w=window_w, window_h=window_h,
@@ -1238,7 +1393,7 @@ class PylaAIEnhanced:
 
             # NOVO: Motor de aprendizagem online (Q-Learning + ELO)
             try:
-                from .pylaai_real.rl_engine import OnlineLearner
+                from pylaai_real.rl_engine import OnlineLearner
                 self.online_learner = OnlineLearner(
                     reward_bridge=self.reward_bridge,
                     enabled=True,
@@ -1263,6 +1418,23 @@ class PylaAIEnhanced:
                 cover_system=self.cover_system,
                 world_model_integrator=self.world_model_integrator,
             )
+
+            # --- Step 4.5: Create auto-fix engine ---
+            self.auto_fix = None
+            if HAS_AUTO_FIX:
+                try:
+                    self.auto_fix = AutoFixEngine(
+                        screenshot_func=screenshot_source.take if screenshot_source else None,
+                        click_func=self.emulator_controller.tap_scaled if self.emulator_controller else None,
+                        key_func=lambda k: self.emulator_controller.keyevent(
+                            {'esc': 4, 'enter': 66, 'home': 3}.get(k.lower(), 4)
+                        ) if self.emulator_controller else None,
+                        state_detector=self.unified_detector,
+                        emulator_controller=self.emulator_controller,
+                    )
+                    logger.info('[WRAPPER] AutoFixEngine inicializado')
+                except Exception as e:
+                    logger.warning(f'[WRAPPER] AutoFixEngine indisponível: {e}')
 
             # --- Step 5: Create state manager ---
             # Ensure we have a compatible screenshot taker (Fix Error #10 integration)
@@ -1334,6 +1506,8 @@ class PylaAIEnhanced:
                 unified_state_detector=self.unified_detector,  # NEW: unified detector
                 ocr_detector=self.ocr_detector,  # NEW: OCR fallback
                 rl_engine=self.online_learner,  # NEW: RL online
+                learning_mode_controller=self.learning_mode_controller,  # NEW: learning mode
+                auto_fix_engine=self.auto_fix,  # NEW: auto-diagnosis and recovery
             )
 
             # Premium: Connect dashboard bridge to state_manager for match tracking
@@ -1384,22 +1558,23 @@ class PylaAIEnhanced:
             except Exception as e:
                 logger.warning(f"[WRAPPER] Falha ao iniciar dashboard: {e}")
 
-        # Anti-ban schedule check
-        if self.anti_ban and not self.anti_ban.should_start_match():
+        # Anti-ban schedule check (skipped in learning mode)
+        if not self.learning_mode and self.anti_ban and not self.anti_ban.should_start_match():
             logger.warning("[WRAPPER] Anti-ban: início bloqueado por schedule/padrão")
             return False
 
-        # Safety check before starting
-        logger.debug("[WRAPPER] Verificando limites de segurança")
-        trophy_status = self.safety.check_trophy_limit(
-            self._get_current_trophies()
-        )
-        if not trophy_status["can_play"]:
-            logger.error(f"[WRAPPER] Safety block: {trophy_status['message']}")
-            return False
+        # Safety check before starting (skipped in learning mode)
+        if not self.learning_mode:
+            logger.debug("[WRAPPER] Verificando limites de segurança")
+            trophy_status = self.safety.check_trophy_limit(
+                self._get_current_trophies()
+            )
+            if not trophy_status["can_play"]:
+                logger.error(f"[WRAPPER] Safety block: {trophy_status['message']}")
+                return False
 
-        if trophy_status["warning"]:
-            logger.warning(f"[WRAPPER] Safety warning: {trophy_status['message']}")
+            if trophy_status["warning"]:
+                logger.warning(f"[WRAPPER] Safety warning: {trophy_status['message']}")
 
         # Start safety session
         logger.debug("[WRAPPER] Iniciando sessão de segurança")
@@ -1710,6 +1885,13 @@ class PylaAIEnhanced:
         # Systematic resource cleanup
         self._cleanup_resources()
 
+        # Print learning mode summary if active
+        if self.learning_mode and self.learning_mode_controller:
+            try:
+                self.learning_mode_controller.print_summary()
+            except Exception as e:
+                logger.warning(f"[WRAPPER] Falha ao imprimir sumário de learning mode: {e}")
+
         # Wait for threads with reasonable timeouts
         logger.debug("[WRAPPER] Aguardando threads terminarem")
         if self.orchestrator_thread and self.orchestrator_thread.is_alive():
@@ -1819,21 +2001,25 @@ class PylaAIEnhanced:
             # Procurar brawler na fila
             for i, b in enumerate(self.brawler_queue.brawlers):
                 if b.name.lower() == name.lower():
+                    if not getattr(b, 'enabled', True):
+                        logger.warning(f"[WRAPPER] Brawler bloqueado/desativado recusado: {b.name}")
+                        return False
                     self.brawler_queue.current_index = i
                     if self.state_manager:
                         self.state_manager.current_brawler = b.name
                     logger.info(f"[WRAPPER] Brawler forçado: {b.name}")
                     return True
-            # Se nao encontrou, adiciona com defaults
-            self.add_brawler_to_queue(name)
-            self.brawler_queue.current_index = len(self.brawler_queue.brawlers) - 1
-            if self.state_manager:
-                self.state_manager.current_brawler = name
-            logger.info(f"[WRAPPER] Brawler adicionado e selecionado: {name}")
-            return True
+            logger.warning(f"[WRAPPER] Brawler nao encontrado na fila: {name}")
+            return False
         except Exception as e:
             logger.error(f"[WRAPPER] Falha ao set brawler {name}: {e}")
             return False
+
+    def get_available_brawler_names(self) -> List[str]:
+        """Retorna apenas os brawlers habilitados para selecao na UI."""
+        if not self.brawler_queue:
+            return []
+        return [b.name for b in self.brawler_queue.brawlers if getattr(b, 'enabled', True)]
 
     def update_queue(self, queue_data: List[Dict]) -> bool:
         """Substitui a fila de brawlers completamente."""
@@ -1841,7 +2027,7 @@ class PylaAIEnhanced:
             logger.warning("[WRAPPER] Brawler queue nao inicializada")
             return False
         try:
-            from .pylaai_real.lobby_automator import BrawlerConfig
+            from pylaai_real.lobby_automator import BrawlerConfig
             self.brawler_queue.brawlers = []
             self.brawler_queue.current_index = 0
             for item in queue_data:
@@ -1903,12 +2089,53 @@ class PylaAIEnhanced:
             elif system_name == "auto_tuner":
                 self.auto_tuning_enabled = enabled
                 logger.info(f"[WRAPPER] Auto-tuning {'ativado' if enabled else 'desativado'}")
+            elif system_name == "learning_mode":
+                self.toggle_learning_mode(enabled)
             else:
                 logger.warning(f"[WRAPPER] Sistema desconhecido: {system_name}")
                 return False
             return True
         except Exception as e:
             logger.error(f"[WRAPPER] Falha ao toggle {system_name}: {e}")
+            return False
+
+    def toggle_learning_mode(self, enabled: bool = True, max_matches: int = 5) -> bool:
+        """Ativa/desativa o modo de aprendizagem dinamicamente."""
+        try:
+            if enabled:
+                if self.learning_mode_controller is None and HAS_LEARNING_MODE:
+                    try:
+                        screenshot_source = self.emulator_controller or self.screenshot
+                        self.learning_mode_controller = LearningModeController(
+                            lobby_automator=self.lobby,
+                            emulator_controller=self.emulator_controller,
+                            screenshot_taker=screenshot_source,
+                            state_finder=self.state_finder,
+                            play_logic=self.play_logic,
+                            max_matches=max_matches,
+                        )
+                    except Exception as e:
+                        logger.error(f"[WRAPPER] Falha ao criar LearningModeController: {e}")
+                        return False
+                if self.learning_mode_controller:
+                    self.learning_mode_controller.start_learning_mode(max_matches=max_matches)
+                    self.learning_mode = True
+                    # Forçar state manager a transitar para learning mode
+                    if self.state_manager:
+                        self.state_manager.learning_mode_controller = self.learning_mode_controller
+                    logger.info("[WRAPPER] Modo de aprendizagem ATIVADO via dashboard")
+                    return True
+            else:
+                if self.learning_mode_controller:
+                    self.learning_mode_controller.stop_learning_mode()
+                self.learning_mode = False
+                if self.state_manager:
+                    self.state_manager.learning_mode_controller = None
+                logger.info("[WRAPPER] Modo de aprendizagem DESATIVADO via dashboard")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"[WRAPPER] Falha ao toggle learning mode: {e}")
             return False
 
     def execute_action(self, action_name: str, **kwargs) -> bool:
@@ -1963,6 +2190,57 @@ class PylaAIEnhanced:
             logger.error(f"[WRAPPER] Falha na acao {action_name}: {e}")
             return False
 
+    def toggle_esp(self, enabled: Optional[bool] = None) -> bool:
+        """Liga/desliga ESP overlay sobre o emulador."""
+        if not self.esp_overlay:
+            logger.warning("[WRAPPER] ESP Overlay nao disponivel")
+            return False
+        return self.esp_overlay.toggle(enabled)
+
+    def start_mode(self, mode: str, config: Optional[Dict] = None) -> bool:
+        """Inicia um modo operacional via dashboard."""
+        if not self.mode_controller:
+            logger.warning("[WRAPPER] ModeController nao disponivel")
+            return False
+        return self.mode_controller.start_mode(mode, config)
+
+    def stop_mode(self, mode: Optional[str] = None) -> bool:
+        """Para um modo operacional via dashboard."""
+        if not self.mode_controller:
+            logger.warning("[WRAPPER] ModeController nao disponivel")
+            return False
+        return self.mode_controller.stop_mode(mode)
+
+    def get_mode_status(self) -> Dict:
+        """Retorna estado de todos os modos operacionais."""
+        if not self.mode_controller:
+            return {"available": False}
+        return self.mode_controller.get_status()
+
+    def get_detection_snapshot(self) -> Dict:
+        """Retorna detecoes raw do vision engine para dashboard/ESP."""
+        detections = []
+        vision_stats = {}
+        try:
+            if self.detect_main and hasattr(self.detect_main, 'get_raw_detections'):
+                detections = self.detect_main.get_raw_detections()
+            if self.detect_main and hasattr(self.detect_main, 'get_vision_stats'):
+                vision_stats = self.detect_main.get_vision_stats()
+        except Exception as e:
+            logger.debug(f"[WRAPPER] Detection snapshot error: {e}")
+        return {"detections": detections, "vision_stats": vision_stats}
+
+    def get_rl_metrics(self) -> Dict:
+        """Retorna métricas de RL para a dashboard."""
+        if self.rl_metrics_collector:
+            return self.rl_metrics_collector.get_metrics()
+        # Fallback direto ao engine
+        if self.online_learner and hasattr(self.online_learner, 'rl_bridge') and self.online_learner.rl_bridge:
+            return self.online_learner.rl_bridge.get_stats()
+        if self.online_learner and hasattr(self.online_learner, 'q_learning'):
+            return self.online_learner.q_learning.get_live_metrics()
+        return {}
+
     def get_system_status(self) -> Dict:
         """Retorna status detalhado de todos os sistemas para a dashboard."""
         status = {
@@ -1996,6 +2274,22 @@ class PylaAIEnhanced:
                 "data_collector": {
                     "enabled": self.data_collector is not None,
                     "available": self.data_collector is not None,
+                },
+                "learning_mode": {
+                    "enabled": self.learning_mode,
+                    "available": HAS_LEARNING_MODE,
+                    "active": getattr(self.learning_mode_controller, '_match_active', False) if self.learning_mode_controller else False,
+                },
+                "mode_controller": {
+                    "available": self.mode_controller is not None,
+                    "active_mode": self.mode_controller.get_status().get("active_mode") if self.mode_controller else None,
+                },
+                "esp_overlay": {
+                    "available": self.esp_overlay is not None,
+                    "enabled": self.esp_overlay.enabled if self.esp_overlay else False,
+                },
+                "rl_metrics": {
+                    "available": self.rl_metrics_collector is not None,
                 },
             }
         }
@@ -2251,7 +2545,94 @@ class PylaAIEnhanced:
                 # Dashboard live data update (REAL data, zero mocks)
                 if self.dashboard:
                     try:
+                        # Learning mode metrics → dashboard bridge
+                        if self.learning_mode and self.learning_mode_controller:
+                            try:
+                                lm_data = self.learning_mode_controller.get_live_metrics()
+                                self.dashboard.bridge.update(
+                                    learning_mode_active=lm_data.get("active", False),
+                                    learning_current_match=lm_data.get("current_match", 0),
+                                    learning_max_matches=lm_data.get("max_matches", 0),
+                                    learning_kills=lm_data.get("kills", 0),
+                                    learning_detections=lm_data.get("detections_enemies", 0),
+                                    learning_accuracy=lm_data.get("accuracy_percent", 0.0),
+                                    learning_damage=lm_data.get("damage_dealt", 0.0),
+                                    learning_survival_seconds=lm_data.get("match_duration_seconds", 0.0),
+                                    learning_brawler=lm_data.get("current_brawler", "unknown"),
+                                )
+                            except Exception as e:
+                                logger.debug(f"[WRAPPER] Learning mode dashboard update error: {e}")
                         self.dashboard.update_from_wrapper(self)
+
+                        # Detection snapshot → dashboard (ESP + minimap)
+                        try:
+                            snap = self.get_detection_snapshot()
+                            self.dashboard.bridge.update(
+                                detections=snap.get("detections", []),
+                                vision_stats=snap.get("vision_stats", {}),
+                            )
+                            # ESP overlay update
+                            if self.esp_overlay and self.esp_overlay.enabled:
+                                try:
+                                    player_pos = None
+                                    target_pos = None
+                                    if self.play_logic and hasattr(self.play_logic, 'last_combat_snapshot'):
+                                        pcs = self.play_logic.last_combat_snapshot
+                                        if pcs:
+                                            player = pcs.get('player')
+                                            if player and len(player) >= 4:
+                                                player_pos = (int((player[0]+player[2])/2), int((player[1]+player[3])/2))
+                                            enemies = pcs.get('enemies', [])
+                                            if enemies and len(enemies[0]) >= 4:
+                                                e = enemies[0]
+                                                target_pos = (int((e[0]+e[2])/2), int((e[1]+e[3])/2))
+                                    self.esp_overlay.update_detections(
+                                        snap.get("detections", []),
+                                        player_pos=player_pos,
+                                        target_pos=target_pos,
+                                    )
+                                except Exception as e:
+                                    logger.debug(f"[WRAPPER] ESP update error: {e}")
+                        except Exception as e:
+                            logger.debug(f"[WRAPPER] Detection dashboard update error: {e}")
+
+                        # RL metrics → dashboard
+                        try:
+                            rl_data = self.get_rl_metrics()
+                            if rl_data:
+                                self.dashboard.bridge.update(
+                                    rl_active=rl_data.get("active", False),
+                                    rl_engine_type=rl_data.get("engine_type", ""),
+                                    rl_epsilon=rl_data.get("epsilon", 0.0),
+                                    rl_q_table_size=rl_data.get("q_table_size", 0),
+                                    rl_total_updates=rl_data.get("total_updates", 0),
+                                    rl_last_reward=rl_data.get("last_reward", 0.0),
+                                    rl_episode_reward=rl_data.get("episode_reward", 0.0),
+                                    rl_policy_loss=rl_data.get("policy_loss", 0.0),
+                                    rl_value_loss=rl_data.get("value_loss", 0.0),
+                                    rl_entropy=rl_data.get("entropy", 0.0),
+                                    rl_buffer_size=rl_data.get("buffer_size", 0),
+                                )
+                        except Exception as e:
+                            logger.debug(f"[WRAPPER] RL metrics dashboard update error: {e}")
+
+                        # Mode controller status → dashboard
+                        try:
+                            if self.mode_controller:
+                                mode_status = self.mode_controller.get_status()
+                                self.dashboard.bridge.update(
+                                    active_mode=mode_status.get("active_mode"),
+                                    mode_training=mode_status.get("training_active", False),
+                                    mode_farm=mode_status.get("farm_active", False),
+                                    mode_learn=mode_status.get("learn_active", False),
+                                    mode_matches_completed=mode_status.get("matches_completed", 0),
+                                    mode_matches_target=mode_status.get("matches_target", 0),
+                                    mode_current_brawler=mode_status.get("current_brawler", "unknown"),
+                                    mode_session_duration=mode_status.get("session_duration_seconds", 0.0),
+                                )
+                        except Exception as e:
+                            logger.debug(f"[WRAPPER] Mode status dashboard update error: {e}")
+
                         # Se estivermos em jogo, gravar frame para replay
                         if (self.state_manager and self.state_manager.current_state == 'in_game' and
                                 self.dashboard.recorder and self.state_manager._last_screenshot is not None):
@@ -2502,12 +2883,17 @@ def main() -> None:
         action="store_true",
         help="Run setup (emulator, models) and exit without starting automation threads",
     )
+    parser.add_argument(
+        "--learning-mode",
+        action="store_true",
+        help="Modo teste aprendizagem: vai à Training Cave, joga contra bots e mostra métricas",
+    )
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
     )
-    bot = PylaAIEnhanced()
+    bot = PylaAIEnhanced(learning_mode=args.learning_mode)
     if not bot.setup():
         logger.error("Setup failed; see logs above.")
         sys.exit(1)

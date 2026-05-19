@@ -101,6 +101,8 @@ class StateManager:
         ocr_detector=None,  # NOVO: OCR detector para fallback híbrido
         lobby=None,
         rl_engine=None,  # NOVO: motor de RL online
+        learning_mode_controller=None,  # NOVO: modo teste aprendizagem
+        auto_fix_engine=None,  # NOVO: motor de auto-diagnóstico e recovery
     ):
         # Aceitar 'lobby' como alias de 'lobby_automator'
         if lobby is not None and lobby_automator is None:
@@ -120,6 +122,8 @@ class StateManager:
         self.brawler_selector = brawler_selector
         self.observability = observability
         self.rl_engine = rl_engine  # NOVO
+        self.learning_mode_controller = learning_mode_controller  # NOVO
+        self.auto_fix = auto_fix_engine
 
         # NOVO: Detector unificado (prioridade sobre state_finder antigo)
         self.unified_detector = unified_state_detector
@@ -180,6 +184,8 @@ class StateManager:
             'end': self._handle_end_game,
             'in_game': self._handle_in_game,
             'unknown': self._handle_unknown,
+            # NOVO: modo teste aprendizagem (Training Cave)
+            'in_game_learning': self._handle_in_game_learning,
             # NOVOS estados adicionais (ANALISE_PROFUNDA)
             'tutorial': self._handle_tutorial,
             'news': self._handle_news,
@@ -207,6 +213,13 @@ class StateManager:
 
         # State timeout tracking to prevent infinite loops
         self.state_start_time = None
+        
+        # ANTI-OSCILLATION: Cooldown entre transições e lock de estado
+        self._last_transition_time = 0.0
+        self._state_transition_cooldown = 3.0  # segundos mínimos entre transições
+        self._in_game_lock = False  # Quando True, só sai de in_game para end/connection_lost
+        self._in_game_min_duration = 5.0  # Mínimo de segundos em in_game antes de permitir saída
+        
         self.state_timeouts = {
             'loading': 30,    # 30 seconds max in loading
             'lobby': 60,     # 60 seconds max in lobby
@@ -215,6 +228,7 @@ class StateManager:
             'in_game': 180,  # 180 seconds max in game (3 min) - forces end_match with "unknown"
             'end': 45,       # 45 seconds max in end screen
             'unknown': 60,   # 60 seconds max in unknown before forced reset
+            'in_game_learning': 300,  # 5 min max por partida de treino
             'tutorial': 45,  # 45 seconds max in tutorial
             'news': 20,      # 20 seconds max in news (deve ser fechada rapido)
             'brawler_unlock': 30,  # 30 seconds max
@@ -223,12 +237,13 @@ class StateManager:
 
         # Valid state transitions (for validation and debugging)
         self.VALID_TRANSITIONS = {
-            'unknown': ['lobby', 'in_game', 'loading', 'matchmaking', 'brawler_selection', 'shop', 'popup', 'end', 'connection_lost', 'tutorial', 'news', 'brawler_unlock', 'season_reset', 'event_screen', 'starr_drop'],
-            'lobby': ['loading', 'matchmaking', 'brawler_selection', 'shop', 'popup', 'unknown', 'in_game', 'news', 'brawler_unlock', 'season_reset'],
-            'loading': ['in_game', 'lobby', 'unknown', 'connection_lost'],
-            'matchmaking': ['in_game', 'loading', 'lobby', 'unknown', 'connection_lost'],
+            'unknown': ['lobby', 'in_game', 'in_game_learning', 'loading', 'matchmaking', 'brawler_selection', 'shop', 'popup', 'end', 'connection_lost', 'tutorial', 'news', 'brawler_unlock', 'season_reset', 'event_screen', 'starr_drop'],
+            'lobby': ['loading', 'matchmaking', 'brawler_selection', 'shop', 'popup', 'unknown', 'in_game', 'in_game_learning', 'news', 'brawler_unlock', 'season_reset'],
+            'loading': ['in_game', 'in_game_learning', 'lobby', 'unknown', 'connection_lost'],
+            'matchmaking': ['in_game', 'in_game_learning', 'loading', 'lobby', 'unknown', 'connection_lost'],
             'brawler_selection': ['lobby', 'loading', 'matchmaking', 'unknown'],
             'in_game': ['end', 'connection_lost', 'unknown', 'lobby'],
+            'in_game_learning': ['lobby', 'end', 'unknown', 'in_game_learning'],
             'end': ['lobby', 'brawler_selection', 'loading', 'unknown'],
             'shop': ['lobby', 'unknown'],
             'popup': ['lobby', 'unknown'],
@@ -297,8 +312,13 @@ class StateManager:
             self._popup_consecutive_count = 0
         if not hasattr(self, '_last_popup_type'):
             self._last_popup_type = None
+        if not hasattr(self, '_popup_ignore_until'):
+            self._popup_ignore_until = 0.0
 
-        if self.lobby and hasattr(self.lobby, '_popup_manager') and self.lobby._popup_manager:
+        # Verificar se estamos em cooldown de popup
+        if time.time() < self._popup_ignore_until:
+            logger.debug(f"[STATE] Popup check ignorado (cooldown até {self._popup_ignore_until - time.time():.0f}s)")
+        elif self.lobby and hasattr(self.lobby, '_popup_manager') and self.lobby._popup_manager:
             try:
                 import numpy as np
                 if isinstance(image, np.ndarray):
@@ -321,13 +341,13 @@ class StateManager:
                             key_func=self.lobby._key_press if hasattr(self.lobby, '_key_press') else lambda k: None
                         )
 
-                        # FIX #18: Only sleep if we haven't been stuck on same popup
-                        if self._popup_consecutive_count <= 2:
-                            time.sleep(random.uniform(0.3, 0.6))
+                        # FIX #18: Popup Loop Breaker - cooldown após 3 falhas
+                        if self._popup_consecutive_count >= 3:
+                            logger.warning(f"[STATE] Popup {popup.popup_type} NAO FECHOU apos 3 tentativas - IGNORANDO popups por 30s")
+                            self._popup_ignore_until = time.time() + 30.0
+                            self._popup_consecutive_count = 0
                         else:
-                            logger.warning(f"[STATE] Popup {popup.popup_type} nao fechou apos "
-                                        f"{self._popup_consecutive_count} tentativas - pulando sleep")
-                            self._popup_consecutive_count = 0  # Reset after warning
+                            time.sleep(random.uniform(0.3, 0.6))
 
                         # Se era um popup, ficamos em "unknown" e deixamos o ciclo seguinte resolver
                         if self.current_state != 'in_game':
@@ -379,7 +399,24 @@ class StateManager:
             if detected_state != self.current_state:
                 # Validate transition
                 valid_next = self.VALID_TRANSITIONS.get(self.current_state, [])
-                if valid_next and detected_state not in valid_next:
+
+                # ANTI-OSCILLATION: Cooldown entre transições
+                time_since_last_transition = time.time() - self._last_transition_time
+                if time_since_last_transition < self._state_transition_cooldown:
+                    logger.debug(f"[STATE] Transição bloqueada por cooldown ({time_since_last_transition:.1f}s < {self._state_transition_cooldown}s)")
+                    detected_state = self.current_state
+
+                # ANTI-OSCILLATION: Lock de in_game - só sai para end, connection_lost, ou unknown com confiança alta
+                elif self.current_state == 'in_game' and detected_state not in ('end', 'connection_lost', 'unknown'):
+                    time_in_game = time.time() - self.state_start_time if self.state_start_time else 0
+                    if time_in_game < self._in_game_min_duration:
+                        logger.warning(f"[STATE] BLOCKED: in_game -> {detected_state} (apenas {time_in_game:.1f}s em jogo, mínimo {self._in_game_min_duration}s)")
+                        detected_state = self.current_state
+                    else:
+                        logger.warning(f"[STATE] BLOCKED: in_game -> {detected_state} (só permitido: end, connection_lost, unknown)")
+                        detected_state = self.current_state
+
+                elif valid_next and detected_state not in valid_next:
                     logger.warning(f"[STATE] Invalid transition: {self.current_state} -> {detected_state} (valid: {valid_next})")
                     # CRITICAL: Block impossible transitions that cause loops
                     if self.current_state == 'lobby' and detected_state == 'end':
@@ -389,7 +426,9 @@ class StateManager:
                         logger.debug("[STATE] Already in end, ignoring repeated detection")
                         detected_state = self.current_state
 
-                logger.info(f"[STATE] Transição: {self.current_state} -> {detected_state}")
+                if detected_state != self.current_state:
+                    logger.info(f"[STATE] Transição: {self.current_state} -> {detected_state}")
+                    self._last_transition_time = time.time()
                 if log_manager:
                     log_manager.log(
                         message=f"Transição de estado: {self.current_state} -> {detected_state}",
@@ -491,7 +530,7 @@ class StateManager:
             logger.debug(f"[STATE] Handler disponível: {handler_name in self.states}")
             handler_start = time.time()
             try:
-                if self.current_state == 'in_game' or self.current_state == 'unknown':
+                if self.current_state in ('in_game', 'in_game_learning', 'unknown'):
                     self.states[self.current_state](image)
                 else:
                     self.states[self.current_state]()
@@ -667,6 +706,19 @@ class StateManager:
                     except Exception as e:
                         logger.debug(f"[STATE] Erro ao verificar convites: {e}")
 
+                # === NOVO: Auto-fix engine - diagnóstico e recovery automático ===
+                if self.auto_fix:
+                    try:
+                        forced_state = self.auto_fix.tick(self.current_state)
+                        if forced_state and forced_state != self.current_state:
+                            logger.info(f"[STATE] AutoFix forçou estado: {self.current_state} -> {forced_state}")
+                            self.current_state = forced_state
+                            self.state_start_time = time.time()
+                            if forced_state == 'lobby':
+                                self._remember_known_state('lobby')
+                    except Exception as e:
+                        logger.debug(f"[STATE] AutoFix error: {e}")
+
                 # FORCE LOADING TIMEOUT: if in loading for >15s, skip detection and force in_game
                 logger.info(f"[STATE] DEBUG: current={self.current_state}, start_time={self.state_start_time}")
                 if self.current_state == 'loading':
@@ -741,11 +793,27 @@ class StateManager:
         return False
 
     def _handle_lobby(self):
-        """No lobby - pressiona play"""
+        """No lobby - pressiona play com verificações proativas"""
         logger.info("[STATE] No lobby - a pressionar play")
         logger.info(f"[STATE] Lobby automator disponível: {self.lobby is not None}")
-        logger.info(f"[STATE] Emulator controller disponível: {self.emulator_controller is not None}")
         self._diag("lobby_handler_start")
+
+        # Verificar popups proativamente antes de tentar clicar no Play
+        if self.lobby and hasattr(self.lobby, 'close_popup'):
+            try:
+                img = self._get_cached_screenshot()
+                if img is not None:
+                    from pylaai_real.unified_state_detector import UnifiedStateDetector
+                    quick_det = UnifiedStateDetector(images_path=self.unified_detector.images_path if self.unified_detector else 'images')
+                    det = quick_det.detect(img)
+                    if det.state in ('popup', 'news', 'shop', 'tutorial'):
+                        logger.info(f"[STATE] Detectado {det.state} no lobby, fechando antes de prosseguir")
+                        self.lobby.close_popup()
+                        time.sleep(random.uniform(0.5, 1.0))
+                        self._diag(f"lobby_pre_popup_closed={det.state}")
+            except Exception as e:
+                logger.debug(f"[STATE] Verificação proativa de popup falhou: {e}")
+        logger.info(f"[STATE] Emulator controller disponível: {self.emulator_controller is not None}")
 
         # Phase 10: LobbyFSM state tracking
         if self.lobby_fsm and HAS_LOBBY_FSM:
@@ -777,6 +845,21 @@ class StateManager:
         if self.lobby is None:
             logger.warning("[STATE] Lobby automator não disponível, não é possível pressionar play")
             return
+
+        # === NOVO: Learning Mode — ir diretamente para Training Cave ===
+        if self.learning_mode_controller:
+            logger.info("[STATE] Learning mode ativo — navegando para Training Cave")
+            entered = self.learning_mode_controller.enter_training_cave()
+            if entered:
+                self.current_state = 'in_game_learning'
+                self.state_start_time = time.time()
+                self._diag("learning_mode_entered_training_cave")
+                # Reset in_game flag to ensure clean state
+                self._in_game_initialized = False
+            else:
+                logger.error("[STATE] Falha ao entrar na Training Cave; tentando fallback Play")
+            return
+
         # === NOVO: Selecionar modo de jogo desejado antes de pressionar Play ===
         desired_mode = None
         if self.lobby and hasattr(self.lobby, 'queue') and self.lobby.queue:
@@ -1035,6 +1118,31 @@ class StateManager:
         logger.info("[STATE] Matchmaking detectado - aguardando início da partida")
         self._diag("matchmaking_handler_start")
 
+        # Verificar se a partida já começou (proactive detection)
+        if self.state_start_time:
+            elapsed = time.time() - self.state_start_time
+            if elapsed > 20:
+                logger.warning(f"[STATE] Matchmaking timeout ({elapsed:.0f}s > 20s) - forçando transição para in_game")
+                self._diag(f"matchmaking_timeout_force_in_game={elapsed:.1f}")
+                self.current_state = 'in_game'
+                self.state_start_time = time.time()
+                self._remember_known_state('in_game')
+                return
+            elif elapsed > 10:
+                logger.info(f"[STATE] Matchmaking há {elapsed:.0f}s - verificando se partida começou")
+                try:
+                    img = self._get_cached_screenshot()
+                    if img is not None and hasattr(self, 'unified_detector') and self.unified_detector:
+                        result = self.unified_detector.detect(img)
+                        if result.state in ('in_game', 'loading'):
+                            logger.info(f"[STATE] Partida detectada via proactive check: {result.state}")
+                            self._diag(f"matchmaking_proactive_detected={result.state}")
+                            self.current_state = result.state
+                            self.state_start_time = time.time()
+                            return
+                except Exception as e:
+                    logger.debug(f"[STATE] Proactive matchmaking check falhou: {e}")
+
         # Map detection is now handled automatically in _process_cycle via screen automation hints
         # No need to set default map here anymore
         logger.debug("[STATE] Mapa será detectado automaticamente via screen automation hints")
@@ -1149,6 +1257,37 @@ class StateManager:
 
             result = self.play.play_round(screenshot)
             logger.info(f"[STATE] Play round resultado: {result}")
+            
+            # FALLBACK: Garantir que o bot nunca fica parado por muito tempo
+            current_time = time.time()
+            if not hasattr(self, '_last_combat_action_time'):
+                self._last_combat_action_time = current_time
+            
+            # Verificar se houve ação real de combate
+            action_taken = False
+            if result and isinstance(result, dict):
+                action_taken = result.get('attacked', False) or result.get('moved', False) or result.get('super_used', False)
+            
+            if action_taken:
+                self._last_combat_action_time = current_time
+                logger.info(f"[STATE] Ação de combate registrada: {result}")
+            else:
+                time_since_last_action = current_time - self._last_combat_action_time
+                if time_since_last_action > 3.0:
+                    logger.warning(f"[STATE] BOT PARADO há {time_since_last_action:.1f}s - FORÇANDO movimento de exploração")
+                    # Movimento aleatório para explorar
+                    if self.emulator_controller:
+                        import random
+                        # Mover para direção aleatória
+                        angle = random.uniform(0, 2 * 3.14159)
+                        distance = random.randint(100, 300)
+                        # Centro do joystick + offset
+                        joy_x, joy_y = 300, 900  # Coordenadas aproximadas do joystick
+                        target_x = int(joy_x + distance * __import__('math').cos(angle))
+                        target_y = int(joy_y + distance * __import__('math').sin(angle))
+                        self.emulator_controller.swipe(joy_x, joy_y, target_x, target_y, duration=200)
+                        logger.info(f"[STATE] Movimento de exploração: ({joy_x},{joy_y}) -> ({target_x},{target_y})")
+                    self._last_combat_action_time = current_time
 
             # === RL ONLINE: aprender deste frame ===
             if self.rl_engine and self.play and hasattr(self.play, 'last_rl_transition') and self.play.last_rl_transition:
@@ -1683,6 +1822,58 @@ class StateManager:
         self.current_state = 'lobby'
         self.state_start_time = time.time()
         self._diag("starr_drop_handler_done")
+
+    def _handle_in_game_learning(self, image):
+        """Modo teste aprendizagem na Training Cave — executa frame-a-frame com métricas."""
+        logger.debug("[STATE] Handler in_game_learning iniciado")
+
+        if self.learning_mode_controller is None:
+            logger.error("[STATE] learning_mode_controller não disponível — saindo para lobby")
+            self.current_state = 'lobby'
+            return
+
+        # Inicializar match na primeira entrada
+        if not getattr(self, '_learning_match_initialized', False):
+            brawler = "unknown"
+            if self.lobby and hasattr(self.lobby, 'queue') and self.lobby.queue:
+                current = self.lobby.queue.get_current()
+                if current:
+                    brawler = current.name
+            self.learning_mode_controller.start_match(brawler)
+            self._learning_match_initialized = True
+            if self.play and hasattr(self.play, 'set_pve_mode'):
+                try:
+                    self.play.set_pve_mode('training_cave')
+                except Exception as e:
+                    logger.debug(f"[STATE] Falha ao definir PvE mode: {e}")
+
+        # Executar um frame de gameplay
+        if image is not None:
+            self.learning_mode_controller.run_frame(image)
+
+        # Verificar se a partida terminou (morte, timeout, tela de restart)
+        ended, reason = self.learning_mode_controller.is_match_ended(image)
+        if ended:
+            self.learning_mode_controller.end_match(reason)
+            self._learning_match_initialized = False
+            if self.learning_mode_controller.should_continue():
+                logger.info("[STATE] Reiniciando treino na Training Cave (%s/%s)",
+                            self.learning_mode_controller._current_match_index,
+                            self.learning_mode_controller.max_matches)
+                self.learning_mode_controller.restart_training()
+                self.state_start_time = time.time()
+                # Start next match immediately on next cycle
+                self._learning_match_initialized = False
+            else:
+                logger.info("[STATE] Modo de aprendizagem concluído (%s partidas). Voltando ao lobby.",
+                            self.learning_mode_controller.max_matches)
+                self.learning_mode_controller.exit_training_cave()
+                self.current_state = 'lobby'
+                self.state_start_time = time.time()
+                return
+
+        time.sleep(0.1)
+        logger.debug("[STATE] Handler in_game_learning concluído")
 
     def _safe_back_to_lobby(self, max_attempts: int = 3):
         """Helper: tentar voltar para lobby de forma segura usando ESC/BACK."""
