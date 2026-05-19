@@ -2514,6 +2514,44 @@ class PylaAIEnhanced:
                         # FIX #15: BehavioralProfile failures should be logged
                         logger.warning(f"[WRAPPER] BehavioralProfile.record_state failed: {e}")
 
+                # === WATCHDOG: Recovery autónomo quando o bot está preso ===
+                if self.state_manager and hasattr(self.state_manager, 'state_start_time') and self.state_manager.state_start_time:
+                    try:
+                        state = self.state_manager.current_state
+                        elapsed = time.time() - self.state_manager.state_start_time
+                        if state == 'matchmaking' and elapsed > 15:
+                            logger.warning(f"[WATCHDOG] Matchmaking preso há {elapsed:.0f}s - forçando in_game")
+                            self.state_manager.current_state = 'in_game'
+                            self.state_manager.state_start_time = time.time()
+                            if hasattr(self.state_manager, '_forced_in_game_time'):
+                                self.state_manager._forced_in_game_time = time.time()
+                            if hasattr(self.state_manager, '_matchmaking_enter_time'):
+                                self.state_manager._matchmaking_enter_time = None
+                        elif state == 'loading' and elapsed > 18:
+                            logger.warning(f"[WATCHDOG] Loading preso há {elapsed:.0f}s - forçando in_game")
+                            self.state_manager.current_state = 'in_game'
+                            self.state_manager.state_start_time = time.time()
+                            if hasattr(self.state_manager, '_forced_in_game_time'):
+                                self.state_manager._forced_in_game_time = time.time()
+                        elif state == 'lobby' and elapsed > 35:
+                            logger.warning(f"[WATCHDOG] Lobby preso há {elapsed:.0f}s - tentando clicar Play")
+                            if self.state_manager and hasattr(self.state_manager, '_force_click_play'):
+                                self.state_manager._force_click_play()
+                                self.state_manager.state_start_time = time.time()
+                        elif state == 'end' and elapsed > 18:
+                            logger.warning(f"[WATCHDOG] End screen preso há {elapsed:.0f}s - forçando lobby")
+                            self.state_manager.current_state = 'lobby'
+                            self.state_manager.state_start_time = time.time()
+                            if hasattr(self.state_manager, '_matchmaking_enter_time'):
+                                self.state_manager._matchmaking_enter_time = None
+                        elif state == 'unknown' and elapsed > 12:
+                            logger.warning(f"[WATCHDOG] Unknown preso há {elapsed:.0f}s - forçando lobby")
+                            self.state_manager.current_state = 'lobby'
+                            self.state_manager.state_start_time = time.time()
+                            self.state_manager.unknown_since = None
+                    except Exception as e:
+                        logger.debug(f"[WATCHDOG] Erro no recovery: {e}")
+
                 # Phase v2.1: Strategic cycle end
                 if self.v2_integrator:
                     try:
