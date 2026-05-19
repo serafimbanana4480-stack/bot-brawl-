@@ -569,7 +569,7 @@ class StateManager:
         # forçar uma ação de recovery autónoma
         if self.state_start_time:
             stuck_elapsed = time.time() - self.state_start_time
-            if stuck_elapsed > 25 and self.current_state in ('lobby', 'matchmaking', 'loading', 'brawler_selection'):
+            if stuck_elapsed > 18 and self.current_state in ('lobby', 'matchmaking', 'loading', 'brawler_selection', 'end', 'unknown'):
                 logger.warning(f"[STATE] STUCK DETECTION: {self.current_state} há {stuck_elapsed:.0f}s - forçando recovery")
                 self._diag(f"stuck_recovery={self.current_state},elapsed={stuck_elapsed:.1f}")
                 if self.current_state == 'lobby':
@@ -592,6 +592,21 @@ class StateManager:
                     # Se preso em brawler selection, tentar confirmar e voltar ao lobby
                     self.current_state = 'lobby'
                     self.state_start_time = time.time()
+                    return
+                elif self.current_state == 'end':
+                    # Se preso no end screen, forçar lobby
+                    logger.warning("[STATE] STUCK: end screen, forçando lobby")
+                    self.current_state = 'lobby'
+                    self.state_start_time = time.time()
+                    if hasattr(self, '_matchmaking_enter_time'):
+                        self._matchmaking_enter_time = None
+                    return
+                elif self.current_state == 'unknown':
+                    # Se preso em unknown, forçar lobby
+                    logger.warning("[STATE] STUCK: unknown, forçando lobby")
+                    self.current_state = 'lobby'
+                    self.state_start_time = time.time()
+                    self.unknown_since = None
                     return
 
         if not hasattr(self, '_last_log_time'):
@@ -953,8 +968,13 @@ class StateManager:
             logger.info(f"[STATE] Screen automation state: {state_name}")
             self._diag(f"screen_automation_state={state_name}")
 
+        # SEMPRE tentar clicar no Play, mesmo sem lobby automator
         if self.lobby is None:
-            logger.warning("[STATE] Lobby automator não disponível, não é possível pressionar play")
+            logger.warning("[STATE] Lobby automator não disponível - usando clique direto nas coordenadas padrão")
+            self._force_click_play()
+            time.sleep(0.8)
+            self.current_state = 'loading'
+            self.state_start_time = time.time()
             return
 
         # === NOVO: Learning Mode — ir diretamente para Training Cave ===
@@ -1294,11 +1314,29 @@ class StateManager:
         logger.info("[STATE] Matchmaking detectado - aguardando início da partida")
         self._diag("matchmaking_handler_start")
 
-        # CRITICAL FIX: Usar um timestamp local independente para garantir que o timeout funciona
-        # mesmo se state_start_time for modificado externamente
-        if not hasattr(self, '_matchmaking_enter_time'):
+        # CRITICAL FIX: Usar múltiplas fontes de tempo para garantir timeout
+        # state_start_time é o mais fiável (vem do ciclo principal)
+        # _matchmaking_enter_time é backup local
+        state_elapsed = 0.0
+        if self.state_start_time:
+            state_elapsed = time.time() - self.state_start_time
+
+        # Inicializar _matchmaking_enter_time se não existe ou se é inválido (None)
+        if not hasattr(self, '_matchmaking_enter_time') or self._matchmaking_enter_time is None:
             self._matchmaking_enter_time = time.time()
-        matchmaking_elapsed = time.time() - self._matchmaking_enter_time
+            logger.info(f"[STATE] Matchmaking enter time inicializado: {self._matchmaking_enter_time:.3f}")
+
+        try:
+            matchmaking_elapsed = time.time() - self._matchmaking_enter_time
+        except TypeError:
+            # Se _matchmaking_enter_time é None ou inválido, usar state_start_time
+            self._matchmaking_enter_time = self.state_start_time or time.time()
+            matchmaking_elapsed = time.time() - self._matchmaking_enter_time
+            logger.warning("[STATE] _matchmaking_enter_time inválido, usando state_start_time")
+
+        # Usar o MAIOR dos dois elapsed (mais conservador, evita falsos negativos)
+        effective_elapsed = max(matchmaking_elapsed, state_elapsed)
+        logger.debug(f"[STATE] Matchmaking elapsed: local={matchmaking_elapsed:.1f}s, state={state_elapsed:.1f}s, effective={effective_elapsed:.1f}s")
 
         # Verificar se a partida já começou (proactive detection) - a cada ciclo
         try:
@@ -1316,7 +1354,7 @@ class StateManager:
             logger.debug(f"[STATE] Proactive matchmaking check falhou: {e}")
 
         # Verificar se a partida já começou (proactive detection via pixels crus)
-        if matchmaking_elapsed > 8:
+        if effective_elapsed > 6:
             logger.info(f"[STATE] Matchmaking há {matchmaking_elapsed:.0f}s - verificando pixels crus")
             try:
                 img = self._get_cached_screenshot()
@@ -1336,10 +1374,10 @@ class StateManager:
             except Exception as e:
                 logger.debug(f"[STATE] Proactive pixel check falhou: {e}")
 
-        # TIMEOUT AGRESSIVO: forçar in_game após 12s (Brawl Stars matchmaking raramente demora mais)
-        if matchmaking_elapsed > 12:
-            logger.warning(f"[STATE] Matchmaking timeout ({matchmaking_elapsed:.0f}s > 12s) - FORÇANDO in_game")
-            self._diag(f"matchmaking_timeout_force_in_game={matchmaking_elapsed:.1f}")
+        # TIMEOUT AGRESSIVO: forçar in_game após 10s (Brawl Stars matchmaking raramente demora mais)
+        if effective_elapsed > 10:
+            logger.warning(f"[STATE] Matchmaking timeout ({effective_elapsed:.0f}s > 10s) - FORÇANDO in_game")
+            self._diag(f"matchmaking_timeout_force_in_game={effective_elapsed:.1f}")
             self.current_state = 'in_game'
             self.state_start_time = time.time()
             self._remember_known_state('in_game')
@@ -1619,10 +1657,12 @@ class StateManager:
             self._matchmaking_enter_time = None
 
         # Se estamos no end há muito tempo, forçar retorno ao lobby
-        if self.state_start_time and (time.time() - self.state_start_time) > 20:
+        if self.state_start_time and (time.time() - self.state_start_time) > 12:
             logger.warning("[STATE] End screen timeout - forçando retorno ao lobby")
             self.current_state = 'lobby'
             self.state_start_time = time.time()
+            if hasattr(self, '_matchmaking_enter_time'):
+                self._matchmaking_enter_time = None
             return
         if log_manager:
             log_manager.log(

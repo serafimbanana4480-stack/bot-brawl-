@@ -121,7 +121,7 @@ class DynamicCoordinates:
         self.settings_button = (round(w * 0.95) + ox, round(h * 0.04) + oy)
 
         # In-game: HP bar do jogador (topo esquerdo)
-        self.player_hp_bar = (round(w * 0.08) + ox, round(h * 0.06) + oy)
+        self.player_hp_bar = (round(w * 0.08) + ox, round(h * 0.04) + oy)  # Calibrado: y=0.04 (43px @ 1080p)
 
         # In-game: Timer do match (topo centro)
         self.match_timer = (round(w * 0.50) + ox, round(h * 0.04) + oy)
@@ -219,7 +219,7 @@ class UnifiedStateDetector:
     _TUTORIAL_ARROW_COLOR = (50, 200, 255) # Setas azuis de tutorial
     _BRAWLER_UNLOCK_GOLD = (255, 215, 0)   # Texto dourado de unlock
     _SEASON_RESET_BLUE = (100, 180, 255)    # Azul season reset
-    _PLAYER_HP_GREEN = (50, 255, 50)       # HP bar verde
+    _PLAYER_HP_BAR = (6, 140, 247)         # HP bar azul/ciano (Brawl Stars modern UI)
     _TIMER_WHITE = (240, 240, 240)          # Timer branco no topo
 
     # Tolerâncias calibradas por tipo de deteção
@@ -496,12 +496,101 @@ class UnifiedStateDetector:
                 details={"sub_type": "star_drop", "match_fraction": max(s1_frac, s2_frac)}
             )
 
-        # 5. Play button (main lobby, yellow)
+        # 5. In-game heuristic: check for joystick area (moved BEFORE lobby - stronger signals) (dark region) + attack button area
+        # If joystick area is mostly dark AND attack button area has distinctive color, we're in-game
+        joy_x, joy_y = sc(c.joystick_center)
+        atk_x, atk_y = sc(c.attack_button_center)
+        hp_x, hp_y = sc(c.player_hp_bar)
+        timer_x, timer_y = sc(c.match_timer)
+
+        in_game_conf = 0.0
+        in_game_details = {}
+
+        if (0 < joy_x < w and 0 < joy_y < h and
+            0 < atk_x < w and 0 < atk_y < h):
+            # Sample joystick area - should be dark in-game
+            joy_region = image[max(0,joy_y-20):min(h,joy_y+20),
+                               max(0,joy_x-20):min(w,joy_x+20)]
+            if joy_region.size > 0:
+                joy_brightness = np.mean(joy_region)
+                # Also check attack button area - should have distinctive color in-game
+                atk_region = image[max(0,atk_y-30):min(h,atk_y+30),
+                                   max(0,atk_x-30):min(w,atk_x+30)]
+                atk_brightness = np.mean(atk_region) if atk_region.size > 0 else 255
+                atk_std = np.std(atk_region) if atk_region.size > 0 else 0
+                in_game_details["brightness"] = float(joy_brightness)
+                in_game_details["atk_brightness"] = float(atk_brightness)
+                in_game_details["atk_std"] = float(atk_std)
+                # In-game: joystick area is dark (brightness < 150) AND attack area has some content
+                if joy_brightness < 150:
+                    in_game_conf = 0.35
+                    if atk_region.size > 0 and atk_std > 15:
+                        in_game_conf = 0.55
+
+        # Verificar HP bar (azul/ciano no topo esquerdo) para confirmar in_game
+        if 0 < hp_x < w and 0 < hp_y < h:
+            hp_frac = self._pixel_match_region(
+                image, hp_x, hp_y, self._PLAYER_HP_BAR,
+                tolerance=self._TOLERANCES['hp'], sample_radius=5
+            )
+            if hp_frac > 0.15:
+                in_game_conf = max(in_game_conf, 0.65)
+                in_game_details["hp_match"] = float(hp_frac)
+
+        # Verificar timer no topo centro (branco)
+        if 0 < timer_x < w and 0 < timer_y < h:
+            timer_region = image[max(0,timer_y-8):min(h,timer_y+8),
+                                 max(0,timer_x-25):min(w,timer_x+25)]
+            if timer_region.size > 0:
+                timer_brightness = np.mean(timer_region)
+                timer_std = np.std(timer_region)
+                # Timer: area pequena branca com texto (alto contraste)
+                if timer_brightness > 100 and timer_std > 25:
+                    in_game_conf = max(in_game_conf, 0.6)
+                    in_game_details["timer_brightness"] = float(timer_brightness)
+                    in_game_details["timer_std"] = float(timer_std)
+
+        if in_game_conf >= 0.35:
+            return DetectedState(
+                state="in_game",
+                confidence=in_game_conf,
+                method="pixel",
+                details={"sub_type": "joystick_heuristic", **in_game_details}
+            )
+
+        # 6. Play button (main lobby, yellow)
+        # CROSS-CHECK: if joystick is dark AND HP bar exists, this is in-game (super/attack buttons can be yellow)
         match_frac = self._pixel_match_region(
             image, *sc(c.play_button), self._PLAY_COLOR,
             tolerance=self._TOLERANCES['play']
         )
         if match_frac > 0.3:
+            # Verify it's actually lobby, not in-game with yellow super/attack buttons
+            joy_dark = False
+            hp_exists = False
+            hp_frac_verify = 0.0
+            try:
+                if joy_region is not None and joy_region.size > 0:
+                    joy_dark = np.mean(joy_region) < 150
+            except NameError:
+                pass
+            try:
+                if 0 < hp_x < w and 0 < hp_y < h:
+                    hp_frac_verify = self._pixel_match_region(
+                        image, hp_x, hp_y, self._PLAYER_HP_BAR,
+                        tolerance=self._TOLERANCES['hp'], sample_radius=5
+                    )
+                    hp_exists = hp_frac_verify > 0.15
+            except NameError:
+                pass
+            if joy_dark and hp_exists:
+                # Strong in-game signals override weak play button match
+                return DetectedState(
+                    state="in_game",
+                    confidence=0.7,
+                    method="pixel",
+                    details={"sub_type": "play_button_override_in_game", "play_match": float(match_frac), "hp_match": float(hp_frac_verify)}
+                )
             return DetectedState(
                 state="lobby",
                 confidence=match_frac,
@@ -510,7 +599,7 @@ class UnifiedStateDetector:
                 details={"sub_type": "play_button", "match_fraction": match_frac}
             )
 
-        # 6. Proceed button (blue)
+        # 7. Proceed button (blue)
         match_frac = self._pixel_match_region(
             image, *sc(c.proceed_button), self._PROCEED_COLOR,
             tolerance=self._TOLERANCES['proceed']
@@ -524,7 +613,7 @@ class UnifiedStateDetector:
                 details={"sub_type": "proceed", "match_fraction": match_frac}
             )
 
-        # 7. Connection lost (gray)
+        # 8. Connection lost (gray)
         match_frac = self._pixel_match_region(
             image, *sc(c.connection_lost_cord), self._CONNECTION_LOST_COLOR,
             tolerance=self._TOLERANCES['connection']
@@ -538,7 +627,7 @@ class UnifiedStateDetector:
                 details={"sub_type": "connection_lost", "match_fraction": match_frac}
             )
 
-        # 8. Matchmaking detection: dark screen with loading spinner or player icons
+        # 9. Matchmaking detection: dark screen with loading spinner or player icons
         # During matchmaking, the screen is mostly dark with occasional UI elements
         # Distinguish from loading by checking for absence of bright green load indicator
         center_region = image[h//3:2*h//3, w//3:2*w//3]
@@ -573,69 +662,7 @@ class UnifiedStateDetector:
                                  "load_match": float(load_match)}
                     )
 
-        # 9. In-game heuristic: check for joystick area (dark region) + attack button area
-        # If joystick area is mostly dark AND attack button area has distinctive color, we're in-game
-        joy_x, joy_y = sc(c.joystick_center)
-        atk_x, atk_y = sc(c.attack_button_center)
-        hp_x, hp_y = sc(c.player_hp_bar)
-        timer_x, timer_y = sc(c.match_timer)
-
-        in_game_conf = 0.0
-        in_game_details = {}
-
-        if (0 < joy_x < w and 0 < joy_y < h and
-            0 < atk_x < w and 0 < atk_y < h):
-            # Sample joystick area - should be dark in-game
-            joy_region = image[max(0,joy_y-20):min(h,joy_y+20),
-                               max(0,joy_x-20):min(w,joy_x+20)]
-            if joy_region.size > 0:
-                joy_brightness = np.mean(joy_region)
-                # Also check attack button area - should have distinctive color in-game
-                atk_region = image[max(0,atk_y-30):min(h,atk_y+30),
-                                   max(0,atk_x-30):min(w,atk_x+30)]
-                atk_brightness = np.mean(atk_region) if atk_region.size > 0 else 255
-                atk_std = np.std(atk_region) if atk_region.size > 0 else 0
-                in_game_details["brightness"] = float(joy_brightness)
-                in_game_details["atk_brightness"] = float(atk_brightness)
-                in_game_details["atk_std"] = float(atk_std)
-                # In-game: joystick area is dark (brightness < 90) AND attack area has some content
-                if joy_brightness < 90:
-                    in_game_conf = 0.35
-                    if atk_region.size > 0 and atk_std > 15:
-                        in_game_conf = 0.55
-
-        # Verificar HP bar (verde no topo esquerdo) para confirmar in_game
-        if 0 < hp_x < w and 0 < hp_y < h:
-            hp_frac = self._pixel_match_region(
-                image, hp_x, hp_y, self._PLAYER_HP_GREEN,
-                tolerance=self._TOLERANCES['hp'], sample_radius=5
-            )
-            if hp_frac > 0.15:
-                in_game_conf = max(in_game_conf, 0.65)
-                in_game_details["hp_match"] = float(hp_frac)
-
-        # Verificar timer no topo centro (branco)
-        if 0 < timer_x < w and 0 < timer_y < h:
-            timer_region = image[max(0,timer_y-8):min(h,timer_y+8),
-                                 max(0,timer_x-25):min(w,timer_x+25)]
-            if timer_region.size > 0:
-                timer_brightness = np.mean(timer_region)
-                timer_std = np.std(timer_region)
-                # Timer: area pequena branca com texto (alto contraste)
-                if timer_brightness > 160 and timer_std > 25:
-                    in_game_conf = max(in_game_conf, 0.6)
-                    in_game_details["timer_brightness"] = float(timer_brightness)
-                    in_game_details["timer_std"] = float(timer_std)
-
-        if in_game_conf >= 0.35:
-            return DetectedState(
-                state="in_game",
-                confidence=in_game_conf,
-                method="pixel",
-                details={"sub_type": "joystick_heuristic", **in_game_details}
-            )
-
-        # 9. Tutorial (setas azuis no centro inferior)
+        # 10. Tutorial (setas azuis no centro inferior)
         tut_frac = self._pixel_match_region(
             image, *sc(c.tutorial_tap_area), self._TUTORIAL_ARROW_COLOR,
             tolerance=self._TOLERANCES['tutorial'], sample_radius=8
@@ -649,7 +676,7 @@ class UnifiedStateDetector:
                 details={"sub_type": "tutorial_arrow", "match_fraction": tut_frac}
             )
 
-        # 10. Shop (moedas douradas no topo direito)
+        # 11. Shop (moedas douradas no topo direito)
         shop_frac = self._pixel_match_region(
             image, *sc(c.shop_icon_area), self._SHOP_GOLD_COLOR,
             tolerance=self._TOLERANCES['shop'], sample_radius=6
@@ -663,7 +690,7 @@ class UnifiedStateDetector:
                 details={"sub_type": "shop_gold_icon", "match_fraction": shop_frac}
             )
 
-        # 11. News/Brawl Talk (botao X vermelho no canto superior direito)
+        # 12. News/Brawl Talk (botao X vermelho no canto superior direito)
         news_frac = self._pixel_match_region(
             image, *sc(c.news_close_button), self._NEWS_CLOSE_COLOR,
             tolerance=self._TOLERANCES['news'], sample_radius=4
@@ -677,7 +704,7 @@ class UnifiedStateDetector:
                 details={"sub_type": "news_close_x", "match_fraction": news_frac}
             )
 
-        # 12. Brawler unlock (texto dourado central)
+        # 13. Brawler unlock (texto dourado central)
         unlock_frac = self._pixel_match_region(
             image, *sc(c.brawler_unlock_area), self._BRAWLER_UNLOCK_GOLD,
             tolerance=self._TOLERANCES['unlock'], sample_radius=10
@@ -691,7 +718,7 @@ class UnifiedStateDetector:
                 details={"sub_type": "unlock_gold_text", "match_fraction": unlock_frac}
             )
 
-        # 13. Season reset (azul no topo central)
+        # 14. Season reset (azul no topo central)
         season_frac = self._pixel_match_region(
             image, *sc(c.season_reset_area), self._SEASON_RESET_BLUE,
             tolerance=self._TOLERANCES['season'], sample_radius=8

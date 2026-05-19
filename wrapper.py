@@ -2515,11 +2515,17 @@ class PylaAIEnhanced:
                         logger.warning(f"[WRAPPER] BehavioralProfile.record_state failed: {e}")
 
                 # === WATCHDOG: Recovery autónomo quando o bot está preso ===
+                # Este watchdog corre numa thread separada e força transições
+                # independentemente do state_manager, garantindo que o bot nunca fica preso
                 if self.state_manager and hasattr(self.state_manager, 'state_start_time') and self.state_manager.state_start_time:
                     try:
                         state = self.state_manager.current_state
                         elapsed = time.time() - self.state_manager.state_start_time
-                        if state == 'matchmaking' and elapsed > 15:
+                        # Log de debug para monitorar o watchdog
+                        if elapsed > 5:
+                            logger.debug(f"[WATCHDOG] Estado {state} há {elapsed:.0f}s")
+
+                        if state == 'matchmaking' and elapsed > 10:
                             logger.warning(f"[WATCHDOG] Matchmaking preso há {elapsed:.0f}s - forçando in_game")
                             self.state_manager.current_state = 'in_game'
                             self.state_manager.state_start_time = time.time()
@@ -2527,24 +2533,24 @@ class PylaAIEnhanced:
                                 self.state_manager._forced_in_game_time = time.time()
                             if hasattr(self.state_manager, '_matchmaking_enter_time'):
                                 self.state_manager._matchmaking_enter_time = None
-                        elif state == 'loading' and elapsed > 18:
+                        elif state == 'loading' and elapsed > 12:
                             logger.warning(f"[WATCHDOG] Loading preso há {elapsed:.0f}s - forçando in_game")
                             self.state_manager.current_state = 'in_game'
                             self.state_manager.state_start_time = time.time()
                             if hasattr(self.state_manager, '_forced_in_game_time'):
                                 self.state_manager._forced_in_game_time = time.time()
-                        elif state == 'lobby' and elapsed > 35:
+                        elif state == 'lobby' and elapsed > 25:
                             logger.warning(f"[WATCHDOG] Lobby preso há {elapsed:.0f}s - tentando clicar Play")
                             if self.state_manager and hasattr(self.state_manager, '_force_click_play'):
                                 self.state_manager._force_click_play()
                                 self.state_manager.state_start_time = time.time()
-                        elif state == 'end' and elapsed > 18:
+                        elif state == 'end' and elapsed > 15:
                             logger.warning(f"[WATCHDOG] End screen preso há {elapsed:.0f}s - forçando lobby")
                             self.state_manager.current_state = 'lobby'
                             self.state_manager.state_start_time = time.time()
                             if hasattr(self.state_manager, '_matchmaking_enter_time'):
                                 self.state_manager._matchmaking_enter_time = None
-                        elif state == 'unknown' and elapsed > 12:
+                        elif state == 'unknown' and elapsed > 8:
                             logger.warning(f"[WATCHDOG] Unknown preso há {elapsed:.0f}s - forçando lobby")
                             self.state_manager.current_state = 'lobby'
                             self.state_manager.state_start_time = time.time()
