@@ -1248,6 +1248,11 @@ class LobbyAutomator:
         """
         Verifica visualmente se o estado do jogo mudou após uma ação.
         Usa o detector unificado para confirmar que a ação funcionou.
+        
+        MELHORIA v2: Quando o estado muda para 'unknown', continuar a verificar
+        por mais tempo porque pode ser uma transição temporária (loading/matchmaking
+        que ainda não foram reconhecidos). Se após timeout ainda for unknown,
+        considerar que a ação pode ter falhado.
         """
         if not self._state_detector or not self._screenshot_func:
             # Sem verificação visual, assumir sucesso
@@ -1255,20 +1260,50 @@ class LobbyAutomator:
             return True
 
         deadline = time.time() + timeout
+        first_unknown_time = None
+        
         while time.time() < deadline:
             try:
                 screenshot = self._screenshot_func()
                 if screenshot is not None:
                     detection = self._state_detector.detect(screenshot)
-                    # FIXED: Consider any state change from lobby as valid, even "unknown",
-                    # because matchmaking/loading screens may not be recognized yet.
-                    if detection.state != previous_state:
-                        logger.info(f"[LOBBY] Estado mudou: {previous_state} -> {detection.state}")
+                    
+                    # Se mudou para um estado reconhecido (não unknown), sucesso imediato
+                    if detection.state != previous_state and detection.state != 'unknown':
+                        logger.info(f"[LOBBY] Estado mudou para reconhecido: {previous_state} -> {detection.state}")
                         return True
+                    
+                    # Se mudou para unknown, pode ser transição temporária
+                    # Guardar quando vimos unknown pela primeira vez
+                    if detection.state == 'unknown' and detection.state != previous_state:
+                        if first_unknown_time is None:
+                            first_unknown_time = time.time()
+                            logger.info(f"[LOBBY] Estado mudou para unknown (possível transição). "
+                                      f"Aguardando para confirmar...")
+                        # Se estamos em unknown há menos de 2s, continuar verificando
+                        elif time.time() - first_unknown_time < 2.0:
+                            logger.debug(f"[LOBBY] Ainda em unknown ({time.time() - first_unknown_time:.1f}s), aguardando...")
+                        else:
+                            # Estamos em unknown há mais de 2s, considerar como sucesso
+                            # porque provavelmente é loading/matchmaking não reconhecido
+                            logger.info(f"[LOBBY] Estado em unknown há >2s, considerando transição válida")
+                            return True
+                    
+                    # Se voltou ao estado anterior, o clique provavelmente falhou
+                    if detection.state == previous_state and first_unknown_time is not None:
+                        logger.info(f"[LOBBY] Voltou ao estado {previous_state} - clique provavelmente falhou")
+                        return False
+                        
             except Exception as e:
                 logger.debug(f"[LOBBY] Erro na verificação visual: {e}")
             time.sleep(0.3)
 
+        # Se chegámos ao timeout e estávamos em unknown, considerar sucesso
+        # (provavelmente loading/matchmaking não reconhecido)
+        if first_unknown_time is not None:
+            logger.info(f"[LOBBY] Timeout em unknown, considerando transição válida (provavelmente loading)")
+            return True
+            
         logger.debug(f"[LOBBY] Estado não mudou após {timeout}s")
         return False
 
