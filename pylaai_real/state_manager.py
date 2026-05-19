@@ -1289,19 +1289,42 @@ class StateManager:
             else:
                 time_since_last_action = current_time - self._last_combat_action_time
                 if time_since_last_action > 3.0:
-                    logger.warning(f"[STATE] BOT PARADO há {time_since_last_action:.1f}s - FORÇANDO movimento de exploração")
-                    # Movimento aleatório para explorar
+                    logger.warning(f"[STATE] BOT PARADO há {time_since_last_action:.1f}s - FORÇANDO ação de combate")
+                    # Usar coordenadas dinâmicas do joystick
+                    joy_x, joy_y = 300, 900
+                    if self.movement and hasattr(self.movement, 'joystick_center_x'):
+                        joy_x = self.movement.joystick_center_x
+                        joy_y = self.movement.joystick_center_y
+                    
+                    # FORÇAR movimento aleatório
                     if self.emulator_controller:
                         import random
-                        # Mover para direção aleatória
                         angle = random.uniform(0, 2 * 3.14159)
-                        distance = random.randint(100, 300)
-                        # Centro do joystick + offset
-                        joy_x, joy_y = 300, 900  # Coordenadas aproximadas do joystick
+                        distance = random.randint(150, 350)
                         target_x = int(joy_x + distance * __import__('math').cos(angle))
                         target_y = int(joy_y + distance * __import__('math').sin(angle))
-                        self.emulator_controller.swipe(joy_x, joy_y, target_x, target_y, duration=200)
-                        logger.info(f"[STATE] Movimento de exploração: ({joy_x},{joy_y}) -> ({target_x},{target_y})")
+                        try:
+                            self.emulator_controller.swipe_scaled(joy_x, joy_y, target_x, target_y, duration=200)
+                            logger.info(f"[STATE] Movimento forçado: ({joy_x},{joy_y}) -> ({target_x},{target_y})")
+                        except Exception as e:
+                            logger.warning(f"[STATE] Falha no swipe forçado: {e}")
+                    
+                    # FORÇAR ataque se houver emulador e não atacou recentemente
+                    if self.emulator_controller and self.play and hasattr(self.play, 'last_shot_time'):
+                        time_since_shot = current_time - self.play.last_shot_time
+                        if time_since_shot > 1.0:
+                            try:
+                                # Coordenadas dinâmicas do botão de ataque
+                                atk_x, atk_y = 1750, 850
+                                if self.movement and hasattr(self.movement, 'window_w'):
+                                    atk_x = round(self.movement.window_w * 0.90)
+                                    atk_y = round(self.movement.window_h * 0.82)
+                                self.emulator_controller.tap_scaled(atk_x, atk_y)
+                                logger.info(f"[STATE] Ataque forçado em ({atk_x},{atk_y})")
+                                self.play.last_shot_time = current_time
+                            except Exception as e:
+                                logger.warning(f"[STATE] Falha no ataque forçado: {e}")
+                    
                     self._last_combat_action_time = current_time
 
             # === RL ONLINE: aprender deste frame ===

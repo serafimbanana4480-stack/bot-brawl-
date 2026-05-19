@@ -898,7 +898,11 @@ class PlayLogic:
             return ""
         return move_key
 
-    def play_round(self, screenshot: np.ndarray) -> bool:
+    def play_round(self, screenshot: np.ndarray) -> Dict[str, any]:
+        """
+        Executa um round de combate completo.
+        Retorna dict com flags de ação: {"attacked": bool, "moved": bool, "super_used": bool, "success": bool}
+        """
         logger.debug("[COMBAT] Iniciando play_round")
         if log_manager:
             log_manager.log(
@@ -908,13 +912,13 @@ class PlayLogic:
                 data={"action": "play_round_start"}
             )
         if self.detect_main is None:
-            logger.debug("[COMBAT] No vision model loaded - skipping combat logic")
+            logger.warning("[COMBAT] No vision model loaded - skipping combat logic")
             self.last_combat_snapshot = {
                 **self.last_combat_snapshot,
                 "state": "skipped_no_model",
                 "last_error": "no_vision_model",
             }
-            return False
+            return {"attacked": False, "moved": False, "super_used": False, "success": False, "error": "no_vision_model"}
         try:
             logger.debug("[COMBAT] Executando detecção de objetos")
             detections = self.detect_main.detect_objects(screenshot)
@@ -1233,6 +1237,8 @@ class PlayLogic:
 
             # 1. Decisão de Combate: Phase 5 strategy + Phase 10 UtilityAI/Coordinator override
             attack_taken = False
+            moved = False
+            super_used = False
             action = "idle"
             move_target = None
             if coordinator_action and HAS_COORDINATOR and self.central_coordinator:
@@ -1291,12 +1297,14 @@ class PlayLogic:
             logger.debug("[COMBAT] Calculando movimento tático")
             if move_target and self.movement:
                 self.movement.move_to_position(move_target[0], move_target[1])
+                moved = True
                 move_key = self.movement.get_tactical_movement(player, enemies, bushes, power_cubes)
                 logger.info(f"[COMBAT] Movimento combat -> ({move_target[0]:.0f}, {move_target[1]:.0f}), dir={move_key}")
             else:
                 use_rl = rl_action is not None and rl_confidence > 0.6
                 if use_rl:
                     move_key = self._apply_rl_action(rl_action, player, enemies, power_cubes, "")
+                    moved = True  # RL action implies movement
                     logger.info(f"[COMBAT] Movimento RL (conf={rl_confidence:.2f}): {rl_action}")
                 else:
                     if self.movement and hasattr(self.movement, 'get_tactical_movement_target'):
@@ -1307,13 +1315,18 @@ class PlayLogic:
                         )
                         if target_pos:
                             self.movement.move_to_position(target_pos[0], target_pos[1])
+                            moved = True
                             move_key = self.movement.get_tactical_movement(player, enemies, bushes, power_cubes)
                             logger.info(f"[COMBAT] Movimento tático -> ({target_pos[0]:.0f}, {target_pos[1]:.0f}), dir={move_key}")
                         else:
                             move_key = self.movement.get_tactical_movement(player, enemies, bushes, power_cubes)
+                            if move_key:
+                                moved = True
                             logger.info(f"[COMBAT] Decisão de movimento (fallback): {move_key}")
                     else:
                         move_key = self.movement.get_tactical_movement(player, enemies, bushes, power_cubes) if self.movement else ""
+                        if move_key:
+                            moved = True
                         logger.info(f"[COMBAT] Decisão de movimento: {move_key}")
 
             # Log de tracks por classe usando get_tracks_by_class se disponível
@@ -1369,10 +1382,11 @@ class PlayLogic:
                 "enemies": enemies,
                 "move_key": move_key,
                 "attack_taken": attack_taken,
-                "last_error": None,
+                "moved": moved,
+                "super_used": super_used,
             }
 
-            return True
+            return {"attacked": attack_taken, "moved": moved, "super_used": super_used, "success": True}
         except Exception as e:
             logger.error(f"Erro no cérebro de combate: {e}", exc_info=True)
             self._last_action = "error"
@@ -1381,7 +1395,7 @@ class PlayLogic:
                 "state": "combat_error",
                 "last_error": str(e),
             }
-            return False
+            return {"attacked": False, "moved": False, "super_used": False, "success": False, "error": str(e)}
 
     def _get_target_position_for_attack(self, player, enemies):
         """Calcula a posição predita do alvo para ataque (sem executar o ataque)."""
