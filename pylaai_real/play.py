@@ -1763,7 +1763,12 @@ class PlayLogic:
         if not self.emulator_controller:
             logger.warning("[COMBAT] EmulatorController não disponível para executar movimento")
             return
-        jx, jy = 200, 775
+        # Usar coordenadas dinâmicas do joystick se disponíveis
+        if self.movement and hasattr(self.movement, 'joystick_center_x'):
+            jx = self.movement.joystick_center_x
+            jy = self.movement.joystick_center_y
+        else:
+            jx, jy = 192, 810
         dist = 100
         dx, dy = 0, 0
         if 'W' in key: dy = -dist

@@ -1003,6 +1003,18 @@ class StateManager:
                 except Exception as e:
                     logger.warning(f"[STATE] Fallback inteligente falhou: {e}")
             return
+        
+        # NOVO: Forçar estado para loading após clicar no Play
+        # Isto evita que o bot fique oscilando entre lobby e unknown
+        # quando o detector não consegue reconhecer a tela de loading
+        if pressed or True:  # Sempre forçar, mesmo que press_play tenha falhado no fallback
+            logger.info("[STATE] Play pressionado. Forcando estado para loading por 5s...")
+            self.current_state = 'loading'
+            self.state_start_time = time.time()
+            self._remember_known_state('loading')
+            # Dar tempo para o jogo iniciar o loading
+            time.sleep(2.0)
+            return
 
         # Reset MatchController se necessário para permitir novas partidas
         if self.match_controller:
