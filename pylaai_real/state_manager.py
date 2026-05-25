@@ -501,9 +501,14 @@ class StateManager:
                 logger.debug(f"[STATE] Tempo no estado '{self.current_state}': {time_in_state:.1f}s")
                 if time_in_state > 30:
                     logger.warning(f"[STATE] Estado '{self.current_state}' há muito tempo ({time_in_state:.1f}s)")
-            self._remember_known_state(detected_state)
-            self.current_state = detected_state
-            logger.debug(f"[STATE] Estado confirmado: {detected_state}, streak resetado")
+            # FIX: Nao sobrescrever estado se handler o forcou (ex: matchmaking -> in_game)
+            if getattr(self, '_handler_forced_state', False):
+                logger.info(f"[STATE] Handler forcou estado, ignorando deteccao: {self.current_state}")
+                self._handler_forced_state = False
+            else:
+                self._remember_known_state(detected_state)
+                self.current_state = detected_state
+                logger.debug(f"[STATE] Estado confirmado: {detected_state}, streak resetado")
         else:
             self.unknown_streak += 1
             if self.last_known_state != 'unknown' and self.unknown_streak <= self._unknown_hold_cycles:
@@ -810,15 +815,16 @@ class StateManager:
                     except Exception as e:
                         logger.debug(f"[STATE] AutoFix error: {e}")
 
-                # FORCE LOADING TIMEOUT: if in loading for >15s, skip detection and force in_game
+                # FORCE LOADING TIMEOUT: if in loading for >5s, skip detection and force in_game
                 logger.info(f"[STATE] DEBUG: current={self.current_state}, start_time={self.state_start_time}")
                 if self.current_state == 'loading':
                     if not self.state_start_time:
                         self.state_start_time = time.time()
-                        logger.debug("[STATE] Initialized loading_start_time")
+                        logger.info("[STATE] Initialized loading_start_time")
                     loading_elapsed = time.time() - self.state_start_time
-                    if loading_elapsed > 15:
-                        logger.warning(f"[STATE] FORCE: Loading timeout ({loading_elapsed:.0f}s), forcing in_game")
+                    logger.info(f"[STATE] Loading elapsed: {loading_elapsed:.1f}s / 5s timeout")
+                    if loading_elapsed > 5:
+                        logger.warning(f"[STATE] FORCE: Loading timeout ({loading_elapsed:.0f}s > 5s), forcing in_game")
                         self.current_state = 'in_game'
                         self.state_start_time = time.time()
                         self._remember_known_state('in_game')
@@ -1090,6 +1096,38 @@ class StateManager:
                     logger.warning(f"[STATE] Fallback inteligente falhou: {e}")
             return
         
+        # Reset MatchController se necessário para permitir novas partidas
+        if self.match_controller:
+            try:
+                # Verificar se há partida pendente
+                if hasattr(self.match_controller, 'current_match') and self.match_controller.current_match:
+                    logger.warning("[STATE] MatchController tem partida pendente, resetando para permitir nova partida")
+                    self.match_controller.reset_match()
+            except Exception as e:
+                logger.warning(f"[STATE] Falha ao verificar/resetar MatchController: {e}")
+
+        # Registar a partida antes de abandonar o lobby.
+        # O return abaixo é necessário para evitar repetir a pressão no Play
+        # no mesmo ciclo, mas o match deve ser marcado antes disso.
+        if self.match_controller and hasattr(self.lobby, "queue") and hasattr(self.lobby.queue, "get_current"):
+            current = self.lobby.queue.get_current()
+            if current:
+                game_mode = getattr(current, "game_mode", None) or "showdown"
+                if self.match_controller.start_match(game_mode, current.name):
+                    self._diag(f"match_controller_start_match={current.name}")
+                self.current_brawler = current.name
+                if self.play and hasattr(self.play, "set_current_game_mode"):
+                    try:
+                        self.play.set_current_game_mode(game_mode)
+                    except Exception as e:
+                        logger.debug(f"[STATE] Falha ao definir game mode no play logic: {e}")
+
+        if self.progress and hasattr(self.progress, "clear_last_result"):
+            try:
+                self.progress.clear_last_result()
+            except Exception as e:
+                logger.debug(f"[STATE] Falha ao limpar último resultado no início da partida: {e}")
+
         # NOVO: Forçar estado para loading após clicar no Play
         # Isto evita que o bot fique oscilando entre lobby e unknown
         # quando o detector não consegue reconhecer a tela de loading
@@ -1101,36 +1139,6 @@ class StateManager:
             # Dar tempo para o jogo iniciar o loading
             time.sleep(2.0)
             return
-
-        # Reset MatchController se necessário para permitir novas partidas
-        if self.match_controller:
-            try:
-                # Verificar se há partida pendente
-                if hasattr(self.match_controller, 'current_match') and self.match_controller.current_match:
-                    logger.warning("[STATE] MatchController tem partida pendente, resetando para permitir nova partida")
-                    self.match_controller.reset_match()
-            except Exception as e:
-                logger.warning(f"[STATE] Falha ao verificar/resetar MatchController: {e}")
-
-        if self.progress and hasattr(self.progress, "clear_last_result"):
-            try:
-                self.progress.clear_last_result()
-            except Exception as e:
-                logger.debug(f"[STATE] Falha ao limpar último resultado no início da partida: {e}")
-
-        if self.match_controller and hasattr(self.lobby, "queue") and hasattr(self.lobby.queue, "get_current"):
-            current = self.lobby.queue.get_current()
-            if current:
-                game_mode = getattr(current, "game_mode", None) or "showdown"
-                if self.match_controller.start_match(game_mode, current.name):
-                    self._diag(f"match_controller_start_match={current.name}")
-                # Update current_brawler for dashboard
-                self.current_brawler = current.name
-                if self.play and hasattr(self.play, "set_current_game_mode"):
-                    try:
-                        self.play.set_current_game_mode(game_mode)
-                    except Exception as e:
-                        logger.debug(f"[STATE] Falha ao definir game mode no play logic: {e}")
         # Update current map for dashboard
         if self.movement and hasattr(self.movement, "current_map"):
             self._current_map = self.movement.current_map
@@ -1284,10 +1292,11 @@ class StateManager:
         if not hasattr(self, '_loading_start_time') or self._loading_start_time is None:
             self._loading_start_time = time.time()
         
-        # Check timeout: if loading for more than 8s, force to in_game
-        # (Brawl Stars loading typically takes 5-10s; 8s is a safe midpoint)
+        # Check timeout: if loading for more than 5s, force to in_game
+        # (Brawl Stars loading typically takes 3-8s; 5s is aggressive but safe)
         elapsed = time.time() - self._loading_start_time
-        if elapsed > 8:
+        logger.info(f"[STATE] _handle_loading elapsed: {elapsed:.1f}s / 5s timeout")
+        if elapsed > 5:
             logger.warning(f"[STATE] Loading timeout ({elapsed:.0f}s), forcing transition to in_game")
             self._loading_start_time = None
             self.current_state = 'in_game'
@@ -1298,6 +1307,11 @@ class StateManager:
             self._forced_in_game_time = time.time()
             logger.info("[STATE] Forçado in_game desde loading - bloqueando retorno a loading por 30s")
             return
+        
+        # Reset timer if state changed naturally (not via timeout)
+        # This prevents stale timer if we come back to loading later
+        if self.current_state != 'loading':
+            self._loading_start_time = None
         
         if self.screen_automation and hasattr(self.screen_automation, "get_current_state_name"):
             try:
@@ -1370,13 +1384,14 @@ class StateManager:
                         self._remember_known_state('in_game')
                         self._forced_in_game_time = time.time()
                         self._matchmaking_enter_time = None
+                        self._handler_forced_state = True
                         return
             except Exception as e:
                 logger.debug(f"[STATE] Proactive pixel check falhou: {e}")
 
-        # TIMEOUT AGRESSIVO: forçar in_game após 10s (Brawl Stars matchmaking raramente demora mais)
-        if effective_elapsed > 10:
-            logger.warning(f"[STATE] Matchmaking timeout ({effective_elapsed:.0f}s > 10s) - FORÇANDO in_game")
+        # TIMEOUT AGRESSIVO: forçar in_game após 8s (Brawl Stars matchmaking raramente demora mais)
+        if effective_elapsed > 8:
+            logger.warning(f"[STATE] Matchmaking timeout ({effective_elapsed:.0f}s > 8s) - FORÇANDO in_game")
             self._diag(f"matchmaking_timeout_force_in_game={effective_elapsed:.1f}")
             self.current_state = 'in_game'
             self.state_start_time = time.time()
@@ -1385,6 +1400,10 @@ class StateManager:
             self._matchmaking_enter_time = None
             logger.info("[STATE] Forçado in_game desde matchmaking - bloqueando retorno por 25s")
             return
+        
+        # Reset timer if state changed naturally (not via timeout)
+        if self.current_state != 'matchmaking':
+            self._matchmaking_enter_time = None
 
         time.sleep(0.8)
         if self.screen_automation and hasattr(self.screen_automation, "get_current_state_name"):
@@ -1456,15 +1475,18 @@ class StateManager:
                 self._in_game_initialized = True
             except Exception as e:
                 logger.warning(f"[STATE] Falha ao resetar estado de combate: {e}")
+        
+        # Reset combat action time to prevent immediate fallback on entry
+        self._last_combat_action_time = time.time()
 
-            # Iniciar episodio de RL com brawler e mapa atual
-            if self.rl_engine:
-                try:
-                    brawler = self.lobby.queue.get_current().name if self.lobby and hasattr(self.lobby, 'queue') and self.lobby.queue else "unknown"
-                    map_name = getattr(self, '_current_map', None)
-                    self.rl_engine.start_episode(brawler, map_name)
-                except Exception as e:
-                    logger.debug(f"[STATE] Falha ao iniciar episodio RL: {e}")
+        # Iniciar episodio de RL com brawler e mapa atual
+        if self.rl_engine:
+            try:
+                brawler = self.lobby.queue.get_current().name if self.lobby and hasattr(self.lobby, 'queue') and self.lobby.queue else "unknown"
+                map_name = getattr(self, '_current_map', None)
+                self.rl_engine.start_episode(brawler, map_name)
+            except Exception as e:
+                logger.debug(f"[STATE] Falha ao iniciar episodio RL: {e}")
 
         screenshot = self.screenshot.take()
         if screenshot is not None:
@@ -1494,8 +1516,14 @@ class StateManager:
                 except Exception as e:
                     logger.debug(f"[STATE] Erro ao detectar PvE: {e}")
 
-            result = self.play.play_round(screenshot)
-            logger.info(f"[STATE] Play round resultado: {result}")
+            # GARANTIR que play_round é chamado e retorna resultado válido
+            result = None
+            try:
+                result = self.play.play_round(screenshot)
+                logger.info(f"[STATE] Play round resultado: {result}")
+            except Exception as e:
+                logger.error(f"[STATE] ERRO CRÍTICO em play_round: {e}", exc_info=True)
+                result = {"attacked": False, "moved": False, "super_used": False, "success": False, "error": str(e)}
 
             # FALLBACK IMEDIATO: Se play_round falhou (ex: sem modelo), forçar ação imediatamente
             if result and isinstance(result, dict) and not result.get('success', True):

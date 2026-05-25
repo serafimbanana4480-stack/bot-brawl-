@@ -1,0 +1,12 @@
+BOT PRONTO PARA EXECUÇÃO
+
+Todas as melhorias foram aplicadas e testadas:
+- Loading timeout: 5s
+- Matchmaking timeout: 8s
+- Proteção contra retorno a loading: 30s
+- Fallback de combate: 3s idle
+- Coordenadas Play atualizadas
+- AutonomousTester integrado
+- Garantia de execução de play_round
+
+Execute com: python wrapper.py

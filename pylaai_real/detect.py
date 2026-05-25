@@ -55,22 +55,35 @@ class Detect:
     def _do_inference(self, img) -> Dict[str, List[List[int]]]:
         """Internal inference method - runs in thread pool."""
         detected = {}
+        def _collect(results) -> None:
+            for result in results:
+                for box in result.boxes:
+                    cls_id = int(box.cls[0])
+                    if cls_id in self.ignore_classes:
+                        continue
+
+                    class_name = self.classes.get(cls_id, f"class_{cls_id}")
+                    bbox = box.xyxy[0].cpu().numpy()
+                    bbox = bbox.astype(int).tolist()
+
+                    if class_name not in detected:
+                        detected[class_name] = []
+                    detected[class_name].append(bbox)
+
+        # Primeiro passe: conserva precisão com o threshold configurado.
         results = self.model(img, conf=self.conf)
+        _collect(results)
 
-        for result in results:
-            for box in result.boxes:
-                cls_id = int(box.cls[0])
-                if cls_id in self.ignore_classes:
-                    continue
-
-                class_name = self.classes.get(cls_id, f"class_{cls_id}")
-
-                bbox = box.xyxy[0].cpu().numpy()
-                bbox = bbox.astype(int).tolist()
-
-                if class_name not in detected:
-                    detected[class_name] = []
-                detected[class_name].append(bbox)
+        # Segundo passe: se o modelo ficou demasiado conservador, fazer fallback
+        # com confiança mais baixa para evitar que o combate fique cego.
+        if not detected and self.conf > 0.15:
+            fallback_conf = 0.10
+            logger.debug(
+                f"[DETECT] No detections at conf={self.conf:.2f}, "
+                f"retrying with fallback conf={fallback_conf:.2f}"
+            )
+            fallback_results = self.model(img, conf=fallback_conf)
+            _collect(fallback_results)
 
         return detected
 

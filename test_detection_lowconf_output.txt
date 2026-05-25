@@ -1,0 +1,32 @@
+﻿python.exe : INFO     | Loading model: models/brawlstars_yolov8.pt
+At line:1 char:1
++ & 'C:\Users\rodri\Desktop\bot brawl\.venv\Scripts\python.exe' 'C:\Use ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (INFO     | Load...stars_yolov8.pt:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+INFO     | Model classes: {0: 'Player', 1: 'Enemy', 2: 'Cubebox', 3: 'Powerup'}
+INFO     | Finding emulator window...
+INFO     | Janela encontrada por correspondÛncia exata: BlueStacks App Player (hwnd: 592138)
+INFO     | Taking screenshot...
+INFO     | [SCREENSHOT] Iniciando captura, window_title=auto
+INFO     | [SCREENSHOT] Janela rect: (0, 0, 1920, 1080)
+INFO     | [SCREENSHOT] Usando janela filha: hwnd=1181944, rect=(0, 0, 1920, 1079)
+INFO     | [SCREENSHOT] Capturando regiÒo: {'top': 0, 'left': 0, 'width': 1920, 'height': 1079}
+INFO     | [SCREENSHOT] Imagem capturada: shape=(1079, 1920, 3)
+INFO     | [SCREENSHOT] Redimensionando de (1079, 1920, 3) para (1080, 1920)
+INFO     | [SCREENSHOT] Captura concluÝda com sucesso
+INFO     | Screenshot captured: shape=(1080, 1920, 3)
+INFO     | Running inference (conf=0.10)...
+INFO     |   Detected: Enemy (conf=0.57) at [592,15,698,118]
+INFO     |   Detected: Powerup (conf=0.16) at [1717,408,1773,459]
+INFO     |   Detected: Cubebox (conf=0.16) at [1697,93,1756,156]
+INFO     |   Detected: Enemy (conf=0.14) at [1682,758,1754,824]
+INFO     |   Detected: Cubebox (conf=0.14) at [1344,7,1412,71]
+INFO     |   Detected: Cubebox (conf=0.13) at [1145,10,1212,73]
+INFO     |   Detected: Enemy (conf=0.11) at [1545,0,1611,72]
+INFO     |   Detected: Player (conf=0.11) at [675,646,773,769]
+INFO     |   Detected: Enemy (conf=0.10) at [677,649,761,756]
+INFO     |   Detected: Cubebox (conf=0.10) at [1619,759,1680,821]
+INFO     | Saved result with 10 detections to C:\Users\rodri\Desktop\bot brawl\test_detection_lowconf.jpg
+INFO     | Open C:\Users\rodri\Desktop\bot brawl\test_detection_lowconf.jpg to inspect detections.

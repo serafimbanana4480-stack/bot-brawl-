@@ -55,7 +55,11 @@ def _adb_screencap(adb_path: str, adb_id: str, out_path: Path) -> bool:
 
 
 def _get_adb_path() -> str:
-    from .emulator_detector import get_adb_path
+    try:
+        from .emulator_detector import get_adb_path
+    except ImportError:
+        # Permite executar o ficheiro diretamente com `python screenshot_recorder.py`.
+        from emulator_detector import get_adb_path
     return get_adb_path()
 
 

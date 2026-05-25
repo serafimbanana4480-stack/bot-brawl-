@@ -1,0 +1,27 @@
+STATUS: TODAS AS MELHORIAS APLICADAS E TESTADAS
+
+Data: 2025-08-25
+
+Melhorias concluídas:
+1. Timeout de loading reduzido para 5s (era 15s+)
+2. Proteção contra retorno a loading (30s bloqueio)
+3. Garantia de execução de play_round com fallback
+4. Coordenadas do botão Play atualizadas
+5. AutonomousTester criado e integrado
+6. Fallback de combate quando idle > 3s
+7. Timeout de matchmaking reduzido para 8s
+8. Handler de event screen melhorado
+9. Reset de timers stale ao sair de estados
+10. Reset de tempo de ação ao entrar em in_game
+
+Testes criados e passados:
+- test_all_fixes.py
+- test_autonomous.py
+- test_loading_timeout.py
+- test_cycle_simulation.py
+- test_lobby_to_ingame.py
+
+Compilação: OK (sem erros)
+Import wrapper: OK
+
+Próximo passo: Executar o bot e monitorar os logs para validar o funcionamento em tempo real.
