@@ -171,7 +171,7 @@ class GameStateCheckpointer:
                 logger.debug("[CHECKPOINTER] Checkpoint %s salvo (%s)", checkpoint_id, current_state)
                 return True
 
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, AttributeError, OSError) as e:
                 logger.error("[CHECKPOINTER] Falha ao salvar checkpoint: %s", e)
                 return False
 
@@ -228,14 +228,14 @@ class GameStateCheckpointer:
                 )
                 return snapshot
 
-            except Exception as e:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
                 logger.error("[CHECKPOINTER] Erro ao carregar %s: %s", latest.name, e)
                 # Tentar o penúltimo
                 if len(checkpoints) > 1:
                     try:
                         with open(checkpoints[-2], "rb") as f:
                             return pickle.load(f)
-                    except Exception:
+                    except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError):
                         pass
                 return None
 
@@ -246,7 +246,7 @@ class GameStateCheckpointer:
             try:
                 with open(path, "rb") as f:
                     snapshots.append(pickle.load(f))
-            except Exception as e:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
                 logger.warning("[CHECKPOINTER] Erro ao carregar %s: %s", path.name, e)
         return snapshots
 

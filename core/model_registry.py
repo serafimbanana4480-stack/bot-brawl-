@@ -94,7 +94,7 @@ class ModelRegistry:
                         is_warm_start=ver_data.get("is_warm_start", False),
                     )
             self._active = data.get("active", {})
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
             logger.warning("[MODEL_REGISTRY] Erro ao carregar: %s", e)
 
     def _save_registry(self):
@@ -119,7 +119,7 @@ class ModelRegistry:
                     }
             with open(self.registry_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
             logger.error("[MODEL_REGISTRY] Erro ao salvar: %s", e)
 
     # ------------------------------------------------------------------
@@ -214,7 +214,7 @@ class ModelRegistry:
             else:
                 logger.warning("[MODEL_REGISTRY] Tipo de modelo desconhecido: %s", name)
                 return None
-        except Exception as e:
+        except (ImportError, ModuleNotFoundError, FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, OSError, IOError) as e:
             logger.error("[MODEL_REGISTRY] Erro ao carregar %s@%s: %s", name, version, e)
             return None
 

@@ -350,7 +350,7 @@ class IntelligentRateLimiter:
         try:
             with open(self._profile_path(account_id), "w", encoding="utf-8") as f:
                 json.dump(profile.to_dict(), f, indent=2, default=str)
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
             logger.warning("[RATE_LIMITER] Erro ao salvar perfil %s: %s", account_id, e)
 
     def _load_all_profiles(self):
@@ -361,7 +361,7 @@ class IntelligentRateLimiter:
                     data = json.load(f)
                 profile = AccountProfile.from_dict(data)
                 self._profiles[profile.account_id] = profile
-            except Exception as e:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
                 logger.warning("[RATE_LIMITER] Erro ao carregar %s: %s", path.name, e)
 
     # ------------------------------------------------------------------

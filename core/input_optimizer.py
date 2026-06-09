@@ -220,7 +220,7 @@ class InputOptimizer:
             try:
                 self._minitouch_proc.terminate()
                 self._minitouch_proc.wait(timeout=2)
-            except Exception:
+            except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass
             self._minitouch_proc = None
         
@@ -228,7 +228,7 @@ class InputOptimizer:
             try:
                 self._scrcpy_proc.terminate()
                 self._scrcpy_proc.wait(timeout=2)
-            except Exception:
+            except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass
             self._scrcpy_proc = None
         
@@ -269,7 +269,7 @@ class InputOptimizer:
                 self._minitouch_socket.send(f"d 0 {x} {y} 50\n".encode())
                 self._minitouch_socket.send(b"u 0\n")
                 self._minitouch_socket.send(b"c\n")
-            except Exception:
+            except (ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 # Fallback to ADB
                 self._adb_tap(x, y)
         else:
@@ -289,7 +289,7 @@ class InputOptimizer:
                     time.sleep(duration_ms / 1000 / steps)
                 self._minitouch_socket.send(b"u 0\n")
                 self._minitouch_socket.send(b"c\n")
-            except Exception:
+            except (ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 self._adb_swipe(x1, y1, x2, y2, duration_ms)
         else:
             self._adb_swipe(x1, y1, x2, y2, duration_ms)
@@ -327,7 +327,7 @@ class InputOptimizer:
         
         try:
             subprocess.run(cmd, capture_output=True, timeout=3)
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.warning("[INPUT_OPTIMIZER] Batch execution failed: %s", e)
         
         latency = (time.time() - start) * 1000
@@ -361,7 +361,7 @@ class InputOptimizer:
                 stderr=subprocess.PIPE,
             )
             return True
-        except Exception:
+        except (FileNotFoundError, PermissionError, ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError):
             return False
 
     def _try_scrcpy(self) -> bool:
@@ -378,7 +378,7 @@ class InputOptimizer:
             )
             time.sleep(1)  # Wait for scrcpy to initialize
             return self._scrcpy_proc.poll() is None
-        except Exception:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError):
             return False
 
     def _try_adb_optimized(self) -> bool:
@@ -389,7 +389,7 @@ class InputOptimizer:
                 capture_output=True, timeout=2,
             )
             return result.returncode == 0
-        except Exception:
+        except (ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
             return False
 
     # --- Helpers ---

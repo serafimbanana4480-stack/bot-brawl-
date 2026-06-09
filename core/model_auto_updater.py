@@ -183,7 +183,7 @@ class ModelAutoUpdater:
             ver = self.registry.register(name, path)
             self.registry.set_active(name, ver.version)
             self._performance_log[name] = []  # Reset log para nova versão
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError, AttributeError) as e:
             logger.error("[AUTO_UPDATE] Erro ao ativar %s: %s", name, e)
 
     def _latest_version_for_path(self, name: str, path: Path) -> str:

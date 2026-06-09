@@ -85,7 +85,7 @@ class OTelMetrics:
             metrics.set_meter_provider(provider)
             self._meter = metrics.get_meter("soberana-omega-bot", "1.0.0")
             logger.info("[OTEL_METRICS] Provider initialized")
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError, AttributeError) as e:
             logger.error("[OTEL_METRICS] Init failed: %s", e)
             self.enabled = False
 

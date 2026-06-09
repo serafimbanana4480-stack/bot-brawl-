@@ -242,7 +242,7 @@ class ResolutionManager:
             )
             logger.info(f"[RES] Win32 detectado: {w}x{h} (hwnd={hwnd})")
             return profile
-        except Exception as e:
+        except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.debug(f"[RES] Win32 detection failed: {e}")
             return None
 
@@ -272,7 +272,7 @@ class ResolutionManager:
                         )
                         logger.info(f"[RES] ADB detectado: {w}x{h}")
                         return profile
-        except Exception as e:
+        except (ImportError, ModuleNotFoundError, ConnectionError, TimeoutError, TypeError, RuntimeError, OSError) as e:
             logger.debug(f"[RES] ADB detection failed: {e}")
         return None
 
@@ -303,7 +303,7 @@ class ResolutionManager:
                 if self.on_resolution_change:
                     try:
                         self.on_resolution_change(profile)
-                    except Exception as e:
+                    except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                         logger.error(f"[RES] on_resolution_change callback error: {e}")
 
         # Validar se é razoável
@@ -382,7 +382,7 @@ class ResolutionManager:
 
             win32gui.EnumChildWindows(parent_hwnd, _child_cb, None)
             return child_hwnd if child_hwnd != 0 else None
-        except Exception:
+        except (ImportError, ModuleNotFoundError, ConnectionError, ValueError, TypeError, RuntimeError, OSError):
             return None
 
     # ------------------------------------------------------------------

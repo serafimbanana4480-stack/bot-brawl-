@@ -3,6 +3,9 @@ anti_ban_advanced.py
 
 Sistema Anti-Ban Ultra-Avançado para Soberana Omega.
 
+DEPRECATED: Use core.anti_ban.AntiBanSystem instead.
+This module is kept for backward compatibility only.
+
 Arquitetura (10 pilares):
 1. BehavioralFingerprint    — fingerprint dinâmico do estilo de jogo
 2. InputRandomizer          — randomização de inputs com distribuições realistas
@@ -18,6 +21,7 @@ Arquitetura (10 pilares):
 Tudo integrado na classe principal AdvancedAntiBanSystem.
 """
 
+import warnings
 import time
 import math
 import random
@@ -31,6 +35,12 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
+
+warnings.warn(
+    "Deprecated: use core.anti_ban.AntiBanSystem instead",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 # ---------------------------------------------------------------------------
 # UTILS

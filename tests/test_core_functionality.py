@@ -15,9 +15,6 @@ from datetime import datetime
 from unittest.mock import MagicMock, patch, Mock
 
 # Project root on path
-_repo_root = str(Path(__file__).resolve().parent.parent)
-if _repo_root not in sys.path:
-    sys.path.insert(0, _repo_root)
 
 import pytest
 import torch

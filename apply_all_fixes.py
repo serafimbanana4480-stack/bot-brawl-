@@ -250,13 +250,13 @@ def apply_fixes():
 
     # 4.2. Melhorar _handle_lobby - se estamos no lobby ha muito tempo, forcar clicar Play
     old_lobby2 = """    def _handle_lobby(self):
-        """No lobby - pressiona play com verificacoes proativas e recovery autonomo."""
+        \"\"\"No lobby - pressiona play com verificacoes proativas e recovery autonomo.\"\"\"
         logger.info("[STATE] No lobby - a pressionar play")
         logger.info(f"[STATE] Lobby automator disponivel: {self.lobby is not None}")
         self._diag("lobby_handler_start")"""
 
     new_lobby2 = """    def _handle_lobby(self):
-        """No lobby - pressiona play com verificacoes proativas e recovery autonomo."""
+        \"\"\"No lobby - pressiona play com verificacoes proativas e recovery autonomo.\"\"\"
         logger.info("[STATE] No lobby - a pressionar play")
         logger.info(f"[STATE] Lobby automator disponivel: {self.lobby is not None}")
         self._diag("lobby_handler_start")

@@ -11,9 +11,6 @@ def load_routes_module():
     project_root = Path(__file__).parent.parent
     module_path = project_root / 'api' / 'brawl_stars_routes.py'
     import sys
-    cwd = str(project_root)
-    if cwd not in sys.path:
-        sys.path.insert(0, cwd)
     spec = importlib.util.spec_from_file_location('brawl_stars_routes', str(module_path))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

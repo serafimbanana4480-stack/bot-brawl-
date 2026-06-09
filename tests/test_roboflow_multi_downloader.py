@@ -7,7 +7,6 @@ Testes para training/roboflow_multi_downloader.py
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 from training.roboflow_multi_downloader import (

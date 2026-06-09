@@ -38,7 +38,7 @@ class InputAdapter(InputPort):
             else:
                 logger.warning(f"[INPUT_ADAPTER] Unknown action type: {action.action_type}")
                 return False
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError, AttributeError) as e:
             logger.error(f"[INPUT_ADAPTER] Execute failed: {e}")
             return False
 
@@ -50,7 +50,7 @@ class InputAdapter(InputPort):
             if hasattr(self._controller, "tap_scaled"):
                 return self._controller.tap_scaled(int(x * 1920), int(y * 1080))
             return self._controller.tap(int(x * 1920), int(y * 1080))
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.error(f"[INPUT_ADAPTER] Tap failed: {e}")
             return False
 
@@ -69,7 +69,7 @@ class InputAdapter(InputPort):
                 int(x2 * 1920), int(y2 * 1080),
                 duration_ms
             )
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.error(f"[INPUT_ADAPTER] Swipe failed: {e}")
             return False
 

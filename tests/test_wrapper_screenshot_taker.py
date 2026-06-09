@@ -4,9 +4,6 @@ import os
 
 # Ensure the 'soberana-omega' package directory is on sys.path so tests can import backend.brawl_bot
 _this_dir = os.path.dirname(__file__)
-_soberana_root = os.path.abspath(os.path.join(_this_dir, '..', '..', '..'))
-if _soberana_root not in sys.path:
-    sys.path.insert(0, _soberana_root)
 
 from backend.brawl_bot.pylaai_real.screenshot_taker import ScreenshotTaker
 

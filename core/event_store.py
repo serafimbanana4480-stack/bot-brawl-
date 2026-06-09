@@ -162,7 +162,7 @@ class EventStore:
                     f.write(line + "\n")
                 self._events_appended += 1
                 return True
-            except Exception as e:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
                 logger.error("[EVENT_STORE] Falha ao append evento: %s", e)
                 return False
 
@@ -208,7 +208,7 @@ class EventStore:
                         try:
                             data = json.loads(line)
                             event = DomainEvent.from_dict(data)
-                        except Exception:
+                        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError):
                             continue
 
                         # Filtros
@@ -223,7 +223,7 @@ class EventStore:
 
                         self._events_replayed += 1
                         yield event
-            except Exception as e:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
                 logger.warning("[EVENT_STORE] Erro ao ler %s: %s", file_path.name, e)
 
     def get_events_for_aggregate(self, aggregate_id: str) -> List[DomainEvent]:
@@ -417,7 +417,7 @@ class EventStore:
                     gz_path.unlink(missing_ok=True)
                     logger.info("[EVENT_STORE] Removido %s (expirado)", file_path.name)
 
-            except Exception as e:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
                 logger.warning("[EVENT_STORE] Erro na manutenção de %s: %s", file_path.name, e)
 
     def get_stats(self) -> Dict[str, Any]:

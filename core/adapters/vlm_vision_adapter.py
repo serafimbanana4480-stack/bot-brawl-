@@ -158,7 +158,7 @@ class VLMVisionAdapter(VisionPort):
                             center=(x_norm, y_norm),
                         )
                     )
-                except Exception as e:
+                except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                     logger.debug("[VLM_VISION] Element merge error: %s", e)
 
         merged.metadata["vlm"] = {

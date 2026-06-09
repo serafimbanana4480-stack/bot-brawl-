@@ -24,7 +24,6 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from training.unified_training_system import UnifiedTrainingSystem
 from training.real_reward_system import RealRewardCalculator

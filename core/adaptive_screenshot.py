@@ -225,7 +225,7 @@ class AdaptiveScreenshotCache:
         
         try:
             screenshot = capture_fn()
-        except Exception as e:
+        except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.error("[ADAPTIVE_SCREENSHOT] Capture failed: %s", e)
             # Return cached screenshot if available
             if self._cache and self._cache.screenshot is not None:
@@ -241,7 +241,7 @@ class AdaptiveScreenshotCache:
                 # Downsample for faster hashing
                 small = screenshot[::10, ::10] if screenshot.size > 10000 else screenshot
                 hash_value = hashlib.md5(small.tobytes()).hexdigest()[:16]
-            except Exception:
+            except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass
         
         with self._lock:

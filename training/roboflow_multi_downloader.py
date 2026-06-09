@@ -34,7 +34,6 @@ from typing import Dict, List, Optional, Set, Tuple
 from urllib.error import URLError
 from urllib.request import urlretrieve
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.class_registry import (
     CORE_CLASSES,
     EXTENDED_CLASSES,

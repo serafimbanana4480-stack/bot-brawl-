@@ -105,7 +105,7 @@ class V2Integrator:
             try:
                 from core.degradation_manager import DegradationManager
                 self._degradation_mgr = DegradationManager()
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError) as e:
                 logger.warning("[V2] DegradationManager indisponível: %s", e)
 
         if cfg.enable_event_store:
@@ -118,7 +118,7 @@ class V2Integrator:
                     "session",
                     {"config": cfg.__dict__},
                 )
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError) as e:
                 logger.warning("[V2] EventStore indisponível: %s", e)
 
         if cfg.enable_rate_limiter:
@@ -126,7 +126,7 @@ class V2Integrator:
                 from core.rate_limiter import IntelligentRateLimiter
                 self._rate_limiter = IntelligentRateLimiter()
                 self._rate_limiter.register_account(cfg.account_id)
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError) as e:
                 logger.warning("[V2] RateLimiter indisponível: %s", e)
 
         if cfg.enable_game_state_checkpoint:
@@ -135,49 +135,49 @@ class V2Integrator:
                 self._checkpointer = GameStateCheckpointer(
                     checkpoint_interval=cfg.checkpoint_interval,
                 )
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError) as e:
                 logger.warning("[V2] GameStateCheckpointer indisponível: %s", e)
 
         if cfg.enable_distributed_tracing:
             try:
                 from core.distributed_tracing import Tracer
                 self._tracer = Tracer()
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError) as e:
                 logger.warning("[V2] Tracer indisponível: %s", e)
 
         if cfg.enable_brawler_adaptive:
             try:
                 from decision.brawler_adaptive_controller import BrawlerAdaptiveController
                 self._brawler_ctrl = BrawlerAdaptiveController()
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError) as e:
                 logger.warning("[V2] BrawlerAdaptiveController indisponível: %s", e)
 
         if cfg.enable_replay_analyzer:
             try:
                 from core.replay_failure_analyzer import ReplayFailureAnalyzer
                 self._replay_analyzer = ReplayFailureAnalyzer()
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError) as e:
                 logger.warning("[V2] ReplayFailureAnalyzer indisponível: %s", e)
 
         if cfg.enable_multi_objective_rl:
             try:
                 from decision.multi_objective_rl import MultiObjectiveOptimizer
                 self._moo = MultiObjectiveOptimizer()
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError) as e:
                 logger.warning("[V2] MultiObjectiveOptimizer indisponível: %s", e)
 
         if cfg.enable_smart_frame_skip:
             try:
                 from core.smart_frame_skipper import SmartFrameSkipper
                 self._frame_skipper = SmartFrameSkipper()
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError) as e:
                 logger.warning("[V2] SmartFrameSkipper indisponível: %s", e)
 
         if cfg.enable_alert_system:
             try:
                 from core.alert_system import AlertSystem
                 self._alert_system = AlertSystem()
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError) as e:
                 logger.warning("[V2] AlertSystem indisponível: %s", e)
 
     # ------------------------------------------------------------------
@@ -407,7 +407,7 @@ class V2Integrator:
                 rl_state=rl_state,
                 force=False,
             )
-        except Exception as e:
+        except (ImportError, ModuleNotFoundError) as e:
             logger.warning("[V2] Checkpoint falhou: %s", e)
 
     # ------------------------------------------------------------------
@@ -441,6 +441,6 @@ class V2Integrator:
                     "session",
                     {"cycles": self._cycle_count},
                 )
-            except Exception:
+            except (ImportError, ModuleNotFoundError):
                 pass
         V2Integrator._instance = None

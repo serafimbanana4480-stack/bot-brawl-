@@ -298,7 +298,7 @@ class DegradationManager:
         for listener in self._listeners:
             try:
                 listener(new_mode, self.config)
-            except Exception as e:
+            except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.warning("[DEGRADATION] Listener falhou: %s", e)
 
     # ------------------------------------------------------------------

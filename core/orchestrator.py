@@ -49,6 +49,7 @@ from core.ports import (
     TelemetryPort,
     VisionPort,
 )
+from core.repetition_guard import RepetitionGuard
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,9 @@ class BotOrchestrator:
         self._fps = 0.0
         self._cycle_time_ms = 0.0
 
+        # Repetition Guard (extracted from deprecated lobby_fsm)
+        self._repetition_guard = RepetitionGuard()
+
         # Hooks
         self._shutdown_hooks: List[Callable] = []
 
@@ -153,7 +157,7 @@ class BotOrchestrator:
             try:
                 port.initialize()
                 logger.info(f"[ORCHESTRATOR] {name} initialized")
-            except Exception as e:
+            except (ValueError, TypeError, RuntimeError, AttributeError) as e:
                 logger.error(f"[ORCHESTRATOR] {name} init failed: {e}")
                 success = False
 
@@ -188,10 +192,17 @@ class BotOrchestrator:
 
             try:
                 self._tick()
-            except Exception as e:
+            except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 self._error_count += 1
                 self._last_error = str(e)
                 logger.error(f"[ORCHESTRATOR] Tick error: {e}")
+                if self._error_count > self.config.get("max_errors", 10):
+                    logger.critical("[ORCHESTRATOR] Too many errors, shutting down")
+                    self._shutdown_requested = True
+            except Exception as e:
+                self._error_count += 1
+                self._last_error = str(e)
+                logger.exception(f"[ORCHESTRATOR] Unexpected tick error: {e}")
                 if self._error_count > self.config.get("max_errors", 10):
                     logger.critical("[ORCHESTRATOR] Too many errors, shutting down")
                     self._shutdown_requested = True
@@ -246,10 +257,14 @@ class BotOrchestrator:
         """One iteration: perceive -> decide -> act -> learn."""
         try:
             self._do_tick()
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             self._error_count += 1
             self._last_error = str(e)
             logger.error(f"[ORCHESTRATOR] Tick error: {e}")
+        except Exception as e:
+            self._error_count += 1
+            self._last_error = str(e)
+            logger.exception(f"[ORCHESTRATOR] Unexpected tick error: {e}")
 
     def _do_tick(self) -> None:
         """Actual tick logic (wrapped by _tick for error handling)."""
@@ -302,21 +317,31 @@ class BotOrchestrator:
                     "confidence": decision.confidence,
                 })
 
-            # 4. ACT
+            # 4. ACT (with repetition guard)
             if decision.target_pos:
-                with span("input.execute", {"action_type": decision.action_type}) as act_span:
-                    action = InputAction(
-                        action_type="tap",
-                        x=decision.target_pos[0],
-                        y=decision.target_pos[1],
-                        duration_ms=100,
+                can_act, guard_reason = self._repetition_guard.can_execute(
+                    decision.action_type, target=str(decision.target_pos)
+                )
+                if can_act:
+                    with span("input.execute", {"action_type": decision.action_type}) as act_span:
+                        action = InputAction(
+                            action_type="tap",
+                            x=decision.target_pos[0],
+                            y=decision.target_pos[1],
+                            duration_ms=100,
+                        )
+                        success = self.input_.execute(action)
+                        if act_span:
+                            act_span.set_attribute("success", success)
+                    self._repetition_guard.record_action(
+                        decision.action_type, target=str(decision.target_pos), result="success" if success else "fail"
                     )
-                    success = self.input_.execute(action)
-                    if act_span:
-                        act_span.set_attribute("success", success)
-                self.safety.record_action(decision.action_type)
-                if not success:
-                    self.telemetry.record_metric(MetricEvent("input_failure", 1.0))
+                    self.safety.record_action(decision.action_type)
+                    if not success:
+                        self.telemetry.record_metric(MetricEvent("input_failure", 1.0))
+                else:
+                    logger.debug("[ORCHESTRATOR] Action vetoed by repetition guard: %s", guard_reason)
+                    self.telemetry.record_event("action_vetoed", {"reason": guard_reason, "action": decision.action_type})
 
             # 5. LEARN (online RL)
             with span("decision.learn") as learn_span:
@@ -462,13 +487,13 @@ class BotOrchestrator:
         for hook in self._shutdown_hooks:
             try:
                 hook()
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, AttributeError, OSError) as e:
                 logger.warning(f"[ORCHESTRATOR] Shutdown hook error: {e}")
 
         for port in [self.vision, self.input_, self.decision, self.safety, self.telemetry, self.persistence]:
             try:
                 port.shutdown()
-            except Exception:
+            except (RuntimeError, AttributeError, OSError):
                 pass
 
         self.telemetry.record_event("orchestrator_shutdown", {})

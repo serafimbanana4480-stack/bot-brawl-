@@ -22,7 +22,6 @@ from urllib.request import urlretrieve
 from urllib.error import URLError
 from typing import Union
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from training.class_schema import CORE_CLASSES, EXTENDED_CLASSES
 from core.class_registry import ROBOFLOW_TO_CANONICAL, get_class_id
 

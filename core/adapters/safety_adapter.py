@@ -32,7 +32,7 @@ class SafetyAdapter(SafetyPort):
                     status.should_pause = True
                     status.warning_message = "APM limit reached"
             return status
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.debug(f"[SAFETY_ADAPTER] Check error: {e}")
             return SafetyStatus(can_continue=True)
 
@@ -46,7 +46,7 @@ class SafetyAdapter(SafetyPort):
                     status.should_stop = True
                     status.warning_message = "Max session duration reached"
             return status
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.debug(f"[SAFETY_ADAPTER] Match check error: {e}")
             return SafetyStatus(can_continue=True)
 
@@ -54,14 +54,14 @@ class SafetyAdapter(SafetyPort):
         if self._safety is not None and hasattr(self._safety, "record_action"):
             try:
                 self._safety.record_action(action_type)
-            except Exception:
+            except (ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass
 
     def record_match_end(self, result: str, duration_sec: float = 0.0) -> None:
         if self._safety is not None and hasattr(self._safety, "record_match"):
             try:
                 self._safety.record_match(result, duration_sec)
-            except Exception:
+            except (ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass
 
     def health_check(self):

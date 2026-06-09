@@ -14,7 +14,6 @@ import logging
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)-8s | %(message)s")
 logger = logging.getLogger("test_detection")

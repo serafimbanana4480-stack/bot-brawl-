@@ -143,7 +143,7 @@ def initialize_tracing(
         _tracer_instance = trace.get_tracer(service_name, "1.0.0")
         logger.info("[OTEL] Tracing initialized: %s -> %s", service_name, exporter_type)
         return True
-    except Exception as e:
+    except (ImportError, ModuleNotFoundError, TypeError) as e:
         logger.error("[OTEL] Tracing init failed: %s", e)
         _tracer_instance = NoOpTracer()
         return False
@@ -156,7 +156,7 @@ def shutdown_tracing() -> None:
         try:
             _provider.shutdown()
             logger.info("[OTEL] Tracing shutdown complete")
-        except Exception as e:
+        except (RuntimeError, AttributeError, OSError) as e:
             logger.warning("[OTEL] Tracing shutdown error: %s", e)
         _provider = None
 
@@ -195,7 +195,7 @@ def record_error(span_obj: Any, exception: Exception, message: Optional[str] = N
         span_obj.record_exception(exception)
         if message:
             span_obj.set_status(Status(StatusCode.ERROR, message))
-    except Exception:
+    except (ValueError, TypeError, RuntimeError, AttributeError, OSError):
         pass
 
 
@@ -206,5 +206,5 @@ def get_trace_id() -> Optional[str]:
     try:
         ctx = trace.get_current_span().get_span_context()
         return format(ctx.trace_id, "032x") if ctx.trace_id else None
-    except Exception:
+    except (ValueError, TypeError, RuntimeError, AttributeError, OSError):
         return None

@@ -3,6 +3,9 @@ decision/gradient_boosting_decisions.py
 
 Gradient Boosting para Decisões Combinatórias.
 
+DEPRECATED: Use pylaai_real.play.PlayLogic instead.
+This module is kept for backward compatibility only.
+
 Combina múltiplos "weak decision makers" (UtilityAI, MultiObjectiveRL,
 BrawlerAdaptive, StickyTarget, etc.) numa decisão final robusta.
 
@@ -12,12 +15,19 @@ Ideia: cada subsistema dá um "voto" com peso. O sistema aprende os pesos
 Benefício: se um subsistema falha, os outros compensam.
 """
 
+import warnings
 import logging
 import random
 from typing import Dict, List, Optional, Callable, Any
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
+
+warnings.warn(
+    "Deprecated: use pylaai_real.play.PlayLogic instead",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 class DecisionVoter:

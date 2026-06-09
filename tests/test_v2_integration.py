@@ -14,6 +14,13 @@ from pathlib import Path
 
 
 class TestV2Integrator:
+    @pytest.fixture(autouse=True)
+    def reset_singleton(self):
+        from core.v2_integration import V2Integrator
+        V2Integrator._instance = None
+        yield
+        V2Integrator._instance = None
+
     def test_singleton(self):
         from core.v2_integration import V2Integrator, V2IntegrationConfig
         v2a = V2Integrator(config=V2IntegrationConfig())
@@ -47,6 +54,8 @@ class TestV2Integrator:
         from core.v2_integration import V2Integrator, V2IntegrationConfig
         cfg = V2IntegrationConfig()
         cfg.enable_brawler_adaptive = True
+        cfg.enable_rate_limiter = False
+        cfg.enable_smart_frame_skip = False
         v2 = V2Integrator(config=cfg)
         v2._last_brawler = None
         # Simular mudança de brawler

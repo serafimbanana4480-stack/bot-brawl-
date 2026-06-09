@@ -143,7 +143,7 @@ class ESPOverlay:
         if self._overlay_hwnd and WIN32_AVAILABLE:
             try:
                 win32gui.DestroyWindow(self._overlay_hwnd)
-            except Exception:
+            except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass
         self._overlay_hwnd = None
         logger.info("[ESP] Overlay parado")
@@ -182,7 +182,7 @@ class ESPOverlay:
                 rect = win32gui.GetWindowRect(hwnd)
                 self._window_rect = rect
                 return True
-            except Exception:
+            except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass
         return False
 
@@ -198,7 +198,7 @@ class ESPOverlay:
             wc.lpszClassName = "SoberanaESPOverlay"
             try:
                 win32gui.RegisterClass(wc)
-            except Exception:
+            except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass  # Already registered
 
             style = (
@@ -224,7 +224,7 @@ class ESPOverlay:
             windll.user32.SetLayeredWindowAttributes(self._overlay_hwnd, 0x000000, 0, win32con.LWA_COLORKEY)
             win32gui.ShowWindow(self._overlay_hwnd, win32con.SW_SHOW)
             return True
-        except Exception as e:
+        except (ImportError, ModuleNotFoundError, ConnectionError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.warning(f"[ESP] Falha ao criar overlay: {e}")
             return False
 
@@ -264,7 +264,7 @@ class ESPOverlay:
                     x, y, r - x, b - y,
                     win32con.SWP_NOACTIVATE | win32con.SWP_SHOWWINDOW
                 )
-        except Exception:
+        except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
             pass
 
     def _redraw(self):
@@ -323,7 +323,7 @@ class ESPOverlay:
             win32gui.DeleteDC(mem_dc)
             win32gui.DeleteObject(bmp.GetHandle())
             win32gui.ReleaseDC(self._overlay_hwnd, hdc)
-        except Exception as e:
+        except (ImportError, ModuleNotFoundError, RuntimeError, ValueError) as e:
             logger.debug(f"[ESP] Draw error: {e}")
 
     def _draw_detection(self, hdc, det: ESPDetection, win_w: int, win_h: int):

@@ -198,7 +198,7 @@ class TacticalBridge:
                     if plan:
                         self._current_plan = plan
                         return plan
-                except Exception as e:
+                except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                     logger.warning("[TACTICAL_BRIDGE] Enterprise planning failed: %s", e)
             
             # Fallback: heuristic planning

@@ -7,9 +7,11 @@ Sistema profissional para navegacao no lobby do Brawl Stars:
 3. EventDetector - identifica eventos ativos (Starr Nova, etc.)
 4. BrawlerSelectorFast - selecao rapida de brawler com cache
 
-Integrado no LobbyAutomator para fluxo completo lobby->jogo.
+DEPRECATED: Use pylaai_real.unified_state_detector.UnifiedStateDetector instead.
+This module is kept for backward compatibility only.
 """
 
+import warnings
 import time
 import random
 import logging
@@ -28,6 +30,12 @@ except ImportError:
     cv2 = None
 
 logger = logging.getLogger(__name__)
+
+warnings.warn(
+    "Deprecated: use pylaai_real.unified_state_detector.UnifiedStateDetector instead",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 # ---------------------------------------------------------------------------

@@ -4,8 +4,12 @@ screenshot_analyzer.py
 Sistema de análise automática de screenshots para diagnóstico e validação.
 Detecta problemas comuns (cores trocadas, screenshot preta, janela minimizada,
 emulador não visível) e fornece métricas de qualidade.
+
+DEPRECATED: Use pylaai_real.unified_state_detector.UnifiedStateDetector instead.
+This module is kept for backward compatibility only.
 """
 
+import warnings
 import time
 import logging
 from pathlib import Path
@@ -20,6 +24,12 @@ except ImportError:
     cv2 = None
 
 logger = logging.getLogger(__name__)
+
+warnings.warn(
+    "Deprecated: use pylaai_real.unified_state_detector.UnifiedStateDetector instead",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 @dataclass

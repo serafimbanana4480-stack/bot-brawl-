@@ -69,7 +69,7 @@ class NotificationManager:
             for k, v in data.items():
                 if hasattr(self.config, k):
                     setattr(self.config, k, v)
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
             logger.warning(f"[NOTIFY] Falha ao carregar config: {e}")
 
     def save_config(self):
@@ -78,7 +78,7 @@ class NotificationManager:
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
                 json.dump(self.config.__dict__, f, indent=2, ensure_ascii=False)
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
             logger.warning(f"[NOTIFY] Falha ao guardar config: {e}")
 
     def update_config(self, **kwargs):
@@ -110,7 +110,7 @@ class NotificationManager:
                 for cb in list(self._listeners):
                     try:
                         cb(event)
-                    except Exception:
+                    except (ValueError, TypeError, RuntimeError, AttributeError, OSError):
                         pass
         # Webhook
         if self.config.webhook_url:
@@ -137,7 +137,7 @@ class NotificationManager:
             )
             with urllib.request.urlopen(req, timeout=5) as resp:
                 pass
-        except Exception as e:
+        except (ConnectionError, TimeoutError, RuntimeError, OSError, ValueError) as e:
             logger.debug(f"[NOTIFY] Webhook failed: {e}")
 
     def _send_desktop(self, event: NotificationEvent):
@@ -152,7 +152,7 @@ class NotificationManager:
                     ToastNotifier().show_toast(event.title, event.message, duration=5)
                 except ImportError:
                     pass
-        except Exception as e:
+        except (ImportError, ModuleNotFoundError) as e:
             logger.debug(f"[NOTIFY] Desktop failed: {e}")
 
     def check_and_notify(self, bot_status: Dict):
@@ -217,7 +217,7 @@ class NotificationManager:
                 )
                 with urllib.request.urlopen(req, timeout=5) as resp:
                     pass
-            except Exception as e:
+            except (ConnectionError, TimeoutError, RuntimeError, OSError, ValueError) as e:
                 logger.debug(f"[NOTIFY] Crash webhook failed: {e}")
 
     def get_history(self, limit: int = 50) -> List[Dict]:
@@ -270,14 +270,14 @@ def install_crash_handler(manager: Optional[NotificationManager] = None):
                 component="uncaught_exception",
                 extra={"traceback": tb_text, "exc_type": exc_type.__name__}
             )
-        except Exception:
+        except (ValueError, TypeError, RuntimeError, AttributeError, OSError):
             pass  # Never let the crash handler itself crash
 
         # Chain to previous handler
         if _previous_excepthook:
             try:
                 _previous_excepthook(exc_type, exc_value, exc_traceback)
-            except Exception:
+            except Exception:  # noqa: broad-except justified — excepthook must never crash
                 pass
 
     sys.excepthook = _crash_excepthook

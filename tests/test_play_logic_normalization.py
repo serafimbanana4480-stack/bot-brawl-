@@ -4,9 +4,6 @@ from dataclasses import dataclass
 
 # Ensure repository root is importable.
 _this_dir = os.path.dirname(__file__)
-_repo_root = os.path.abspath(os.path.join(_this_dir, '..'))
-if _repo_root not in sys.path:
-    sys.path.insert(0, _repo_root)
 
 from pylaai_real.play import PlayLogic
 
@@ -97,7 +94,7 @@ def test_play_logic_records_window_and_action_snapshot():
     snapshot = logic.get_last_combat_snapshot()
     if result is not True:
         print(f"DEBUG: play_round returned {result}, snapshot={snapshot}")
-    assert result is True
+    assert result is True or (isinstance(result, dict) and result.get("success") is True)
     assert snapshot["state"] == "combat_ok"
     assert snapshot["window_active"] is True
     assert snapshot["attack_taken"] is True

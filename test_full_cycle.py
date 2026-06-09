@@ -6,7 +6,6 @@ Simula o fluxo: lobby -> play -> in_game sem iniciar threads.
 """
 
 import sys
-sys.path.insert(0, 'c:/Users/rodri/Desktop/bot brawl')
 
 import time
 import numpy as np

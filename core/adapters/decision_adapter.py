@@ -27,7 +27,7 @@ class DecisionAdapter(DecisionPort):
             try:
                 from neural.rl_bridge import RLBridge
                 self._rl = RLBridge(use_neural=True, q_learning_fallback=True)
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError) as e:
                 logger.warning(f"[DECISION_ADAPTER] RLBridge init failed: {e}")
                 return False
         self._initialized = True
@@ -70,7 +70,7 @@ class DecisionAdapter(DecisionPort):
 
             return decision
 
-        except Exception as e:
+        except (ImportError, ModuleNotFoundError) as e:
             logger.error(f"[DECISION_ADAPTER] Decide error: {e}")
             return Decision(action_type="idle", confidence=0.0, reasoning=f"Error: {e}")
 
@@ -88,14 +88,14 @@ class DecisionAdapter(DecisionPort):
             )
             next_state = state  # Simplified; should re-perceive
             self._rl.learn_from_frame(state, decision.action_type, reward, next_state)
-        except Exception as e:
+        except (ImportError, ModuleNotFoundError) as e:
             logger.debug(f"[DECISION_ADAPTER] Learn error: {e}")
 
     def start_episode(self, brawler: str, map_name: Optional[str] = None) -> None:
         if self._rl is not None:
             try:
                 self._rl.start_episode()
-            except Exception as e:
+            except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.debug(f"[DECISION_ADAPTER] Start episode error: {e}")
 
     def end_episode(self, result: str, rank: int = 0) -> None:
@@ -103,7 +103,7 @@ class DecisionAdapter(DecisionPort):
             try:
                 result_reward = {"win": 10.0, "draw": 2.0, "loss": -5.0}.get(result, 0.0)
                 self._rl.end_episode(result_reward)
-            except Exception as e:
+            except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.debug(f"[DECISION_ADAPTER] End episode error: {e}")
 
     def health_check(self) -> Dict[str, Any]:

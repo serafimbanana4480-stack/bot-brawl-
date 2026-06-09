@@ -116,7 +116,7 @@ class ConfigManager:
         """Search for config file in standard locations."""
         # Determine bot root
         try:
-            from wrapper import _BOT_ROOT
+            from core.constants import _BOT_ROOT
             bot_root = _BOT_ROOT
         except ImportError:
             bot_root = Path(__file__).parent.parent
@@ -159,7 +159,7 @@ class ConfigManager:
             logger.info(f"Configuration loaded from {self.config_path}")
             return True
             
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
             logger.error(f"Failed to load config from {self.config_path}: {e}")
             return False
     
@@ -314,7 +314,7 @@ class ConfigManager:
             
             logger.info(f"Created default config at {self.config_path}")
             
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
             logger.error(f"Failed to create default config: {e}")
     
     def save(self) -> bool:
@@ -375,7 +375,7 @@ class ConfigManager:
             logger.info(f"Configuration saved to {self.config_path}")
             return True
             
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
             logger.error(f"Failed to save config: {e}")
             return False
     
@@ -414,7 +414,7 @@ class ConfigManager:
     def migrate_legacy_config(self) -> bool:
         """Migrate from legacy config.json and lobby.toml to unified config."""
         try:
-            from wrapper import _BOT_ROOT
+            from core.constants import _BOT_ROOT
             bot_root = _BOT_ROOT
         except ImportError:
             bot_root = Path(__file__).parent.parent
@@ -454,7 +454,7 @@ class ConfigManager:
                         except ImportError:
                             logger.warning("toml library not installed, skipping lobby.toml migration")
                 
-                except Exception as e:
+                except (ImportError, ModuleNotFoundError, FileNotFoundError, PermissionError, ValueError, RuntimeError, OSError, IOError) as e:
                     logger.error(f"Failed to migrate {legacy_path}: {e}")
         
         if migrated:

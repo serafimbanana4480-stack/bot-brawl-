@@ -1,9 +1,19 @@
 """
 Finite State Machine for Brawl Stars bot decision making.
 States: IDLE -> SEARCH -> ENGAGE -> RETREAT -> RECOVER
+
+DEPRECATED: Use core.orchestrator.BotOrchestrator instead.
+This module is kept for backward compatibility only.
 """
 
+import warnings
 from enum import Enum, auto
+
+warnings.warn(
+    "Deprecated: use core.orchestrator.BotOrchestrator instead",
+    DeprecationWarning,
+    stacklevel=2,
+)
 from typing import Optional, Callable, Dict, List
 from dataclasses import dataclass
 import time

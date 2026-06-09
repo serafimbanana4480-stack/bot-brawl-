@@ -3,9 +3,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 # Ensure repository root is on sys.path so top-level packages like 'brawl_bot' can be imported
-repo_root = Path(__file__).resolve().parents[4]
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
 
 from brawl_bot import emulator_detector
 

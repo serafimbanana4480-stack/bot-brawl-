@@ -383,11 +383,27 @@ def run_audit() -> None:
         print(f"  {m['name']}  [{m['sha256'][:12]}...] — {m['reason']}")
 
     print(f"\nSystem Integrity Score: {report['integrity_score']}/100")
-    if report["integrity_score"] < 50:
+
+    # Check registry for valid models before reporting CRITICAL
+    registry_valid_count = 0
+    if REGISTRY_PATH.exists():
+        try:
+            reg_data = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+            registry_valid_count = sum(
+                1 for m in reg_data.get("models", {}).values()
+                if m.get("status") == "valid"
+            )
+        except Exception:
+            pass  # Registry unreadable — fall through to normal logic
+
+    if len(report["valid"]) == 0 and registry_valid_count == 0:
         print("STATUS: ❌ CRITICAL — No real Brawl Stars models present.")
         print("        Bot cannot operate. Train YOLO on real game data first.")
+    elif len(report["valid"]) == 0 and registry_valid_count > 0:
+        print(f"STATUS: ⚠️  WARNING — No valid models in current scan, but {registry_valid_count} valid model(s) in registry.")
+        print("        Re-run validation after placing trained models in the models/ directory.")
     elif report["integrity_score"] < 80:
-        print("STATUS: ⚠️  PARTIAL — Some valid models but pipeline unreliable.")
+        print("STATUS: ⚠️  PARTIAL — Valid models present, but models directory contains fake or invalid files.")
     else:
         print("STATUS: ✅ PRODUCTION READY")
     print("=" * 60 + "\n")

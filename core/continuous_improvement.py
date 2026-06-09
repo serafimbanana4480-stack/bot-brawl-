@@ -217,7 +217,7 @@ class ContinuousImprovement:
             with open(self.report_path, 'w', encoding='utf-8') as f:
                 json.dump(report, f, indent=2, default=str)
             logger.info(f"[IMPROVEMENT] Relatório salvo em {self.report_path}")
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
             logger.error(f"[IMPROVEMENT] Erro ao salvar relatório: {e}")
     
     def periodic_save(self):

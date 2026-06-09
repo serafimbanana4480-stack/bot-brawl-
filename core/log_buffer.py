@@ -60,7 +60,7 @@ class RotatingLogWriter:
         if self._current_file:
             try:
                 self._current_file.close()
-            except Exception:
+            except (RuntimeError, AttributeError, OSError):
                 pass
 
         filepath = self.log_dir / self.base_name
@@ -83,7 +83,7 @@ class RotatingLogWriter:
                 with gzip.open(backup_path, "wb") as f_out:
                     f_out.writelines(f_in)
             filepath.unlink()
-        except Exception:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError):
             pass  # If compression fails, just truncate
 
     def write_entry(self, entry: Dict):
@@ -101,7 +101,7 @@ class RotatingLogWriter:
                 self._current_file.write(line)
                 self._current_file.flush()
                 self._current_size += len(line.encode("utf-8"))
-            except Exception:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError):
                 pass  # Never let file writing crash the bot
 
     def close(self):
@@ -110,7 +110,7 @@ class RotatingLogWriter:
             if self._current_file:
                 try:
                     self._current_file.close()
-                except Exception:
+                except (RuntimeError, AttributeError, OSError):
                     pass
                 self._current_file = None
 
@@ -172,7 +172,7 @@ class LogBuffer:
             for ev in list(self._listeners):
                 try:
                     ev.set()
-                except Exception:
+                except (ValueError, TypeError, RuntimeError, AttributeError, OSError):
                     pass
 
     def get_lines(self, limit: int = 100, level: Optional[str] = None,
@@ -243,7 +243,7 @@ class DashboardLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord):
         try:
             self.buffer.append(record)
-        except Exception:
+        except (ValueError, TypeError, RuntimeError, AttributeError, OSError):
             self.handleError(record)
 
 

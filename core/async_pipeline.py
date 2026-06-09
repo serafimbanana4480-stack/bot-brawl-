@@ -277,7 +277,7 @@ class AsyncPipeline:
 
             return (action, params)
 
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError, AttributeError) as e:
             logger.error("[ASYNC_PIPELINE] Decision error: %s", e)
             return None
 
@@ -331,7 +331,7 @@ class AsyncPipeline:
                 if sleep_time > 0:
                     time.sleep(sleep_time)
 
-            except Exception as e:
+            except (FileNotFoundError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.error("[ASYNC_PIPELINE] Inference error: %s\n%s",
                              e, traceback.format_exc())
                 self._stats["inference_errors"] += 1
@@ -390,7 +390,7 @@ class AsyncPipeline:
                 if sleep_time > 0:
                     time.sleep(sleep_time)
 
-            except Exception as e:
+            except (ValueError, TypeError, RuntimeError, AttributeError) as e:
                 logger.error("[ASYNC_PIPELINE] Tracking error: %s\n%s",
                              e, traceback.format_exc())
                 self._stats["tracking_errors"] += 1

@@ -113,7 +113,7 @@ class AutoFixEngine:
             try:
                 screenshot = self.screenshot_func()
                 analysis = self.analyzer.analyze(screenshot)
-            except Exception as e:
+            except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.warning(f"[AUTOFIX] Erro ao analisar screenshot: {e}")
 
         # === PASSO 2: Verificar se detector está a funcionar ===
@@ -215,7 +215,7 @@ class AutoFixEngine:
                     logger.warning(f"[AUTOFIX] Detector falhou: analyzer diz lobby, detector diz {result.state}")
                     return False
             return True
-        except Exception as e:
+        except (FileNotFoundError, ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.warning(f"[AUTOFIX] Erro ao verificar detector: {e}")
             return False
 
@@ -376,7 +376,7 @@ class AutoFixEngine:
                     self.click_func(*result.coords)
                     time.sleep(1.5)
                 return "lobby"
-        except Exception as e:
+        except (ImportError, ModuleNotFoundError, ConnectionError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.debug(f"[AUTOFIX] SmartPlayButtonDetector falhou no blind recovery: {e}")
 
         # Heuristica 2: Se o centro for escuro mas houver elementos coloridos na parte inferior,

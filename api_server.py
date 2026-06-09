@@ -15,7 +15,6 @@ Fixes Applied:
 
 import asyncio
 import json
-import logging
 import os
 import socket
 from typing import Dict, List, Optional, Any
@@ -23,10 +22,25 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+try:
+    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+    HAS_PROMETHEUS = True
+except ImportError:
+    HAS_PROMETHEUS = False
+
+from core.logging_config import setup_logging, get_logger
+from core.metrics import (
+    set_bot_state,
+    inc_matches_completed,
+    inc_errors,
+)
+
+setup_logging()
+logger = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -262,9 +276,11 @@ def record_match(brawler: str, result: str, trophies: int, duration: int):
                 star_player=False,
             )
             bot.match_controller.history.add_match(match_result)
+            inc_matches_completed()
             logger.info(f"Match recorded via bot: {brawler} - {result} ({trophies:+d} trophies)")
     except Exception as e:
         logger.warning(f"Failed to record match via bot: {e}")
+        inc_errors("record_match")
 
 
 # ---------------------------------------------------------------------------
@@ -301,16 +317,40 @@ async def websocket_endpoint(websocket: WebSocket):
 # ---------------------------------------------------------------------------
 # Health and Readiness endpoints
 # ---------------------------------------------------------------------------
-@app.get("/health", summary="Health check", tags=["Health"])
-async def health_check() -> Dict[str, Any]:
+@app.get("/health", summary="Shallow health check", tags=["Health"])
+async def health_check():
     """
-    Liveness probe: returns 200 if the API process itself is alive.
-    Does NOT check bot internals — use /ready for that.
+    Liveness + shallow health check.
+    Checks ADB availability and YOLO model presence.
+    Does NOT require a running emulator.
     """
-    return {
-        "status": "alive",
-        "timestamp": datetime.now().isoformat(),
-    }
+    from core.health_checks import health_shallow, to_dict
+    report = health_shallow()
+    from fastapi.responses import JSONResponse
+    status_code = 200 if report.overall == "healthy" else 503
+    return JSONResponse(content=to_dict(report), status_code=status_code)
+
+
+@app.get("/health/deep", summary="Deep health check", tags=["Health"])
+async def health_deep_check():
+    """
+    Deep health check.
+    Checks ADB, emulator connection, YOLO model, and screenshot pipeline.
+    Requires a running emulator.
+    """
+    from core.health_checks import health_deep as _health_deep, to_dict
+    report = _health_deep()
+    from fastapi.responses import JSONResponse
+    status_code = 200 if report.overall == "healthy" else 503
+    return JSONResponse(content=to_dict(report), status_code=status_code)
+
+
+@app.get("/metrics", summary="Prometheus metrics", tags=["Monitoring"])
+async def metrics():
+    """Expose Prometheus metrics."""
+    if not HAS_PROMETHEUS:
+        return Response(content="prometheus_client not installed", status_code=503)
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/ready", summary="Readiness check", tags=["Health"])
@@ -371,6 +411,27 @@ async def readiness_check() -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Prometheus metrics endpoint
+# ---------------------------------------------------------------------------
+@app.get("/metrics", summary="Prometheus metrics", tags=["Monitoring"])
+async def metrics() -> Response:
+    """
+    Exposes metrics in Prometheus text exposition format.
+    Requires `prometheus-client` to be installed.
+    """
+    if not HAS_PROMETHEUS:
+        return Response(
+            "# Prometheus client not installed\n",
+            media_type="text/plain",
+            status_code=503,
+        )
+    return Response(
+        generate_latest(),
+        media_type=CONTENT_TYPE_LATEST,
+    )
+
+
+# ---------------------------------------------------------------------------
 # REST API endpoints
 # ---------------------------------------------------------------------------
 @app.get("/api/brawl-stars/status", summary="Get bot status", tags=["Bot Control"])
@@ -381,6 +442,8 @@ async def get_status() -> Dict[str, Any]:
     """
     bot = get_bot()
     status = bot.get_status()
+    current_state = status.get("current_state", "unknown") if isinstance(status, dict) else "unknown"
+    set_bot_state(current_state)
     return {"success": True, "status": status}
 
 
@@ -429,6 +492,7 @@ async def get_logs(
         }
     except Exception as e:
         logger.error(f"[API] Erro ao obter logs recentes: {e}")
+        inc_errors("api_logs")
         return {
             "success": False,
             "error": str(e),
@@ -664,6 +728,7 @@ async def get_recommended_action() -> Dict[str, Any]:
             }
     except Exception as e:
         logger.error(f"[API] Erro ao obter ação recomendada: {e}")
+        inc_errors("api_recommended_action")
         return {
             "success": False,
             "error": str(e),
@@ -717,6 +782,7 @@ async def run_auto_tuning() -> Dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"[API] Erro ao executar auto-tuning: {e}")
+        inc_errors("api_auto_tuning")
         return {
             "success": False,
             "error": str(e)

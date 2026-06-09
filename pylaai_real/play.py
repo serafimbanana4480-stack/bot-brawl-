@@ -17,8 +17,6 @@ import logging
 import random
 from collections import deque, defaultdict
 from typing import Optional, List, Dict, Tuple
-import sys
-import os
 from pathlib import Path
 
 # Utilitarios de humanizacao
@@ -29,9 +27,6 @@ from .combat_advanced import (
     LeadingShotEngine, KitingEngine, CoverEngine, ComboManager, AdvancedCombatStrategy,
     _center, _pixel_distance, BRAWLER_PROJECTILES,
 )
-
-# Adicionar diretório parent ao path para importar tracker
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 logger = logging.getLogger(__name__)
 

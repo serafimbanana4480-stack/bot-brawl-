@@ -69,13 +69,13 @@ def create_orchestrator(
     try:
         from safety_system import SafetySystem
         safety_system = SafetySystem(safety_config)
-    except Exception as e:
+    except (ImportError, ModuleNotFoundError) as e:
         logger.warning(f"[FACTORY] SafetySystem unavailable: {e}")
 
     try:
         from core.anti_ban import AntiBanSystem
         anti_ban = AntiBanSystem()
-    except Exception as e:
+    except (ImportError, ModuleNotFoundError) as e:
         logger.debug(f"[FACTORY] AntiBanSystem unavailable: {e}")
 
     safety_adapter = SafetyAdapter(safety_system=safety_system, anti_ban=anti_ban)
@@ -110,7 +110,7 @@ def create_orchestrator(
                 humanizer=humanizer,
             )
             logger.info("[FACTORY] Adversarial humanization enabled")
-        except Exception as e:
+        except (ImportError, ModuleNotFoundError) as e:
             logger.warning("[FACTORY] Adversarial humanization failed: %s", e)
 
     # ------------------------------------------------------------------
@@ -123,7 +123,7 @@ def create_orchestrator(
         try:
             from pylaai_real.unified_state_detector import UnifiedStateDetector
             state_detector = UnifiedStateDetector(images_path=images_path)
-        except Exception as e:
+        except (ImportError, ModuleNotFoundError) as e:
             logger.warning(f"[FACTORY] UnifiedStateDetector unavailable: {e}")
 
     vision_adapter = VisionAdapter(
@@ -155,7 +155,7 @@ def create_orchestrator(
             vlm = VLMFallback(config=vlm_config)
             vision_adapter = VLMVisionAdapter(primary=vision_adapter, vlm=vlm)
             logger.info("[FACTORY] VLM fallback enabled (provider=%s)", vlm_config.provider)
-        except Exception as e:
+        except (ImportError, ModuleNotFoundError, FileNotFoundError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.warning("[FACTORY] VLM fallback initialization failed: %s", e)
 
     # ------------------------------------------------------------------
@@ -173,7 +173,7 @@ def create_orchestrator(
             max_events=2000,
             metrics_dir=install_path / "observability"
         )
-    except Exception as e:
+    except (ImportError, ModuleNotFoundError) as e:
         logger.debug(f"[FACTORY] Observability unavailable: {e}")
 
     # Optional: OpenTelemetry tracing + metrics
@@ -196,7 +196,7 @@ def create_orchestrator(
                 export_interval_ms=otel_cfg.get("export_interval_ms", 60000.0),
             )
             logger.info("[FACTORY] OpenTelemetry initialized (tracing=%s)", tracing_ok)
-        except Exception as e:
+        except (ImportError, ModuleNotFoundError) as e:
             logger.warning("[FACTORY] OpenTelemetry init failed: %s", e)
 
     telemetry_adapter = TelemetryAdapter(observability=observability, otel_metrics=otel_metrics)
@@ -208,7 +208,7 @@ def create_orchestrator(
     try:
         from state_persistence import StatePersistence
         persistence = StatePersistence()
-    except Exception as e:
+    except (ImportError, ModuleNotFoundError) as e:
         logger.debug(f"[FACTORY] StatePersistence unavailable: {e}")
 
     persistence_adapter = PersistenceAdapter(persistence=persistence)
@@ -262,7 +262,7 @@ def _try_create_emulator_controller(config: Dict[str, Any]) -> Optional[Any]:
             return controller
         else:
             logger.warning("[FACTORY] EmulatorController connection failed")
-    except Exception as e:
+    except (ImportError, ModuleNotFoundError, ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, OSError) as e:
         logger.warning(f"[FACTORY] EmulatorController unavailable: {e}")
     return None
 
@@ -285,7 +285,7 @@ def _try_create_screenshot_taker(config: Dict[str, Any], emulator_controller) ->
             return st
         else:
             logger.warning(f"[FACTORY] ScreenshotTaker: window not found ({window_title})")
-    except Exception as e:
+    except (ImportError, ModuleNotFoundError, ConnectionError, ValueError, TypeError, RuntimeError, OSError) as e:
         logger.warning(f"[FACTORY] ScreenshotTaker unavailable: {e}")
     return None
 
@@ -305,6 +305,6 @@ def _try_create_detector(models_path: Path) -> Optional[Any]:
             return det
         else:
             logger.warning("[FACTORY] No YOLO model found")
-    except Exception as e:
+    except (ImportError, ModuleNotFoundError, FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, OSError, IOError) as e:
         logger.warning(f"[FACTORY] Detector unavailable: {e}")
     return None

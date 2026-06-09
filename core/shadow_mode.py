@@ -83,7 +83,7 @@ class ShadowMode:
         strategy_fn = self._strategies[self._active_strategy]
         try:
             shadow_action = strategy_fn(context)
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.debug("[SHADOW] Erro na estratégia %s: %s", self._active_strategy, e)
             return None
 

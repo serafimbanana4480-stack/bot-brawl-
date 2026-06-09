@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-05-17T14:08:12.234953+00:00",
+  "generated_at": "2026-05-30T03:42:39.332808+00:00",
   "models": {
     "bc_unified_best.pt": {
       "name": "bc_unified_best.pt",
-      "path": "c:\\Users\\rodri\\Desktop\\bot brawl\\models\\bc_unified_best.pt",
+      "path": "C:\\Users\\rodri\\Desktop\\bot brawl\\models\\bc_unified_best.pt",
       "sha256": "39b5bb9fa119ba9e4c975d2ffa8aa77359af1d138b37f0505f56bcac3cf30b4e",
       "classes": [],
       "status": "invalid",
@@ -11,24 +11,20 @@
     },
     "brawlstars_yolov8.pt": {
       "name": "brawlstars_yolov8.pt",
-      "path": "c:\\Users\\rodri\\Desktop\\bot brawl\\models\\brawlstars_yolov8.pt",
-      "sha256": "9853fd2e263caacd77d38abd1de25beda5907344562b524767322fb2589c4617",
+      "path": "C:\\Users\\rodri\\Desktop\\bot brawl\\models\\brawlstars_yolov8.pt",
+      "sha256": "14d79af00d440e59c43dd215fbc7d560afba779cb02c4809ea30d0cc1dd1e62c",
       "classes": [
         "Player",
-        "Bush",
         "Enemy",
         "Cubebox",
-        "Wall",
-        "Powerup",
-        "Bullet",
-        "Super"
+        "Powerup"
       ],
-      "status": "fake",
-      "reason": "Duplicate SHA-256 with: ['brawlstars_yolov8_8class.pt']"
+      "status": "valid",
+      "reason": "Brawl Stars-specific class labels verified"
     },
     "brawlstars_yolov8_8class.pt": {
       "name": "brawlstars_yolov8_8class.pt",
-      "path": "c:\\Users\\rodri\\Desktop\\bot brawl\\models\\brawlstars_yolov8_8class.pt",
+      "path": "C:\\Users\\rodri\\Desktop\\bot brawl\\models\\brawlstars_yolov8_8class.pt",
       "sha256": "9853fd2e263caacd77d38abd1de25beda5907344562b524767322fb2589c4617",
       "classes": [
         "Player",
@@ -40,12 +36,33 @@
         "Bullet",
         "Super"
       ],
-      "status": "fake",
-      "reason": "Duplicate SHA-256 with: ['brawlstars_yolov8.pt']"
+      "status": "valid",
+      "reason": "Brawl Stars-specific class labels verified"
+    },
+    "brawlstars_yolov8_backup.pt": {
+      "name": "brawlstars_yolov8_backup.pt",
+      "path": "C:\\Users\\rodri\\Desktop\\bot brawl\\models\\brawlstars_yolov8_backup.pt",
+      "sha256": "ec8ad63b1bd64350255ee83fbaa68c1cb9a741614c2372e215575c060534fdf6",
+      "classes": [
+        "Player",
+        "Enemy",
+        "Cubebox",
+        "Powerup"
+      ],
+      "status": "valid",
+      "reason": "Brawl Stars-specific class labels verified"
+    },
+    "brawlstars_yolov8_gpu.pt": {
+      "name": "brawlstars_yolov8_gpu.pt",
+      "path": "C:\\Users\\rodri\\Desktop\\bot brawl\\models\\brawlstars_yolov8_gpu.pt",
+      "sha256": "9b45f2abd8d325f5560e590a805c053ef1c046d2e7bea7ae3b4877717a60c400",
+      "classes": [],
+      "status": "invalid",
+      "reason": "Cannot load model / no metadata"
     },
     "cql_unified_best.pt": {
       "name": "cql_unified_best.pt",
-      "path": "c:\\Users\\rodri\\Desktop\\bot brawl\\models\\cql_unified_best.pt",
+      "path": "C:\\Users\\rodri\\Desktop\\bot brawl\\models\\cql_unified_best.pt",
       "sha256": "c608042d95ee65bb0429a7409d9150edcddade2032d9783e055c288c556bd670",
       "classes": [],
       "status": "invalid",
@@ -53,7 +70,7 @@
     },
     "yolov5s.pt": {
       "name": "yolov5s.pt",
-      "path": "c:\\Users\\rodri\\Desktop\\bot brawl\\models\\yolov5s.pt",
+      "path": "C:\\Users\\rodri\\Desktop\\bot brawl\\models\\yolov5s.pt",
       "sha256": "8b3b748c1e592ddd8868022e8732fde20025197328490623cc16c6f24d0782ee",
       "classes": [],
       "status": "invalid",
@@ -61,7 +78,7 @@
     },
     "yolov8n.pt": {
       "name": "yolov8n.pt",
-      "path": "c:\\Users\\rodri\\Desktop\\bot brawl\\models\\yolov8n.pt",
+      "path": "C:\\Users\\rodri\\Desktop\\bot brawl\\models\\yolov8n.pt",
       "sha256": "31e20dde3def09e2cf938c7be6fe23d9150bbbe503982af13345706515f2ef95",
       "classes": [
         "person",
@@ -150,7 +167,7 @@
     },
     "yolo_unified_best.pt": {
       "name": "yolo_unified_best.pt",
-      "path": "c:\\Users\\rodri\\Desktop\\bot brawl\\models\\yolo_unified_best.pt",
+      "path": "C:\\Users\\rodri\\Desktop\\bot brawl\\models\\yolo_unified_best.pt",
       "sha256": "09c07e637c47d62e47fbc4db137d54e2fe29d4745325a0faa5959a74b7e7e8c7",
       "classes": [
         "person",
@@ -236,19 +253,6 @@
       ],
       "status": "fake",
       "reason": "COCO-80 class labels detected \u2014 not trained for Brawl Stars"
-    },
-    "brawlstars_yolov8_gpu": {
-      "path": "models/brawlstars_yolov8_gpu.pt",
-      "sha256": "9b45f2abd8d325f5560e590a805c053ef1c046d2e7bea7ae3b4877717a60c400",
-      "source": "trained",
-      "classes": [
-        "player",
-        "enemy",
-        "cubebox",
-        "powerup"
-      ],
-      "status": "valid",
-      "reason": "Trained on merged_v2 dataset (2751 images) with YOLOv8s, 100 epochs, GPU RTX 3060 Ti"
     }
   },
   "quarantined": []

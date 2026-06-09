@@ -357,7 +357,7 @@ class BehavioralProfile:
                 json.dump(data, f, indent=2)
             logger.info("[BEHAVIORAL_PROFILE] Saved to %s", filepath)
             return True
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
             logger.error("[BEHAVIORAL_PROFILE] Failed to save: %s", e)
             return False
 
@@ -385,7 +385,7 @@ class BehavioralProfile:
 
             logger.info("[BEHAVIORAL_PROFILE] Loaded from %s", filepath)
             return True
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
             logger.error("[BEHAVIORAL_PROFILE] Failed to load: %s", e)
             return False
 

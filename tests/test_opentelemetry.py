@@ -34,16 +34,25 @@ class TestInitializeTracing:
             assert initialize_tracing(enabled=True) is False
 
     def test_console_exporter_initializes(self):
-        with patch("core.opentelemetry_tracing.HAS_OTEL", True):
-            with patch("core.opentelemetry_tracing.trace") as mock_trace:
-                mock_provider = MagicMock()
-                mock_trace.TracerProvider.return_value = mock_provider
-                mock_trace.get_tracer_provider.return_value = mock_provider
-                mock_trace.set_tracer_provider.return_value = None
+        import sys
+        mock_export = MagicMock()
+        sys.modules["opentelemetry.sdk.trace.export"] = mock_export
+        try:
+            with patch("core.opentelemetry_tracing.HAS_OTEL", True):
+                with patch("core.opentelemetry_tracing.trace") as mock_trace, \
+                     patch("core.opentelemetry_tracing.TracerProvider", create=True) as mock_tp, \
+                     patch("core.opentelemetry_tracing.BatchSpanProcessor", create=True) as mock_bsp:
+                    mock_provider = MagicMock()
+                    mock_tp.return_value = mock_provider
+                    mock_trace.get_tracer_provider.return_value = mock_provider
+                    mock_trace.set_tracer_provider.return_value = None
 
-                ok = initialize_tracing(enabled=True, exporter_type="console")
-                assert ok is True
-                mock_trace.set_tracer_provider.assert_called_once()
+                    ok = initialize_tracing(enabled=True, exporter_type="console")
+                    assert ok is True
+                    mock_trace.set_tracer_provider.assert_called_once()
+        finally:
+            if "opentelemetry.sdk.trace.export" in sys.modules:
+                del sys.modules["opentelemetry.sdk.trace.export"]
 
     def test_shutdown_does_not_crash(self):
         shutdown_tracing()  # should not raise even if never initialized

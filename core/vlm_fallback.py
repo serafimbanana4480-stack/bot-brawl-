@@ -135,7 +135,7 @@ class VLMFallback:
         provider_method = getattr(self, f"_call_{self.cfg.provider}", self._call_openai)
         try:
             result = provider_method(screenshot)
-        except Exception as e:
+        except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.error("[VLM] Provider %s failed: %s", self.cfg.provider, e)
             result = VLMResult(error=str(e), confidence=0.0)
 

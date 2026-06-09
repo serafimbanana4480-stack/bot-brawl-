@@ -177,7 +177,7 @@ class LearningMetricsCollector:
             with open(self.session_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             logger.debug("[LEARNING_METRICS] Sessão persistida: %s matches", len(self.matches))
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
             logger.warning("[LEARNING_METRICS] Falha ao persistir: %s", e)
 
     def get_summary(self) -> Dict[str, Any]:
@@ -220,7 +220,7 @@ class LearningMetricsCollector:
                 with open(self.session_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 return data.get("matches", [])
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
             logger.debug("[LEARNING_METRICS] Falha ao ler histórico: %s", e)
         return []
 

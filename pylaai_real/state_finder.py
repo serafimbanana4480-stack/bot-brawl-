@@ -3,8 +3,12 @@ state_finder.py
 
 Identifica o estado atual do jogo usando template matching.
 Carrega regioes de lobby.toml em vez de hardcoded (Fix Error #13).
+
+DEPRECATED: Use pylaai_real.unified_state_detector.UnifiedStateDetector instead.
+This module is kept for backward compatibility only.
 """
 
+import warnings
 import numpy as np
 import cv2
 from pathlib import Path
@@ -12,6 +16,12 @@ from typing import Optional, Dict, Tuple
 import logging
 
 logger = logging.getLogger(__name__)
+
+warnings.warn(
+    "Deprecated: use pylaai_real.unified_state_detector.UnifiedStateDetector instead",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 class StateFinder:

@@ -114,7 +114,7 @@ class LearningModeController:
                     return True
                 else:
                     logger.warning("[LEARNING_MODE] enter_training_cave retornou insucesso")
-            except Exception as e:
+            except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.warning("[LEARNING_MODE] Erro ao entrar na Training Cave: %s", e)
         else:
             logger.warning("[LEARNING_MODE] LobbyAutomator não tem enter_training_cave")
@@ -149,7 +149,7 @@ class LearningModeController:
                 if result and getattr(result, 'success', False):
                     self._in_training_cave = False
                     return True
-            except Exception as e:
+            except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.warning("[LEARNING_MODE] Erro ao sair da Training Cave: %s", e)
 
         # Fallback manual
@@ -232,7 +232,7 @@ class LearningModeController:
                 if state in ('lobby', 'end', 'unknown'):
                     logger.info("[LEARNING_MODE] Estado mudou para '%s' — partida terminada", state)
                     return True, f"state_changed_to_{state}"
-            except Exception:
+            except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass
 
         return False, ""
@@ -258,7 +258,7 @@ class LearningModeController:
                     logger.info("[LEARNING_MODE] Treino reiniciado via LobbyAutomator")
                     time.sleep(2.0)
                     return True
-            except Exception as e:
+            except (ValueError, TypeError, RuntimeError, AttributeError) as e:
                 logger.warning("[LEARNING_MODE] Falha em restart_training: %s", e)
 
         # Fallback: pause → restart
@@ -358,7 +358,7 @@ class LearningModeController:
         if self.screenshot is not None and hasattr(self.screenshot, 'take'):
             try:
                 return self.screenshot.take()
-            except Exception as e:
+            except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.debug("[LEARNING_MODE] Screenshot falhou: %s", e)
         return None
 
@@ -385,6 +385,6 @@ class LearningModeController:
             # Se a região central for muito clara e com pouca variância, pode ser o menu de pause/restart
             if mean_val > 180 and gray.std() < 60:
                 return True
-        except Exception:
+        except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, cv2.error):
             pass
         return False

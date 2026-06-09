@@ -14,9 +14,6 @@ import logging
 import time
 from pathlib import Path
 from datetime import datetime
-import sys
-
-sys.path.insert(0, str(Path(__file__).parent))
 
 logger = logging.getLogger("live_collector")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")

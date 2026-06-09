@@ -43,7 +43,6 @@ from collections import defaultdict
 import cv2
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from training.class_schema import CORE_CLASSES, EXTENDED_CLASSES, get_schema
 
 logging.basicConfig(

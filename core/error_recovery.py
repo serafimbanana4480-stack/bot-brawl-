@@ -23,8 +23,42 @@ from enum import Enum
 from functools import wraps
 from collections import deque, defaultdict
 import threading
+import subprocess
 
-logger = logging.getLogger(__name__)
+from core.logging_config import get_logger
+
+logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Tenacity-based circuit breakers
+# ---------------------------------------------------------------------------
+try:
+    from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_result, retry_if_exception_type
+    HAS_TENACITY = True
+except ImportError:  # pragma: no cover
+    HAS_TENACITY = False
+
+
+def _is_false_or_none(val):
+    return val is False or val is None
+
+
+def _make_retry(min_wait: float, max_wait: float):
+    if HAS_TENACITY:
+        return retry(
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(min=min_wait, max=max_wait),
+            retry=(retry_if_result(_is_false_or_none) | retry_if_exception_type(Exception)),
+        )
+    else:
+        def _identity(func):
+            return func
+        return _identity
+
+
+adb_retry = _make_retry(1, 10)
+screenshot_retry = _make_retry(0.5, 5)
+inference_retry = _make_retry(1, 10)
 
 
 class ErrorType(Enum):
@@ -477,7 +511,7 @@ class ErrorRecoverySystem:
                 else:
                     logger.debug(f"[ERROR_RECOVERY] Recovery falhou: {action.description}")
             
-            except Exception as e:
+            except (ValueError, TypeError, RuntimeError, AttributeError) as e:
                 logger.error(f"[ERROR_RECOVERY] Erro ao executar recovery: {e}")
         
         # Todas as tentativas falharam
@@ -521,7 +555,7 @@ class ErrorRecoverySystem:
                     wrapper.screenshot.capture_adb()
                     logger.info("[ERROR_RECOVERY] Usando ADB screencap como fallback")
                     return True
-            except Exception as e:
+            except (ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.error(f"[ERROR_RECOVERY] Fallback screenshot falhou: {e}")
         return False
     
@@ -534,7 +568,7 @@ class ErrorRecoverySystem:
                 wrapper.screenshot = ScreenshotTaker()
                 logger.info("[ERROR_RECOVERY] Screenshot taker reiniciado")
                 return True
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError, ConnectionError, ValueError, TypeError, RuntimeError, OSError) as e:
                 logger.error(f"[ERROR_RECOVERY] Falha ao reiniciar screenshot taker: {e}")
         return False
     
@@ -546,7 +580,7 @@ class ErrorRecoverySystem:
                 if hasattr(wrapper.state_manager, 'state_finder'):
                     logger.info("[ERROR_RECOVERY] Usando StateFinder como fallback")
                     return True
-            except Exception as e:
+            except (ValueError, TypeError, RuntimeError, AttributeError) as e:
                 logger.error(f"[ERROR_RECOVERY] Fallback state detector falhou: {e}")
         return False
     
@@ -557,7 +591,7 @@ class ErrorRecoverySystem:
                 # Usar apenas detecção por pixel
                 logger.info("[ERROR_RECOVERY] Degrading para detecção por pixel apenas")
                 return True
-            except Exception as e:
+            except (ValueError, TypeError, RuntimeError, AttributeError) as e:
                 logger.error(f"[ERROR_RECOVERY] Degradation falhou: {e}")
         return False
     
@@ -568,7 +602,7 @@ class ErrorRecoverySystem:
                 wrapper.emulator_controller.reconnect()
                 logger.info("[ERROR_RECOVERY] Conexão ADB reiniciada")
                 return True
-            except Exception as e:
+            except (ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.error(f"[ERROR_RECOVERY] Falha ao reiniciar ADB: {e}")
         return False
     
@@ -602,7 +636,7 @@ class ErrorRecoverySystem:
                         if hasattr(ec, 'adb') and hasattr(ec.adb, 'ping'):
                             try:
                                 ec.adb.ping()
-                            except Exception:
+                            except (ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
                                 logger.warning("[ERROR_RECOVERY] ADB connected but ping failed, retrying...")
                                 if attempt < max_attempts:
                                     delay = base_delay * (2 ** (attempt - 1))
@@ -620,7 +654,7 @@ class ErrorRecoverySystem:
                     logger.warning("[ERROR_RECOVERY] No emulator_controller available for reconnect")
                     return False
 
-            except Exception as e:
+            except (ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.error(f"[ERROR_RECOVERY] ADB reconnect attempt {attempt} exception: {e}")
 
             # Exponential backoff before next attempt
@@ -637,7 +671,7 @@ class ErrorRecoverySystem:
         try:
             logger.info("[ERROR_RECOVERY] Degrading vision system para heurísticas")
             return True
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError, AttributeError) as e:
             logger.error(f"[ERROR_RECOVERY] Vision degradation falhou: {e}")
         return False
     
@@ -648,7 +682,7 @@ class ErrorRecoverySystem:
             gc.collect()
             logger.info("[ERROR_RECOVERY] Garbage collection executada")
             return True
-        except Exception as e:
+        except (ImportError, ModuleNotFoundError, TypeError) as e:
             logger.error(f"[ERROR_RECOVERY] Memory reduction falhou: {e}")
         return False
     
@@ -692,7 +726,7 @@ def with_error_recovery(
             try:
                 return func(*args, **kwargs)
             
-            except Exception as e:
+            except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 # Classificar erro
                 context = error_recovery.classify_error(e, component, operation)
                 
@@ -703,7 +737,7 @@ def with_error_recovery(
                     # Tentar novamente após recovery
                     try:
                         return func(*args, **kwargs)
-                    except Exception as e2:
+                    except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                         # Se falhar novamente, propagar erro
                         logger.error(f"[ERROR_RECOVERY] Função falhou mesmo após recovery: {e2}")
                         raise

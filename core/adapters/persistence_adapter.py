@@ -27,7 +27,7 @@ class PersistenceAdapter(PersistencePort):
             if hasattr(self._persist, "save_checkpoint"):
                 self._persist.save_checkpoint(state, label)
                 return True
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.warning(f"[PERSISTENCE_ADAPTER] Save failed: {e}")
         return False
 
@@ -37,7 +37,7 @@ class PersistenceAdapter(PersistencePort):
         try:
             if hasattr(self._persist, "load_checkpoint"):
                 return self._persist.load_checkpoint(label)
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.warning(f"[PERSISTENCE_ADAPTER] Load failed: {e}")
         return None
 
@@ -47,6 +47,6 @@ class PersistenceAdapter(PersistencePort):
         try:
             if hasattr(self._persist, "list_checkpoints"):
                 return self._persist.list_checkpoints()
-        except Exception:
+        except (ValueError, TypeError, RuntimeError, AttributeError, OSError):
             pass
         return {}

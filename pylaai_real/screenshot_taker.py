@@ -26,9 +26,10 @@ class ScreenshotTaker:
         "GameLoop",
     )
 
-    def __init__(self, window_title="auto"):
+    def __init__(self, window_title="auto", normalize_resolution=False):
         self.window_title = window_title
         self.window_handle = None
+        self.normalize_resolution = normalize_resolution
 
     def _candidate_titles(self):
         """Return window titles to probe, preserving caller preference first."""
@@ -281,10 +282,13 @@ class ScreenshotTaker:
                     self.window_handle = None  # Forçar re-encontrar janela no próximo tick
                     return None
 
-                # NORMALIZAÇÃO: Redimensionar para 1920x1080
-                if img.shape[0] != 1080 or img.shape[1] != 1920:
-                    logger.info(f"[SCREENSHOT] Redimensionando de {img.shape} para (1080, 1920)")
-                    img = cv2.resize(img, (1920, 1080), interpolation=cv2.INTER_AREA)
+                # NORMALIZAÇÃO opcional: Redimensionar para 1920x1080 apenas se pedido
+                if self.normalize_resolution:
+                    if img.shape[0] != 1080 or img.shape[1] != 1920:
+                        logger.info(f"[SCREENSHOT] Redimensionando de {img.shape} para (1080, 1920)")
+                        img = cv2.resize(img, (1920, 1080), interpolation=cv2.INTER_AREA)
+                else:
+                    logger.info(f"[SCREENSHOT] Usando resolução nativa: {img.shape}")
 
                 logger.info(f"[SCREENSHOT] Captura concluída com sucesso")
                 return img

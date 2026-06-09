@@ -191,6 +191,12 @@ class DynamicCoordinates:
         return (sx, sy)
 
 
+    def scale_from_emulator(self, x: int, y: int) -> Tuple[int, int]:
+        """Converte coordenadas da resolução atual do emulador para 1920x1080."""
+        sx = round(x * 1920 / self.w) if self.w > 0 else x
+        sy = round(y * 1080 / self.h) if self.h > 0 else y
+        return (sx, sy)
+
 
 class UnifiedStateDetector:
     """
@@ -207,7 +213,10 @@ class UnifiedStateDetector:
 
     # RGB reference colors (from BrawlStarsBot, calibrated)
     _DEFEATED_COLOR = (62, 0, 0)
-    _PLAY_COLOR = (224, 186, 8)
+    # UPDATED: Modern Brawl Stars Play button is yellow-orange gradient ~RGB(255,200,50)
+    # Old value (224, 186, 8) was too dark for current UI
+    _PLAY_COLOR = (240, 200, 10)      # Calibrated against real screenshots (2025 UI)
+    _PLAY_COLOR_ALT = (230, 190, 5)   # Alternative shade for gradient variation
     _LOAD_COLOR = (50, 255, 50)  # Verde brilhante do spinner de loading
     _PROCEED_COLOR = (35, 115, 255)
     _CONNECTION_LOST_COLOR = (66, 66, 66)
@@ -225,7 +234,7 @@ class UnifiedStateDetector:
     # Tolerâncias calibradas por tipo de deteção
     _TOLERANCES = {
         'defeated': 12,
-        'play': 20,
+        'play': 35,  # Aumentado para acomodar gradiente amarelo-laranja moderno
         'load': 25,  # Tolerancia reduzida para evitar falsos positivos em pixels escuros
         'proceed': 30,
         'connection': 10,
@@ -254,6 +263,12 @@ class UnifiedStateDetector:
         self._min_votes_to_change = 3  # Precisa de 3/5 votos para mudar de estado
         self._current_stable_state = "unknown"
         self.ocr_detector = ocr_detector if ocr_detector is not None else (OCRStateDetector() if OCRStateDetector else None)
+
+        # Matchmaking timeout intelligence
+        self._matchmaking_start_time: Optional[float] = None
+        self._ever_seen_lobby = False
+        self._matchmaking_timeout_seconds = 15.0
+        self._last_screenshot_size: Tuple[int, int] = (window_w, window_h)
 
         logger.info(f"[UNIFIED_DETECTOR] Inicializado: {window_w}x{window_h}, "
                      f"images_path={images_path}")
@@ -419,7 +434,7 @@ class UnifiedStateDetector:
             logger.debug(f"[UNIFIED_DETECTOR] Template match error: {e}")
             return False, 0.0, None
 
-    def _detect_by_pixels(self, image: np.ndarray) -> DetectedState:
+    def _detect_by_pixels(self, image: np.ndarray, screen_hint: Optional[str] = None) -> DetectedState:
         """
         Detecção rápida por pixel matching (como BrawlStarsBot).
         Usa a screenshot capturada, não o ecrã do PC.
@@ -432,6 +447,76 @@ class UnifiedStateDetector:
         def sc(coord):
             return (min(round(coord[0] * w / c.w), w - 1),
                     min(round(coord[1] * h / c.h), h - 1))
+
+        # Pre-compute common regions to avoid NameError in later checks
+        joy_x, joy_y = sc(c.joystick_center)
+        atk_x, atk_y = sc(c.attack_button_center)
+        hp_x, hp_y = sc(c.player_hp_bar)
+        timer_x, timer_y = sc(c.match_timer)
+
+        joy_region = None
+        atk_region = None
+        if (0 < joy_x < w and 0 < joy_y < h and
+            0 < atk_x < w and 0 < atk_y < h):
+            joy_region = image[max(0, joy_y - 20):min(h, joy_y + 20),
+                               max(0, joy_x - 20):min(w, joy_x + 20)]
+            atk_region = image[max(0, atk_y - 30):min(h, atk_y + 30),
+                               max(0, atk_x - 30):min(w, atk_x + 30)]
+
+        # --- HELPER: Check if lobby indicators are present ---
+        def _lobby_indicators_present() -> Tuple[bool, Dict]:
+            """Returns (True, details) if clear lobby UI elements are detected."""
+            indicators = {}
+            # Play button color (modern yellow-orange)
+            play_match = self._pixel_match_region(
+                image, sc(c.play_button)[0], sc(c.play_button)[1], self._PLAY_COLOR,
+                tolerance=self._TOLERANCES['play'], sample_radius=6
+            )
+            play_match_alt = self._pixel_match_region(
+                image, sc(c.play_button)[0], sc(c.play_button)[1], self._PLAY_COLOR_ALT,
+                tolerance=self._TOLERANCES['play'], sample_radius=6
+            )
+            indicators['play_match'] = max(play_match, play_match_alt)
+
+            # Shop gold icon in top-right
+            shop_match = self._pixel_match_region(
+                image, sc(c.shop_icon_area)[0], sc(c.shop_icon_area)[1], self._SHOP_GOLD_COLOR,
+                tolerance=self._TOLERANCES['shop'], sample_radius=6
+            )
+            indicators['shop_match'] = shop_match
+
+            # News close X in top-right
+            news_match = self._pixel_match_region(
+                image, sc(c.news_close_button)[0], sc(c.news_close_button)[1], self._NEWS_CLOSE_COLOR,
+                tolerance=self._TOLERANCES['news'], sample_radius=4
+            )
+            indicators['news_match'] = news_match
+
+            # Battle log button (top-left area, should be visible in lobby)
+            battle_log_match = self._pixel_match_region(
+                image, sc(c.battle_log_button)[0], sc(c.battle_log_button)[1], (255, 255, 255),
+                tolerance=30, sample_radius=4
+            )
+            indicators['battle_log_match'] = battle_log_match
+
+            # HSV-based play button detection (more robust to gradient)
+            play_x, play_y = sc(c.play_button)
+            hsv_play = self._detect_play_by_hsv(
+                image,
+                (max(0, play_x - 30), max(0, play_y - 30),
+                 min(w, play_x + 30), min(h, play_y + 30)),
+                v_min=150
+            )
+            indicators['hsv_play'] = hsv_play
+
+            is_lobby = (
+                indicators['play_match'] > 0.25 or
+                indicators['hsv_play'] > 0.3 or
+                indicators['shop_match'] > 0.25 or
+                indicators['news_match'] > 0.3 or
+                indicators['battle_log_match'] > 0.4
+            )
+            return is_lobby, indicators
 
         # 1. Play Again button (end of match, yellow)
         match_frac = self._pixel_match_region(
@@ -456,7 +541,9 @@ class UnifiedStateDetector:
             image, *sc(c.defeated2), self._DEFEATED_COLOR,
             tolerance=self._TOLERANCES['defeated']
         )
-        if (d1_frac > 0.6 or d2_frac > 0.6) and (screen_state_hint == "in_game" or screen_state_hint == "end"):
+        # FIX NameError: use screen_hint parameter instead of undefined screen_state_hint
+        hint_ok = screen_hint in ("in_game", "end") if screen_hint else False
+        if (d1_frac > 0.6 or d2_frac > 0.6) and hint_ok:
             return DetectedState(
                 state="end",
                 confidence=max(d1_frac, d2_frac),
@@ -483,36 +570,84 @@ class UnifiedStateDetector:
                 details={"sub_type": "star_drop", "match_fraction": max(s1_frac, s2_frac)}
             )
 
-        # 5. In-game heuristic: check for joystick area (moved BEFORE lobby - stronger signals) (dark region) + attack button area
-        # If joystick area is mostly dark AND attack button area has distinctive color, we're in-game
-        joy_x, joy_y = sc(c.joystick_center)
-        atk_x, atk_y = sc(c.attack_button_center)
-        hp_x, hp_y = sc(c.player_hp_bar)
-        timer_x, timer_y = sc(c.match_timer)
+        # 5. Play button (main lobby, yellow-orange) — CHECK LOBBY BEFORE in_game
+        match_frac = self._pixel_match_region(
+            image, *sc(c.play_button), self._PLAY_COLOR,
+            tolerance=self._TOLERANCES['play']
+        )
+        match_frac_alt = self._pixel_match_region(
+            image, *sc(c.play_button), self._PLAY_COLOR_ALT,
+            tolerance=self._TOLERANCES['play']
+        )
+        play_match = max(match_frac, match_frac_alt)
+        if play_match > 0.25:
+            # Cross-check: if joystick is very dark AND HP bar exists, this is in-game
+            joy_dark = joy_region is not None and joy_region.size > 0 and np.mean(joy_region) < 60
+            hp_exists = False
+            hp_frac_verify = 0.0
+            if 0 < hp_x < w and 0 < hp_y < h:
+                hp_frac_verify = self._pixel_match_region(
+                    image, hp_x, hp_y, self._PLAYER_HP_BAR,
+                    tolerance=self._TOLERANCES['hp'], sample_radius=5
+                )
+                hp_exists = hp_frac_verify > 0.20
+            if joy_dark and hp_exists:
+                return DetectedState(
+                    state="in_game",
+                    confidence=0.7,
+                    method="pixel",
+                    details={"sub_type": "play_button_override_in_game", "play_match": float(play_match), "hp_match": float(hp_frac_verify)}
+                )
+            return DetectedState(
+                state="lobby",
+                confidence=play_match,
+                method="pixel",
+                button_coords=sc(c.play_button),
+                details={"sub_type": "play_button", "match_fraction": play_match}
+            )
 
+        # 5b. HSV fallback for lobby detection (catches gradient play buttons that RGB misses)
+        play_x, play_y = sc(c.play_button)
+        hsv_play_conf = self._detect_play_by_hsv(
+            image,
+            (max(0, play_x - 30), max(0, play_y - 30),
+             min(w, play_x + 30), min(h, play_y + 30)),
+            v_min=150
+        )
+        if hsv_play_conf > 0.35:
+            # Verify not in-game
+            joy_dark = joy_region is not None and joy_region.size > 0 and np.mean(joy_region) < 60
+            hp_exists = False
+            if 0 < hp_x < w and 0 < hp_y < h:
+                hp_frac_verify = self._pixel_match_region(
+                    image, hp_x, hp_y, self._PLAYER_HP_BAR,
+                    tolerance=self._TOLERANCES['hp'], sample_radius=5
+                )
+                hp_exists = hp_frac_verify > 0.20
+            if not (joy_dark and hp_exists):
+                return DetectedState(
+                    state="lobby",
+                    confidence=hsv_play_conf,
+                    method="pixel",
+                    button_coords=sc(c.play_button),
+                    details={"sub_type": "play_button_hsv", "match_fraction": hsv_play_conf}
+                )
+
+        # 6. In-game heuristic — only after lobby is ruled out
         in_game_conf = 0.0
         in_game_details = {}
 
-        if (0 < joy_x < w and 0 < joy_y < h and
-            0 < atk_x < w and 0 < atk_y < h):
-            # Sample joystick area - should be dark in-game
-            joy_region = image[max(0,joy_y-20):min(h,joy_y+20),
-                               max(0,joy_x-20):min(w,joy_x+20)]
-            if joy_region.size > 0:
-                joy_brightness = np.mean(joy_region)
-                # Also check attack button area - should have distinctive color in-game
-                atk_region = image[max(0,atk_y-30):min(h,atk_y+30),
-                                   max(0,atk_x-30):min(w,atk_x+30)]
-                atk_brightness = np.mean(atk_region) if atk_region.size > 0 else 255
-                atk_std = np.std(atk_region) if atk_region.size > 0 else 0
-                in_game_details["brightness"] = float(joy_brightness)
-                in_game_details["atk_brightness"] = float(atk_brightness)
-                in_game_details["atk_std"] = float(atk_std)
-                # In-game: joystick area is dark (brightness < 150) AND attack area has some content
-                if joy_brightness < 50:
-                    in_game_conf = 0.35
-                    if atk_region.size > 0 and atk_std > 15:
-                        in_game_conf = 0.55
+        if joy_region is not None and joy_region.size > 0:
+            joy_brightness = np.mean(joy_region)
+            atk_brightness = np.mean(atk_region) if atk_region is not None and atk_region.size > 0 else 255
+            atk_std = np.std(atk_region) if atk_region is not None and atk_region.size > 0 else 0
+            in_game_details["brightness"] = float(joy_brightness)
+            in_game_details["atk_brightness"] = float(atk_brightness)
+            in_game_details["atk_std"] = float(atk_std)
+            if joy_brightness < 60:
+                in_game_conf = 0.35
+                if atk_region is not None and atk_region.size > 0 and atk_std > 15:
+                    in_game_conf = 0.55
 
         # Verificar HP bar (azul/ciano no topo esquerdo) para confirmar in_game
         if 0 < hp_x < w and 0 < hp_y < h:
@@ -520,22 +655,12 @@ class UnifiedStateDetector:
                 image, hp_x, hp_y, self._PLAYER_HP_BAR,
                 tolerance=self._TOLERANCES['hp'], sample_radius=5
             )
-            if hp_frac > 0.15:
+            if hp_frac > 0.20:
                 in_game_conf = max(in_game_conf, 0.65)
                 in_game_details["hp_match"] = float(hp_frac)
 
-        # Verificar timer no topo centro (branco)
-        if 0 < timer_x < w and 0 < timer_y < h:
-            timer_region = image[max(0,timer_y-8):min(h,timer_y+8),
-                                 max(0,timer_x-25):min(w,timer_x+25)]
-            if timer_region.size > 0:
-                timer_brightness = np.mean(timer_region)
-                timer_std = np.std(timer_region)
-                # Timer: area pequena branca com texto (alto contraste)
-                if timer_brightness > 100 and timer_std > 25:
-                    in_game_conf = max(in_game_conf, 0.6)
-                    in_game_details["timer_brightness"] = float(timer_brightness)
-                    in_game_details["timer_std"] = float(timer_std)
+        # Timer heuristic DISABLED — too many false positives in lobby
+        # (lobby UI elements in top-center trigger brightness>100 and std>25)
 
         if in_game_conf >= 0.35:
             return DetectedState(
@@ -545,46 +670,32 @@ class UnifiedStateDetector:
                 details={"sub_type": "joystick_heuristic", **in_game_details}
             )
 
-        # 6. Play button (main lobby, yellow)
-        # CROSS-CHECK: if joystick is dark AND HP bar exists, this is in-game (super/attack buttons can be yellow)
-        match_frac = self._pixel_match_region(
-            image, *sc(c.play_button), self._PLAY_COLOR,
-            tolerance=self._TOLERANCES['play']
+        # 6b. HSV fallback for lobby detection (catches gradient play buttons that RGB misses)
+        play_x, play_y = sc(c.play_button)
+        hsv_play_conf = self._detect_play_by_hsv(
+            image,
+            (max(0, play_x - 30), max(0, play_y - 30),
+             min(w, play_x + 30), min(h, play_y + 30)),
+            v_min=150
         )
-        if match_frac > 0.3:
-            # Verify it's actually lobby, not in-game with yellow super/attack buttons
-            joy_dark = False
+        if hsv_play_conf > 0.35:
+            # Verify not in-game
+            joy_dark = joy_region is not None and joy_region.size > 0 and np.mean(joy_region) < 150
             hp_exists = False
-            hp_frac_verify = 0.0
-            try:
-                if joy_region is not None and joy_region.size > 0:
-                    joy_dark = np.mean(joy_region) < 150
-            except NameError:
-                pass
-            try:
-                if 0 < hp_x < w and 0 < hp_y < h:
-                    hp_frac_verify = self._pixel_match_region(
-                        image, hp_x, hp_y, self._PLAYER_HP_BAR,
-                        tolerance=self._TOLERANCES['hp'], sample_radius=5
-                    )
-                    hp_exists = hp_frac_verify > 0.15
-            except NameError:
-                pass
-            if joy_dark and hp_exists:
-                # Strong in-game signals override weak play button match
-                return DetectedState(
-                    state="in_game",
-                    confidence=0.7,
-                    method="pixel",
-                    details={"sub_type": "play_button_override_in_game", "play_match": float(match_frac), "hp_match": float(hp_frac_verify)}
+            if 0 < hp_x < w and 0 < hp_y < h:
+                hp_frac_verify = self._pixel_match_region(
+                    image, hp_x, hp_y, self._PLAYER_HP_BAR,
+                    tolerance=self._TOLERANCES['hp'], sample_radius=5
                 )
-            return DetectedState(
-                state="lobby",
-                confidence=match_frac,
-                method="pixel",
-                button_coords=sc(c.play_button),
-                details={"sub_type": "play_button", "match_fraction": match_frac}
-            )
+                hp_exists = hp_frac_verify > 0.15
+            if not (joy_dark and hp_exists):
+                return DetectedState(
+                    state="lobby",
+                    confidence=hsv_play_conf,
+                    method="pixel",
+                    button_coords=sc(c.play_button),
+                    details={"sub_type": "play_button_hsv", "match_fraction": hsv_play_conf}
+                )
 
         # 7. Proceed button (blue)
         match_frac = self._pixel_match_region(
@@ -614,7 +725,7 @@ class UnifiedStateDetector:
                 details={"sub_type": "connection_lost", "match_fraction": match_frac}
             )
 
-        # 9. Loading (green spinner) - verificado DEPOIS de lobby/end para evitar falsos positivos
+        # 9. Loading (green spinner)
         match_frac = self._pixel_match_region(
             image, *sc(c.load_button), self._LOAD_COLOR,
             tolerance=self._TOLERANCES['load']
@@ -628,41 +739,43 @@ class UnifiedStateDetector:
             )
 
         # 10. Matchmaking detection: dark screen with loading spinner or player icons
-        # During matchmaking, the screen is mostly dark with occasional UI elements
-        # Distinguish from loading by checking for absence of bright green load indicator
-        center_region = image[h//3:2*h//3, w//3:2*w//3]
+        # CRITICAL FIX: Strong negative checks to exclude lobby before calling matchmaking.
+        center_region = image[h // 3:2 * h // 3, w // 3:2 * w // 3]
         if center_region.size > 0:
-            center_brightness = np.mean(center_region)
-            center_std = np.std(center_region)
-            # Matchmaking: relatively dark center (brightness 30-140) with some UI variation
-            # and NO green load indicator in the bottom-right area
-            load_px = sc(c.load_button)
-            load_match = self._pixel_match_region(
-                image, load_px[0], load_px[1], self._LOAD_COLOR,
-                tolerance=self._TOLERANCES['load'], sample_radius=6
-            )
-            if 20 < center_brightness < 140 and center_std > 8 and load_match < 0.15:
-                # Additional check: no bright play button (lobby) and no thumbs down (end)
-                play_match = self._pixel_match_region(
-                    image, sc(c.play_button)[0], sc(c.play_button)[1], self._PLAY_COLOR,
-                    tolerance=self._TOLERANCES['play'], sample_radius=6
+            center_brightness = float(np.mean(center_region))
+            center_std = float(np.std(center_region))
+
+            # Strong negative check: if lobby UI indicators are present, this is NOT matchmaking
+            is_lobby_ui, lobby_indicators = _lobby_indicators_present()
+            if not is_lobby_ui:
+                # NO green load indicator in the bottom-right area
+                load_px = sc(c.load_button)
+                load_match = self._pixel_match_region(
+                    image, load_px[0], load_px[1], self._LOAD_COLOR,
+                    tolerance=self._TOLERANCES['load'], sample_radius=6
                 )
+
+                # NO defeated red corners
                 defeated_match = self._pixel_match_region(
                     image, sc(c.defeated1)[0], sc(c.defeated1)[1], self._DEFEATED_COLOR,
                     tolerance=self._TOLERANCES['defeated'], sample_radius=6
                 )
-                if play_match < 0.2 and defeated_match < 0.3:
+
+                if (20 < center_brightness < 100 and center_std > 8 and
+                        load_match < 0.15 and defeated_match < 0.3):
                     return DetectedState(
                         state="matchmaking",
                         confidence=0.45,
                         method="pixel",
                         details={"sub_type": "matchmaking_dark_screen",
-                                 "center_brightness": float(center_brightness),
-                                 "center_std": float(center_std),
+                                 "center_brightness": center_brightness,
+                                 "center_std": center_std,
                                  "load_match": float(load_match)}
                     )
+            else:
+                logger.debug(f"[UNIFIED_DETECTOR] Matchmaking heuristic rejected: lobby indicators present {lobby_indicators}")
 
-        # 10. Tutorial (setas azuis no centro inferior)
+        # 11. Tutorial (setas azuis no centro inferior)
         tut_frac = self._pixel_match_region(
             image, *sc(c.tutorial_tap_area), self._TUTORIAL_ARROW_COLOR,
             tolerance=self._TOLERANCES['tutorial'], sample_radius=8
@@ -676,7 +789,7 @@ class UnifiedStateDetector:
                 details={"sub_type": "tutorial_arrow", "match_fraction": tut_frac}
             )
 
-        # 11. Shop (moedas douradas no topo direito)
+        # 12. Shop (moedas douradas no topo direito)
         shop_frac = self._pixel_match_region(
             image, *sc(c.shop_icon_area), self._SHOP_GOLD_COLOR,
             tolerance=self._TOLERANCES['shop'], sample_radius=6
@@ -690,7 +803,7 @@ class UnifiedStateDetector:
                 details={"sub_type": "shop_gold_icon", "match_fraction": shop_frac}
             )
 
-        # 12. News/Brawl Talk (botao X vermelho no canto superior direito)
+        # 13. News/Brawl Talk (botao X vermelho no canto superior direito)
         news_frac = self._pixel_match_region(
             image, *sc(c.news_close_button), self._NEWS_CLOSE_COLOR,
             tolerance=self._TOLERANCES['news'], sample_radius=4
@@ -704,7 +817,7 @@ class UnifiedStateDetector:
                 details={"sub_type": "news_close_x", "match_fraction": news_frac}
             )
 
-        # 13. Brawler unlock (texto dourado central)
+        # 14. Brawler unlock (texto dourado central)
         unlock_frac = self._pixel_match_region(
             image, *sc(c.brawler_unlock_area), self._BRAWLER_UNLOCK_GOLD,
             tolerance=self._TOLERANCES['unlock'], sample_radius=10
@@ -718,7 +831,7 @@ class UnifiedStateDetector:
                 details={"sub_type": "unlock_gold_text", "match_fraction": unlock_frac}
             )
 
-        # 14. Season reset (azul no topo central)
+        # 15. Season reset (azul no topo central)
         season_frac = self._pixel_match_region(
             image, *sc(c.season_reset_area), self._SEASON_RESET_BLUE,
             tolerance=self._TOLERANCES['season'], sample_radius=8
@@ -740,12 +853,12 @@ class UnifiedStateDetector:
         Mais lento mas mais robusto que pixel matching.
         Tenta múltiplos templates para cada estado.
         """
-        # 1. Check play button (lobby)
+        # 1. Check play button (lobby) — PRIORITY over other templates
         play_region = self.region_data.get('play_button')
         found, conf, pos = self._template_match(
-            image, 'play_button.png', play_region, threshold=0.35
+            image, 'play_button.png', play_region, threshold=0.30
         )
-        if found and conf > 0.35:
+        if found and conf > 0.30:
             return DetectedState(
                 state="lobby",
                 confidence=conf,
@@ -754,13 +867,26 @@ class UnifiedStateDetector:
                 details={"template": "play_button", "position": pos}
             )
 
-        
-# 2. Check joystick first (in-game indicator) (in-game indicator)
+        # 2. Check joystick (in-game indicator) — HIGH threshold because
+        # matchmaking overlay can still show joystick underneath
         joystick_region = self.region_data.get('virtual_joystick')
         found, conf, pos = self._template_match(
-            image, 'joystick.png', joystick_region, threshold=0.55
+            image, 'joystick.png', joystick_region, threshold=0.80
         )
-        if found and conf > 0.4:
+        if found and conf > 0.75:
+            # Negative check: if play button is also detected, prefer lobby
+            play_found, play_conf, _ = self._template_match(
+                image, 'play_button.png', play_region, threshold=0.25
+            )
+            if play_found and play_conf > 0.25:
+                logger.debug("[UNIFIED_DETECTOR] Joystick detected but play button also present -> lobby")
+                return DetectedState(
+                    state="lobby",
+                    confidence=play_conf,
+                    method="template",
+                    button_coords=pos,
+                    details={"template": "play_button_overrides_joystick", "position": pos}
+                )
             return DetectedState(
                 state="in_game",
                 confidence=conf,
@@ -768,8 +894,7 @@ class UnifiedStateDetector:
                 details={"template": "joystick", "position": pos}
             )
 
-        
-# 3. Check thumbs down (end of match)
+        # 3. Check thumbs down (end of match)
         end_region = self.region_data.get('thumbs_down')
         found, conf, pos = self._template_match(
             image, 'thumbs_down.png', end_region, threshold=0.4
@@ -847,25 +972,54 @@ class UnifiedStateDetector:
 
         return detected_state
 
+    def _finalize_detection(self, detection: DetectedState, log_prefix: str = "") -> DetectedState:
+        """Aplica smoothing e regista a deteção no histórico."""
+        smoothed = self._smooth_state(detection.state, detection.confidence)
+        if smoothed != detection.state:
+            detection.confidence *= 0.8
+        detection.state = smoothed
+        if log_prefix:
+            logger.info(log_prefix + f" {detection.state} (conf={detection.confidence:.2f})")
+        self._record_detection(detection)
+        return detection
+
     def update_resolution(self, window_w: int, window_h: int):
         """Atualiza resolucao do detector e recalcula coordenadas dinamicas."""
         self.coords.update_resolution(window_w, window_h)
         logger.info(f"[UNIFIED_DETECTOR] Resolucao atualizada: {window_w}x{window_h}")
 
+    def _ensure_rgb(self, image: np.ndarray) -> np.ndarray:
+        """Detecta se imagem está em BGR (OpenCV padrão) e converte para RGB."""
+        if len(image.shape) != 3 or image.shape[2] != 3:
+            return image
+        h, w = image.shape[:2]
+        pb_x = min(round(self.coords.play_button[0] * w / self.coords.w), w - 1)
+        pb_y = min(round(self.coords.play_button[1] * h / self.coords.h), h - 1)
+        pixel = image[pb_y, pb_x].astype(np.float32)
+        expected = np.array(self._PLAY_COLOR, dtype=np.float32)
+        dist_rgb = np.linalg.norm(pixel - expected)
+        bgr_expected = np.array([expected[2], expected[1], expected[0]], dtype=np.float32)
+        dist_bgr = np.linalg.norm(pixel - bgr_expected)
+        if dist_bgr < dist_rgb:
+            return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        return image
+
     def detect(self, image: np.ndarray, screen_hint: Optional[str] = None) -> DetectedState:
         """
-        Detecção unificada: combina pixel matching + template matching + hint + smoothing.
+        Detecção unificada: combina pixel matching + template matching + OCR + hint + smoothing.
 
         Fluxo:
-        1. Pixel matching (rapido) → se alta confianca, usar
-        2. Template matching (preciso) → confirmar ou refinar
-        3. Screen hint (auxiliar) → apenas como desempate
-        4. Smoothing (votacao) → evitar oscilacoes rapidas
+        1. Verificar resolução e recalibrar se necessário
+        2. Pixel matching (rápido) → se alta confiança (>0.5), usar
+        3. Template matching (preciso) → se alta confiança (>0.5), usar
+        4. Se pixel_conf < 0.35 E template_conf < 0.35 → OCR fallback
+        5. Screen hint (auxiliar) → apenas como desempate
+        6. Smoothing (votação) → evitar oscilações rápidas
 
-        Retorna DetectedState com estado, confianca, metodo e coords do botao.
+        Retorna DetectedState com estado, confiança, método e coords do botão.
         """
+        image = self._ensure_rgb(image)
         if image is None or image.size == 0:
-            # Usar hint se disponivel
             if screen_hint:
                 hinted = self._hint_to_state(screen_hint)
                 if hinted:
@@ -875,95 +1029,85 @@ class UnifiedStateDetector:
             return DetectedState(state="unknown", confidence=0.0, method="none",
                                details={"reason": "empty_image"})
 
-        # Passo 1: Pixel matching (rapido)
-        pixel_result = self._detect_by_pixels(image)
+        # --- RESOLUTION AUTO-CALIBRATION ---
+        h, w = image.shape[:2]
+        if (w, h) != self._last_screenshot_size:
+            logger.info(f"[UNIFIED_DETECTOR] Screenshot size changed from {self._last_screenshot_size} to ({w}, {h}); recalibrating coordinates")
+            self.update_window_size(w, h)
+            self._last_screenshot_size = (w, h)
 
-        # Se pixel matching tem alta confianca, usar diretamente
+        # Passo 1: Pixel matching (rápido)
+        pixel_result = self._detect_by_pixels(image, screen_hint=screen_hint)
+
+        # Se pixel matching tem alta confiança, usar diretamente
         if pixel_result.confidence > 0.5:
-            smoothed = self._smooth_state(pixel_result.state, pixel_result.confidence)
-            if smoothed != pixel_result.state:
-                pixel_result.confidence *= 0.8  # Penalizar confianca quando smoothed
-            pixel_result.state = smoothed
-            logger.info(f"[UNIFIED_DETECTOR] Pixel match: {pixel_result.state} "
-                        f"(conf={pixel_result.confidence:.2f}, "
-                        f"sub={pixel_result.details.get('sub_type', 'unknown')})")
-            self._record_detection(pixel_result)
-            return pixel_result
+            return self._finalize_detection(
+                pixel_result,
+                f"[UNIFIED_DETECTOR] Pixel match:"
+                f" (sub={pixel_result.details.get('sub_type', 'unknown')}),"
+            )
 
         # Passo 2: Template matching (preciso)
         template_result = self._detect_by_templates(image)
 
-        # Se template tem boa confianca, usar
-        if template_result.confidence > 0.4:
-            smoothed = self._smooth_state(template_result.state, template_result.confidence)
-            if smoothed != template_result.state:
-                template_result.confidence *= 0.8
-            template_result.state = smoothed
+        # Se template tem alta confiança, usar diretamente
+        if template_result.confidence > 0.5:
             template_name = template_result.details.get("template", "unknown")
-            logger.info(f"[UNIFIED_DETECTOR] Template match: {template_result.state} "
-                        f"(conf={template_result.confidence:.2f}, template={template_name})")
-            self._record_detection(template_result)
-            return template_result
+            return self._finalize_detection(
+                template_result,
+                f"[UNIFIED_DETECTOR] Template match: (template={template_name}),"
+            )
 
-        # Passo 3: Combinar resultados
-        # Se ambos detectaram algo, usar o de maior confianca
-        if pixel_result.state != "unknown" and template_result.state != "unknown":
-            if pixel_result.confidence >= template_result.confidence:
-                result = pixel_result
-                result.method = "combined_pixel"
+        # Extrair confianças efetivas (unknown conta como 0)
+        pixel_conf = pixel_result.confidence if pixel_result.state != "unknown" else 0.0
+        template_conf = template_result.confidence if template_result.state != "unknown" else 0.0
+
+        # Passo 3: Se ambos detectaram o mesmo estado, combinar
+        if pixel_result.state != "unknown" and pixel_result.state == template_result.state:
+            combined = DetectedState(
+                state=pixel_result.state,
+                confidence=max(pixel_conf, template_conf),
+                method="combined",
+                button_coords=pixel_result.button_coords or template_result.button_coords,
+                details={"pixel_conf": pixel_conf, "template_conf": template_conf,
+                         "sub_type": pixel_result.details.get("sub_type", "unknown")}
+            )
+            return self._finalize_detection(combined, "[UNIFIED_DETECTOR] Combined match:")
+
+        # Passo 4: Se pelo menos um tem confiança decente (>=0.35), usar o melhor
+        if pixel_conf >= 0.35 or template_conf >= 0.35:
+            if pixel_conf >= template_conf:
+                return self._finalize_detection(pixel_result, "[UNIFIED_DETECTOR] Pixel match (low confidence):")
             else:
-                result = template_result
-                result.method = "combined_template"
-            smoothed = self._smooth_state(result.state, result.confidence)
-            if smoothed != result.state:
-                result.confidence *= 0.8
-            result.state = smoothed
-            logger.info(f"[UNIFIED_DETECTOR] Combined: {result.state} "
-                        f"(conf={result.confidence:.2f}, method={result.method})")
-            self._record_detection(result)
-            return result
+                return self._finalize_detection(template_result, "[UNIFIED_DETECTOR] Template match (low confidence):")
 
-        # Se so um detectou, usar esse
-        if pixel_result.state != "unknown":
-            smoothed = self._smooth_state(pixel_result.state, pixel_result.confidence)
-            if smoothed != pixel_result.state:
-                pixel_result.confidence *= 0.8
-            pixel_result.state = smoothed
-            self._record_detection(pixel_result)
-            return pixel_result
-        if template_result.state != "unknown":
-            smoothed = self._smooth_state(template_result.state, template_result.confidence)
-            if smoothed != template_result.state:
-                template_result.confidence *= 0.8
-            template_result.state = smoothed
-            self._record_detection(template_result)
-            return template_result
-
-        # Passo 4: OCR fallback (visão textual) quando pixel/template falharam
+        # Passo 5: OCR fallback — ambos pixel e template abaixo de 0.35
         ocr_result = self._ocr_to_state(image)
-        if ocr_result and ocr_result.state != "unknown":
-            smoothed = self._smooth_state(ocr_result.state, ocr_result.confidence)
-            if smoothed != ocr_result.state:
-                ocr_result.confidence *= 0.8
-            ocr_result.state = smoothed
-            logger.info(f"[UNIFIED_DETECTOR] OCR fallback: {ocr_result.state} "
-                        f"(conf={ocr_result.confidence:.2f})")
-            self._record_detection(ocr_result)
-            return ocr_result
+        if ocr_result and ocr_result.confidence >= 0.35:
+            logger.info(
+                f"[UNIFIED_DETECTOR] OCR fallback triggered"
+                f" (pixel_conf={pixel_conf:.2f}, template_conf={template_conf:.2f})"
+                f" → {ocr_result.state} (conf={ocr_result.confidence:.2f})"
+            )
+            return self._finalize_detection(ocr_result, "[UNIFIED_DETECTOR] OCR fallback:")
 
-        # Passo 5: SmartPlayButtonDetector fallback (usa template matching inteligente)
+        # Se OCR falhou mas existe um resultado não-unknown, usar o melhor disponível
+        if pixel_result.state != "unknown":
+            logger.debug(f"[UNIFIED_DETECTOR] Keeping pixel result despite low confidence ({pixel_conf:.2f}) after OCR miss")
+            return self._finalize_detection(pixel_result)
+        if template_result.state != "unknown":
+            logger.debug(f"[UNIFIED_DETECTOR] Keeping template result despite low confidence ({template_conf:.2f}) after OCR miss")
+            return self._finalize_detection(template_result)
+
+        # Passo 6: SmartPlayButtonDetector fallback
         smart_result = self._smart_play_fallback(image)
         if smart_result and smart_result.state != "unknown":
-            smoothed = self._smooth_state(smart_result.state, smart_result.confidence)
-            if smoothed != smart_result.state:
-                smart_result.confidence *= 0.8
-            smart_result.state = smoothed
-            logger.info(f"[UNIFIED_DETECTOR] SmartPlay fallback: {smart_result.state} "
-                        f"(conf={smart_result.confidence:.2f}, coords={smart_result.button_coords})")
-            self._record_detection(smart_result)
-            return smart_result
+            return self._finalize_detection(
+                smart_result,
+                f"[UNIFIED_DETECTOR] SmartPlay fallback: (coords={smart_result.button_coords}),"
+            )
 
-        # Passo 6: Verificar se o jogo esta visivel (heuristica de tela valida)
+        # Passo 7: Verificar se o jogo está visível
         game_visible = self._check_game_visible(image)
         if not game_visible:
             result = DetectedState(
@@ -980,21 +1124,58 @@ class UnifiedStateDetector:
             self._record_detection(result)
             return result
 
-        # Passo 7: Usar hint como ultimo recurso
+        # Passo 8: Usar hint como último recurso
         if screen_hint:
             hinted = self._hint_to_state(screen_hint)
             if hinted and hinted.state != "unknown":
                 hinted.method = "hint"
-                logger.info(f"[UNIFIED_DETECTOR] Hint fallback: {hinted.state}")
-                self._record_detection(hinted)
-                return hinted
+                return self._finalize_detection(hinted, "[UNIFIED_DETECTOR] Hint fallback:")
 
-        # Nenhuma deteccao
+        # Nenhuma detecção
         result = DetectedState(state="unknown", confidence=0.0, method="none",
                               details={"pixel_state": pixel_result.state,
-                                       "template_state": template_result.state})
+                                       "template_state": template_result.state,
+                                       "ocr_state": ocr_result.state if ocr_result else "none"})
         self._record_detection(result)
         return result
+
+    def _detect_play_by_hsv(self, image: np.ndarray, region: Optional[Tuple[int, int, int, int]] = None, v_min: int = 80) -> float:
+        """Detecta botão Play usando cor HSV (amarelo/laranja). Retorna confiança 0-1."""
+        try:
+            if region:
+                rx1, ry1, rx2, ry2 = region
+                h, w = image.shape[:2]
+                rx1 = max(0, min(rx1, w))
+                rx2 = max(rx1 + 1, min(rx2, w))
+                ry1 = max(0, min(ry1, h))
+                ry2 = max(ry1 + 1, min(ry2, h))
+                search_img = image[ry1:ry2, rx1:rx2]
+            else:
+                search_img = image
+
+            if search_img.size == 0:
+                return 0.0
+
+            hsv = cv2.cvtColor(search_img, cv2.COLOR_RGB2HSV)
+            # Amarelo/laranja em HSV
+            lower = np.array([15, 80, v_min])
+            upper = np.array([40, 255, 255])
+            mask = cv2.inRange(hsv, lower, upper)
+
+            total_pixels = mask.size
+            yellow_pixels = cv2.countNonZero(mask)
+            if total_pixels == 0:
+                return 0.0
+
+            ratio = yellow_pixels / total_pixels
+            # Normalizar: um botão play típico ocupa ~5-20% da região
+            if ratio < 0.02:
+                return 0.0
+            confidence = min(1.0, ratio / 0.15)
+            return confidence
+        except Exception as e:
+            logger.debug(f"[UNIFIED_DETECTOR] _detect_play_by_hsv error: {e}")
+            return 0.0
 
     def _smart_play_fallback(self, image: np.ndarray) -> Optional[DetectedState]:
         """

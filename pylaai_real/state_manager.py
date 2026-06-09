@@ -4,11 +4,15 @@ state_manager.py
 Gestor de estados do jogo.
 Automatiza ações baseado no estado atual.
 
+DEPRECATED: Use core.orchestrator.BotOrchestrator instead.
+This module is kept for backward compatibility only.
+
 MELHORIA: Agora usa UnifiedStateDetector para deteção unificada.
 ScreenAutomation thread NÃO é mais iniciada — toda a deteção acontece
 neste ciclo principal, eliminando conflitos de cliques duplos.
 """
 
+import warnings
 import time
 import random
 import logging
@@ -25,6 +29,12 @@ except ImportError:
     pyautogui = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
+
+warnings.warn(
+    "Deprecated: use core.orchestrator.BotOrchestrator instead",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 try:
     from core.resolution_manager import ResolutionManager
@@ -157,11 +167,6 @@ class StateManager:
         # Phase 10: State Persistence for recovery
         self._state_persistence = None
         try:
-            import sys
-            from pathlib import Path
-            _sp_path = Path(__file__).parent.parent
-            if str(_sp_path) not in sys.path:
-                sys.path.insert(0, str(_sp_path))
             from state_persistence import StatePersistence
             self._state_persistence = StatePersistence()
             logger.info("[STATE] StatePersistence inicializado")

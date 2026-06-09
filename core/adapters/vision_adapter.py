@@ -65,7 +65,7 @@ class VisionAdapter(VisionPort):
                 if not self._screenshot.find_window():
                     logger.error("[VISION_ADAPTER] ScreenshotTaker: no window found")
                     return False
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError, ConnectionError, ValueError, TypeError, RuntimeError, OSError) as e:
                 logger.error(f"[VISION_ADAPTER] Failed to create ScreenshotTaker: {e}")
                 return False
 
@@ -73,7 +73,7 @@ class VisionAdapter(VisionPort):
             try:
                 from pylaai_real.detect import Detect
                 self._detector = Detect(model_path="models/brawlstars_yolov8_8class.pt")
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError, FileNotFoundError, ValueError, TypeError, RuntimeError, OSError) as e:
                 logger.warning(f"[VISION_ADAPTER] Detector not available: {e}")
 
         if self._state_detector is None and self._images_path:
@@ -84,7 +84,7 @@ class VisionAdapter(VisionPort):
                     window_w=self._resolution[0],
                     window_h=self._resolution[1],
                 )
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError, TypeError) as e:
                 logger.warning(f"[VISION_ADAPTER] State detector not available: {e}")
 
         logger.info("[VISION_ADAPTER] Initialized")
@@ -118,7 +118,7 @@ class VisionAdapter(VisionPort):
             try:
                 detections = self._detector(frame)
                 snapshot.detected_objects = self._convert_detections(detections, w, h)
-            except Exception as e:
+            except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.debug(f"[VISION_ADAPTER] Detection error: {e}")
 
         # Detect game state (lobby, combat, etc.)
@@ -128,7 +128,7 @@ class VisionAdapter(VisionPort):
                 snapshot.game_phase = result.state
                 snapshot.metadata["state_confidence"] = result.confidence
                 snapshot.metadata["state_method"] = result.method
-            except Exception as e:
+            except (FileNotFoundError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.debug(f"[VISION_ADAPTER] State detection error: {e}")
 
         snapshot.latency_ms = (time.time() - t0) * 1000
@@ -195,7 +195,7 @@ class VisionAdapter(VisionPort):
                             bbox=(x1, y1, x2, y2),
                             center=((x1 + x2) / 2, (y1 + y2) / 2),
                         ))
-        except Exception as e:
+        except (FileNotFoundError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.debug(f"[VISION_ADAPTER] Detection conversion error: {e}")
 
         return objects

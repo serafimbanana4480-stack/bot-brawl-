@@ -110,7 +110,7 @@ class AutoROICalibrator:
                         name: CalibratedROI(**roi) for name, roi in rois.items()
                     }
                 logger.info("[ROI_CALIBRATOR] %d calibrações carregadas", len(self._calibration_cache))
-            except Exception as e:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
                 logger.warning("[ROI_CALIBRATOR] Erro ao carregar cache: %s", e)
 
     def _save_cache(self):
@@ -123,7 +123,7 @@ class AutoROICalibrator:
             cache_file = self.cache_dir / "calibrations.json"
             with open(cache_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
             logger.warning("[ROI_CALIBRATOR] Erro ao salvar cache: %s", e)
 
     def get_roi(self, name: str, target_w: int, target_h: int) -> Optional[Tuple[int, int, int, int]]:

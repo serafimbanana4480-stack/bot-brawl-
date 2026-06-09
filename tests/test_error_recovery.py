@@ -18,7 +18,6 @@ from dataclasses import dataclass
 
 # Adicionar projeto ao path
 project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
 
 # Fix encoding for Windows console
 if sys.platform == "win32":
@@ -506,7 +505,7 @@ class TestUnifiedStateDetectorOCRFallback:
         black_image = np.zeros((1080, 1920, 3), dtype=np.uint8)
 
         # Forçar pixel/template a falharem para que OCR seja usado
-        detector._detect_by_pixels = lambda img: u_mod.DetectedState("unknown", 0.0, "pixel")
+        detector._detect_by_pixels = lambda img, screen_hint=None: u_mod.DetectedState("unknown", 0.0, "pixel")
         detector._detect_by_templates = lambda img: u_mod.DetectedState("unknown", 0.0, "template")
 
         result = detector.detect(black_image)

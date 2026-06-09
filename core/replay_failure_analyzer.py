@@ -117,7 +117,7 @@ class ReplayFailureAnalyzer:
         try:
             with open(replay_path, "r", encoding="utf-8") as f:
                 replay_data = json.load(f)
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
             logger.warning("[REPLAY_ANALYZER] Erro ao ler %s: %s", replay_path.name, e)
             return None
 
@@ -310,7 +310,7 @@ class ReplayFailureAnalyzer:
                     data = json.load(f)
                 if data.get("metadata", {}).get("result") in ("loss", "defeat"):
                     loss_replays.append(path)
-            except Exception:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError):
                 # Fallback: nome do arquivo
                 if "loss" in path.name.lower() or "defeat" in path.name.lower():
                     loss_replays.append(path)

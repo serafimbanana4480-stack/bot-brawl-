@@ -77,7 +77,7 @@ class ModeController:
                 return self._start_farm(config)
             elif mode == "learn":
                 return self._start_learn(config)
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.error("[MODE_CTRL] Falha ao iniciar %s: %s", mode, e)
             self._status.message = f"Erro: {e}"
             return False
@@ -97,7 +97,7 @@ class ModeController:
                 self._stop_learn()
             self._status.active_mode = None
             return True
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.error("[MODE_CTRL] Falha ao parar %s: %s", mode, e)
             return False
 
@@ -185,14 +185,14 @@ class ModeController:
         if rl_enabled and self.rl_engine and hasattr(self.rl_engine, 'start'):
             try:
                 self.rl_engine.start()
-            except Exception as e:
+            except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.warning("[MODE_CTRL] RL start falhou: %s", e)
 
         # Start live collector
         if collection_enabled and self.live_collector and hasattr(self.live_collector, 'start'):
             try:
                 self.live_collector.start()
-            except Exception as e:
+            except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.warning("[MODE_CTRL] Collector start falhou: %s", e)
 
         # Start farm in background for RL to observe
@@ -211,12 +211,12 @@ class ModeController:
         if self.rl_engine and hasattr(self.rl_engine, 'stop'):
             try:
                 self.rl_engine.stop()
-            except Exception:
+            except (RuntimeError, AttributeError, OSError):
                 pass
         if self.live_collector and hasattr(self.live_collector, 'stop'):
             try:
                 self.live_collector.stop()
-            except Exception:
+            except (RuntimeError, AttributeError, OSError):
                 pass
         if self.wrapper and hasattr(self.wrapper, 'stop'):
             self.wrapper.stop()

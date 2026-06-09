@@ -5,7 +5,6 @@ Testes para o controlador de modos operacionais.
 """
 
 import sys, os, time
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from unittest.mock import MagicMock

@@ -47,4 +47,41 @@ O bot utiliza o modelo `yolov8n.pt` como base. Para maior precisão na detecçã
 -   **Randomização**: A janela do emulador é movida periodicamente para evitar fingerprints estáticos.
 
 ---
+
+## 📐 Architecture Diagram
+
+```mermaid
+flowchart LR
+    subgraph Emulator
+        EM[BlueStacks/LDPlayer]
+    end
+    subgraph Bot
+        API[API Server] -->|calls| Vision[Vision Engine]
+        Vision -->|feeds| Controller[Game Controller]
+        Controller -->|uses| Safety[Safety System]
+        API -->|exposes| Health[/health endpoint]
+    end
+    EM -->|ADB/Win32| Controller
+    Vision -->|TensorRT| Model[YOLO Model]
+```
+
+## 📦 Quick‑Start
+
+![Quick‑Start GIF](images/quick_start.gif)
+
+## 🛠️ Contributing
+
+1. Fork the repository  
+2. Create a feature branch  
+3. Write tests & documentation  
+4. Open a Pull Request
+
+See `CONTRIBUTING.md` for detailed guidelines.
+
+## 🐞 Troubleshooting
+
+- **Emulator not detected**: Ensure ADB is in your PATH and debugging is enabled.  
+- **GPU errors**: Install CUDA drivers or set `CUDA_VISIBLE_DEVICES=""` to force CPU.
+
+---
 **Desenvolvido como parte do sistema Soberana Omega**

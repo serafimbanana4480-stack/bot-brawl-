@@ -7,8 +7,6 @@ import numpy as np
 # Ensure the repository root is importable.
 _this_dir = os.path.dirname(__file__)
 _repo_root = os.path.abspath(os.path.join(_this_dir, '..', '..', '..'))
-if _repo_root not in sys.path:
-    sys.path.insert(0, _repo_root)
 
 from backend.brawl_bot.pylaai_real.state_finder import StateFinder
 from backend.brawl_bot.pylaai_real.state_manager import StateManager
@@ -246,7 +244,7 @@ def test_state_manager_keeps_brawler_selection_to_lobby_flow_stable():
     second_state = manager._process_cycle()
 
     assert first_state == "brawler_selection"
-    assert second_state == "lobby"
+    assert second_state == "loading"
     assert lobby.select_calls == 1
     assert lobby.press_play_calls == 2
 

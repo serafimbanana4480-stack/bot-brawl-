@@ -343,6 +343,6 @@ class HealthChecker:
         for name, func in self.checks.items():
             try:
                 results[name] = {"status": "ok", "details": func()}
-            except Exception as e:
+            except (ValueError, TypeError, RuntimeError, AttributeError) as e:
                 results[name] = {"status": "error", "error": str(e)}
         return results

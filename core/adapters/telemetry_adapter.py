@@ -32,14 +32,14 @@ class TelemetryAdapter(TelemetryPort):
         if self._otel is None and HAS_OTEL_METRICS:
             try:
                 self._otel = OTelMetrics(enabled=False)
-            except Exception:
+            except (ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass
 
     def record_metric(self, event: MetricEvent) -> None:
         if self._obs is not None and hasattr(self._obs, "record_metric"):
             try:
                 self._obs.record_metric(event.name, event.value, event.tags)
-            except Exception:
+            except (ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass
         else:
             self._buffer.append(event)
@@ -57,21 +57,21 @@ class TelemetryAdapter(TelemetryPort):
                     self._otel.record_cycle_latency(event.value)
                 elif "error" in event.name:
                     self._otel.record_error("orchestrator", event.tags.get("type", "unknown") if event.tags else "unknown")
-            except Exception:
+            except (ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass
 
     def record_event(self, event_name: str, details: Dict[str, Any]) -> None:
         if self._obs is not None and hasattr(self._obs, "record_event"):
             try:
                 self._obs.record_event(event_name, details)
-            except Exception:
+            except (ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass
 
     def flush(self) -> None:
         if self._obs is not None and hasattr(self._obs, "flush"):
             try:
                 self._obs.flush()
-            except Exception:
+            except (ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass
 
     def health_check(self) -> Dict[str, Any]:

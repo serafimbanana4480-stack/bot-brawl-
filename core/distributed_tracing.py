@@ -311,7 +311,7 @@ class Tracer:
                     span.add_log("success")
                     self.finish_span(span, status="ok")
                     return result
-                except Exception as e:
+                except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                     span.add_log("error", error=str(e))
                     self.finish_span(span, status="error", tags={"error": str(e)})
                     raise

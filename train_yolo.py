@@ -22,9 +22,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent
+PROJECT_ROOT = Path(__file__).parent
 DATASET_YAML = PROJECT_ROOT / "dataset" / "data.yaml"
-MODELS_DIR = PROJECT_ROOT / "backend" / "brawl_bot" / "models"
+MODELS_DIR = PROJECT_ROOT / "models"
 RUNS_DIR = PROJECT_ROOT / "runs" / "detect"
 
 
@@ -96,7 +96,7 @@ def train(
     logger.info(f"Model copied to {dest}")
 
     # Update model registry
-    from .model_validator import validate_all_models
+    from model_validator import validate_all_models
     validate_all_models(delete_fakes=False)
 
     return dest

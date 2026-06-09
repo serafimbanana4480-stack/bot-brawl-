@@ -183,7 +183,7 @@ class PositioningHeatmap:
 
             cv2.imwrite(str(output_path), img)
             logger.info("[HEATMAP] Visualização exportada: %s", output_path)
-        except Exception as e:
+        except (ImportError, ModuleNotFoundError, ValueError, TypeError, RuntimeError, cv2.error) as e:
             logger.warning("[HEATMAP] Erro ao exportar visualização: %s", e)
 
     def get_stats(self) -> Dict[str, any]:
