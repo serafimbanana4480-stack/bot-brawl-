@@ -12,20 +12,64 @@ import math
 from typing import List, Tuple, Optional, Dict
 from dataclasses import dataclass
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class HumanizationConfig:
     """Configurações de humanização"""
     enabled: bool = True
-    min_delay: float = 0.3
-    max_delay: float = 1.5
+    min_delay: float = 0.15   # mínimo 150ms — limite humano realista
+    max_delay: float = 2.0    # máximo 2s para pausas de pensamento
     bezier_control_variation: float = 0.3
     tremor_amplitude: float = 2.0
     tremor_frequency: float = 0.1
     mistake_probability: float = 0.1
     reaction_time_base: float = 0.25
     reaction_time_variance: float = 0.15
+    # Novos parâmetros avançados
+    advanced_humanization: bool = True
+    pink_noise_enabled: bool = True
+    overshoot_probability: float = 0.05
+    micro_pause_probability: float = 0.08
+    micro_pause_duration_base: float = 0.15
+    fitts_a: float = 0.08  # intercepto Fitts (s)
+    fitts_b: float = 0.12  # slope Fitts (s/bit)
+    fitts_target_width: float = 40.0  # largura alvo padrão (px)
+    jitter_proximity_factor: float = 2.5  # multiplicador jitter perto do alvo
+
+
+class PinkNoiseGenerator:
+    """
+    Gerador de ruído pink (1/f) usando filtro IIR de Paul Kellet.
+    
+    Ruído pink é mais realista que gaussiano puro para movimentos humanos,
+    pois humanos têm correlação temporal (movimentos suaves com variações
+    de baixa frequência dominantes).
+    """
+    
+    def __init__(self, seed: Optional[int] = None):
+        if seed is not None:
+            random.seed(seed)
+        # 7-stage filter state (estado persistente para continuidade)
+        self._state = [0.0] * 7
+        self._white_prev = 0.0
+    
+    def next(self) -> float:
+        """Retorna amostra de ruído pink (1/f) via soma de 3 frequências."""
+        t = random.random() * 1000.0
+        # Soma de 3 senos com decaimento 1/f — aproximação simples de pink noise
+        return (
+            math.sin(t * 0.1) * 0.50 +
+            math.sin(t * 0.03) * 0.33 +
+            math.sin(t * 0.01) * 0.17
+        )
+    
+    def generate_sequence(self, n: int) -> np.ndarray:
+        """Gera sequência de n amostras."""
+        return np.array([self.next() for _ in range(n)])
 
 
 class BezierCurve:
@@ -59,6 +103,13 @@ class WindMouse:
     """
     WindMouse Algorithm - Movimento de mouse humanizado mais realista.
     Baseado no algoritmo usado em bots profissionais.
+    
+    Melhorias anti-ban:
+    - Ruído pink (1/f) em vez de uniforme/gaussiano puro
+    - Jitter posição-dependente (mais perto do alvo)
+    - Micro-pausas em movimentos longos
+    - Overshoot humano ocasional
+    - Fitts's Law para tempo de movimento
     """
     
     def __init__(self, gravity: float = 9.0, wind: float = 3.0):
@@ -69,20 +120,64 @@ class WindMouse:
         """
         self.gravity = gravity
         self.wind = wind
+        self._pink = PinkNoiseGenerator()
+    
+    def _position_dependent_jitter(self, distance_to_target: float, 
+                                   total_distance: float,
+                                   base_jitter: float) -> float:
+        """
+        Jitter aumenta nos últimos 10% do caminho (humanos hesitam ao acertar).
+        """
+        if total_distance <= 0:
+            return base_jitter
+        proximity = 1.0 - (distance_to_target / total_distance)
+        # Mais jitter apenas nos últimos 10% do caminho
+        factor = 1.0 + (max(0, proximity - 0.9) * 10.0) * 2.5
+        return base_jitter * factor
+    
+    def fitts_law_time(self, distance: float, target_width: float = 40.0,
+                       a: float = 0.08, b: float = 0.12) -> float:
+        """
+        Calcula tempo de movimento pela Lei de Fitts (segundos).
+        MT = a + b * log2(D / W + 1)
+        
+        Args:
+            distance: distância ao alvo (px)
+            target_width: largura do alvo (px)
+            a: intercepto (s)
+            b: slope (s/bit)
+        """
+        if distance <= 0 or target_width <= 0:
+            return a
+        index_of_difficulty = math.log2(distance / target_width + 1.0)
+        mt = a + b * index_of_difficulty
+        # Adiciona variância humana (~15% CV)
+        mt *= random.gauss(1.0, 0.15)
+        return max(a, mt)
     
     def generate_path(
         self,
         start: Tuple[float, float],
         end: Tuple[float, float],
-        max_step: int = 20
+        max_step: int = 20,
+        target_width: float = 40.0,
+        fitts_a: float = 0.08,
+        fitts_b: float = 0.12,
+        enable_overshoot: bool = True,
+        enable_micro_pauses: bool = True,
     ) -> List[Tuple[float, float]]:
         """
-        Gera caminho usando WindMouse algorithm.
+        Gera caminho usando WindMouse algorithm melhorado.
         
         Args:
             start: Ponto inicial (x, y)
             end: Ponto final (x, y)
             max_step: Distância máxima por passo
+            target_width: Largura do alvo para Fitts's Law
+            fitts_a: Intercepto Fitts
+            fitts_b: Slope Fitts
+            enable_overshoot: Se True, ocasionalmente passa do alvo e corrige
+            enable_micro_pauses: Se True, adiciona micro-pausas em movimentos longos
         
         Returns:
             Lista de pontos (x, y)
@@ -91,21 +186,48 @@ class WindMouse:
         current_x, current_y = start
         target_x, target_y = end
         
+        total_distance = math.sqrt((target_x - start[0])**2 + (target_y - start[1])**2)
+        
+        # Overshoot humano: ~5% das vezes, passa do target e corrige
+        actual_target = (target_x, target_y)
+        overshoot_active = False
+        if enable_overshoot and random.random() < 0.05:
+            overshoot_active = True
+            overshoot_dist = random.uniform(15, 45)
+            angle = math.atan2(target_y - start[1], target_x - start[0])
+            actual_target = (
+                target_x + math.cos(angle) * overshoot_dist,
+                target_y + math.sin(angle) * overshoot_dist
+            )
+            logger.debug("[HUMANIZE] Overshoot ativado: target=(%.1f, %.1f) -> actual=(%.1f, %.1f)",
+                         target_x, target_y, actual_target[0], actual_target[1])
+        
+        # Micro-pausas: em movimentos longos (>300px), ~8% chance de pausa a meio
+        micro_pause_ms = 0.0
+        if enable_micro_pauses and total_distance > 300 and random.random() < 0.08:
+            micro_pause_ms = random.uniform(0.05, 0.15)  # 50-150ms
+        
+        step_count = 0
         while True:
-            # Calcular distância até o destino
-            dist = math.sqrt((target_x - current_x)**2 + (target_y - current_y)**2)
+            # Calcular distância até o destino atual (pode ser overshoot)
+            dist = math.sqrt((actual_target[0] - current_x)**2 + (actual_target[1] - current_y)**2)
             
             if dist < max_step:
-                path.append((target_x, target_y))
+                path.append((actual_target[0], actual_target[1]))
                 break
             
             # Calcular vetor de direção
-            vx = (target_x - current_x) / dist
-            vy = (target_y - current_y) / dist
+            vx = (actual_target[0] - current_x) / dist
+            vy = (actual_target[1] - current_y) / dist
             
-            # Adicionar wind (jitter aleatório)
-            wind_x = random.uniform(-self.wind, self.wind)
-            wind_y = random.uniform(-self.wind, self.wind)
+            # Wind com ruído pink (1/f) - mais natural que uniforme
+            wind_x = self._pink.next() * self.wind
+            wind_y = self._pink.next() * self.wind
+            
+            # Jitter posição-dependente: mais jitter nos últimos 10%
+            jitter_mult = self._position_dependent_jitter(dist, total_distance, 1.0)
+            wind_x *= jitter_mult
+            wind_y *= jitter_mult
             
             # Adicionar gravity (puxa em direção ao destino)
             gravity_x = vx * self.gravity
@@ -116,11 +238,34 @@ class WindMouse:
             new_y = current_y + vy * max_step + wind_y + gravity_y
             
             # Limitar para não ultrapassar o destino (funciona em qualquer direção)
-            new_x = min(max(new_x, min(current_x, target_x)), max(current_x, target_x))
-            new_y = min(max(new_y, min(current_y, target_y)), max(current_y, target_y))
+            new_x = min(max(new_x, min(current_x, actual_target[0])), max(current_x, actual_target[0]))
+            new_y = min(max(new_y, min(current_y, actual_target[1])), max(current_y, actual_target[1]))
             
             path.append((new_x, new_y))
             current_x, current_y = new_x, new_y
+            step_count += 1
+        
+        # Se houve overshoot, adicionar correção de volta ao target real
+        if overshoot_active:
+            # Correção rápida mas não instantânea
+            correction_steps = max(3, int(random.gauss(6, 2)))
+            for i in range(1, correction_steps + 1):
+                t = i / correction_steps
+                t_eased = t * t * (3 - 2 * t)  # smoothstep
+                cx = actual_target[0] + (target_x - actual_target[0]) * t_eased
+                cy = actual_target[1] + (target_y - actual_target[1]) * t_eased
+                # Adicionar jitter pink na correção
+                cx += self._pink.next() * self.wind * 0.5
+                cy += self._pink.next() * self.wind * 0.5
+                path.append((cx, cy))
+        
+        logger.debug(
+            "[HUMANIZE] Path generated: steps=%d, overshoot=%s, distance=%.1f, "
+            "fitts_time=%.3fs, micro_pause=%.3fs",
+            len(path), overshoot_active, total_distance,
+            self.fitts_law_time(total_distance, target_width, fitts_a, fitts_b),
+            micro_pause_ms
+        )
         
         return path
     
@@ -128,30 +273,43 @@ class WindMouse:
         self,
         start: Tuple[float, float],
         end: Tuple[float, float],
-        base_speed: float = 500.0
+        base_speed: float = 500.0,
+        target_width: float = 40.0,
+        fitts_a: float = 0.08,
+        fitts_b: float = 0.12,
     ) -> List[Tuple[float, float, float]]:
         """
         Gera caminho com timestamps para simular velocidade variável.
+        Usa Fitts's Law para tempo total de movimento.
+        Adiciona micro-pausa de 50-150ms a meio do caminho em movimentos longos (>300px).
         
         Returns:
             Lista de (x, y, timestamp)
         """
-        points = self.generate_path(start, end)
+        points = self.generate_path(start, end, target_width=target_width,
+                                     fitts_a=fitts_a, fitts_b=fitts_b)
         
-        # Calcular distância total
-        total_dist = 0.0
+        # Micro-pausa probabilística para movimentos longos
+        total_dist = math.sqrt((end[0]-start[0])**2 + (end[1]-start[1])**2)
+        micro_pause = random.uniform(0.05, 0.15) if (total_dist > 300 and random.random() < 0.08) else 0.0
+        
+        # Calcular distância total percorrida
+        path_dist = 0.0
         for i in range(1, len(points)):
             dx = points[i][0] - points[i-1][0]
             dy = points[i][1] - points[i-1][1]
-            total_dist += math.sqrt(dx**2 + dy**2)
+            path_dist += math.sqrt(dx**2 + dy**2)
         
-        # Calcular tempo total baseado na velocidade
-        total_time = total_dist / base_speed
+        # Tempo total pela Lei de Fitts (mais realista que distância/velocidade)
+        fitts_time = self.fitts_law_time(path_dist, target_width, fitts_a, fitts_b)
+        # Fallback se Fitts der valor muito baixo
+        speed_time = path_dist / base_speed if base_speed > 0 else 0.0
+        total_time = max(fitts_time, speed_time * 0.3)
         
         # Distribuir tempo com easing (mais lento no início e fim)
         path_with_timing = []
-        current_time = 0.0
         
+        mid_idx = len(points) // 2
         for i, (x, y) in enumerate(points):
             t = i / (len(points) - 1) if len(points) > 1 else 0
             
@@ -159,6 +317,9 @@ class WindMouse:
             t_eased = 4 * t**3 if t < 0.5 else 1 - ((-2 * t + 2)**3) / 2
             
             timestamp = total_time * t_eased
+            # Micro-pausa a meio do caminho
+            if i == mid_idx and micro_pause > 0:
+                timestamp += micro_pause
             path_with_timing.append((x, y, timestamp))
         
         return path_with_timing
@@ -170,6 +331,7 @@ class MouseHumanizer:
     def __init__(self, config: Optional[HumanizationConfig] = None):
         self.config = config or HumanizationConfig()
         self.windmouse = WindMouse()
+        self._pink = PinkNoiseGenerator()
     
     def generate_bezier_control_points(
         self, 
@@ -179,6 +341,7 @@ class MouseHumanizer:
     ) -> Tuple[Tuple[float, float], Tuple[float, float]]:
         """
         Gera pontos de controlo para curva de Bézier com variação natural.
+        Usa ruído pink para offsets mais realistas.
         """
         if variation is None:
             variation = self.config.bezier_control_variation
@@ -187,14 +350,14 @@ class MouseHumanizer:
         dy = end[1] - start[1]
         distance = math.sqrt(dx**2 + dy**2)
         
-        # Pontos de controlo com offset aleatório
+        # Pontos de controlo com offset de ruído pink (mais natural)
         # Control point 1: ~30% do caminho com offset perpendicular
         t1 = 0.3
         mid1 = (start[0] + dx * t1, start[1] + dy * t1)
         
-        # Offset perpendicular aleatório
+        # Offset perpendicular com ruído pink
         perp_angle = math.atan2(dy, dx) + math.pi / 2
-        offset1 = random.uniform(-distance * variation, distance * variation)
+        offset1 = self._pink.next() * distance * variation
         
         cp1 = (
             mid1[0] + math.cos(perp_angle) * offset1,
@@ -204,7 +367,7 @@ class MouseHumanizer:
         # Control point 2: ~70% do caminho com offset perpendicular
         t2 = 0.7
         mid2 = (start[0] + dx * t2, start[1] + dy * t2)
-        offset2 = random.uniform(-distance * variation, distance * variation)
+        offset2 = self._pink.next() * distance * variation
         
         cp2 = (
             mid2[0] + math.cos(perp_angle) * offset2,
@@ -232,29 +395,64 @@ class MouseHumanizer:
         Returns:
             [(x, y, timestamp), ...]
         """
+        distance = math.sqrt((end[0]-start[0])**2 + (end[1]-start[1])**2)
+        
         if use_windmouse:
-            # Usar WindMouse (mais realista)
+            # Usar WindMouse melhorado (mais realista)
             if duration is None:
-                distance = math.sqrt((end[0]-start[0])**2 + (end[1]-start[1])**2)
-                speed = random.uniform(500, 1500)
-                duration = distance / speed
+                # Usar Fitts's Law para tempo de movimento
+                duration = self.windmouse.fitts_law_time(
+                    distance,
+                    self.config.fitts_target_width,
+                    self.config.fitts_a,
+                    self.config.fitts_b
+                )
             
-            path_with_time = self.windmouse.generate_path_with_timing(start, end, base_speed=1000.0)
+            path_with_time = self.windmouse.generate_path_with_timing(
+                start, end,
+                target_width=self.config.fitts_target_width,
+                fitts_a=self.config.fitts_a,
+                fitts_b=self.config.fitts_b
+            )
             
-            # Adicionar tremor sutil
+            # Adicionar tremor com ruído pink (mais natural que gaussiano puro)
             path_with_tremor = []
-            for x, y, timestamp in path_with_time:
-                tremor_x = random.gauss(0, self.config.tremor_amplitude)
-                tremor_y = random.gauss(0, self.config.tremor_amplitude)
-                path_with_tremor.append((x + tremor_x, y + tremor_y, timestamp))
+            for i, (x, y, timestamp) in enumerate(path_with_time):
+                # Jitter posição-dependente: mais perto do alvo = mais tremor
+                dist_to_end = math.sqrt((end[0]-x)**2 + (end[1]-y)**2)
+                jitter_mult = 1.0 + ((1.0 - dist_to_end / max(distance, 1.0)) ** 2) * self.config.jitter_proximity_factor
+                
+                tremor_x = self._pink.next() * self.config.tremor_amplitude * jitter_mult
+                tremor_y = self._pink.next() * self.config.tremor_amplitude * jitter_mult
+                
+                # Micro-pausa: inserir pequeno delay extra em pontos aleatórios
+                extra_delay = 0.0
+                if (self.config.advanced_humanization and 
+                    distance > 300 and 
+                    random.random() < self.config.micro_pause_probability):
+                    extra_delay = random.gauss(
+                        self.config.micro_pause_duration_base,
+                        self.config.micro_pause_duration_base * 0.3
+                    )
+                
+                path_with_tremor.append((x + tremor_x, y + tremor_y, timestamp + extra_delay))
             
+            logger.debug(
+                "[HUMANIZE] WindMouse path: dist=%.1f, duration=%.3fs, "
+                "points=%d, pink_noise=%s",
+                distance, duration, len(path_with_tremor),
+                self.config.pink_noise_enabled
+            )
             return path_with_tremor
         else:
-            # Usar Bézier (método original)
+            # Usar Bézier (método original melhorado)
             if duration is None:
-                distance = math.sqrt((end[0]-start[0])**2 + (end[1]-start[1])**2)
-                speed = random.uniform(500, 1500)
-                duration = distance / speed
+                duration = self.windmouse.fitts_law_time(
+                    distance,
+                    self.config.fitts_target_width,
+                    self.config.fitts_a,
+                    self.config.fitts_b
+                )
             
             cp1, cp2 = self.generate_bezier_control_points(start, end)
             curve = BezierCurve(start, cp1, cp2, end)
@@ -268,8 +466,12 @@ class MouseHumanizer:
                 point = curve.get_point(t_eased)
                 timestamp = duration * t
                 
-                tremor_x = random.gauss(0, self.config.tremor_amplitude)
-                tremor_y = random.gauss(0, self.config.tremor_amplitude)
+                # Tremor com ruído pink
+                dist_to_end = math.sqrt((end[0]-point[0])**2 + (end[1]-point[1])**2)
+                jitter_mult = 1.0 + ((1.0 - dist_to_end / max(distance, 1.0)) ** 2) * self.config.jitter_proximity_factor
+                
+                tremor_x = self._pink.next() * self.config.tremor_amplitude * jitter_mult
+                tremor_y = self._pink.next() * self.config.tremor_amplitude * jitter_mult
                 
                 path_with_time.append((
                     point[0] + tremor_x,
@@ -306,14 +508,17 @@ class DelayRandomizer:
     
     def get_delay(self, action_type: str = "default") -> float:
         """
-        Gera delay aleatório com distribuição gaussiana.
+        Gera delay aleatório com distribuição realista.
         action_types: "default", "reaction", "decision", "movement"
+        
+        Reaction times mínimo: 150ms (limite humano fisiológico).
         """
         if not self.config.enabled:
             return 0.0
         action_type = (action_type or "default").lower()
         profiles = {
-            "reaction": (self.config.reaction_time_base, self.config.reaction_time_variance),
+            # Mínimo 150ms para reaction (input lag + rede + processamento visual)
+            "reaction": (0.22, 0.08),   # média ~220ms, std ~80ms -> range ~150-400ms
             "decision": (0.55, 0.30),
             "movement": (0.18, 0.08),
             "tap": (0.20, 0.12),
@@ -326,21 +531,41 @@ class DelayRandomizer:
         
         delay = random.gauss(base, variance)
         
-        # Clamp aos limites
-        return max(self.config.min_delay, min(self.config.max_delay, delay))
+        # Clamp: reaction nunca abaixo de 150ms
+        if action_type == "reaction":
+            delay = max(0.15, delay)
+        
+        # Clamp aos limites globais
+        delay = max(self.config.min_delay, min(self.config.max_delay, delay))
+        
+        logger.debug("[HUMANIZE] Delay %s: base=%.3f, result=%.3fs", action_type, base, delay)
+        return delay
     
     def get_typing_delay(self, char: str = "") -> float:
-        """Delay para simular digitação"""
+        """Delay para simular digitação com padrões humanos realistas."""
         # Caracteres comuns: 80-150ms
         # Caracteres especiais: 150-250ms
+        # Pausas ocasionais (pensamento): 300-800ms
         if char in "abcdefghijklmnopqrstuvwxyz0123456789":
-            return random.uniform(0.08, 0.15)
+            base = random.uniform(0.08, 0.15)
+        elif char in " ":
+            # Espaços ligeiramente mais rápidos
+            base = random.uniform(0.07, 0.12)
         else:
-            return random.uniform(0.15, 0.25)
+            base = random.uniform(0.15, 0.25)
+        
+        # ~3% chance de pausa de "pensamento" entre palavras
+        if char == " " and random.random() < 0.03:
+            base += random.uniform(0.3, 0.8)
+            logger.debug("[HUMANIZE] Typing think-pause: +%.3fs", base)
+        
+        return base
     
     def sleep(self, action_type: str = "default") -> None:
         """Executa sleep com delay aleatório"""
-        time.sleep(self.get_delay(action_type))
+        delay = self.get_delay(action_type)
+        time.sleep(delay)
+        return delay
 
 
 class BehaviorRandomizer:
@@ -396,6 +621,17 @@ class HumanizationEngine:
         self.action_count = 0
         self.last_pause = time.time()
         self.pause_interval = random.uniform(300, 600)  # 5-10 minutos
+        
+        # Logging de parâmetros para debug
+        logger.info(
+            "[HUMANIZE] Engine initialized: advanced=%s, pink_noise=%s, "
+            "fitts_a=%.3f, fitts_b=%.3f, reaction_base=%.3f",
+            self.config.advanced_humanization,
+            self.config.pink_noise_enabled,
+            self.config.fitts_a,
+            self.config.fitts_b,
+            self.config.reaction_time_base
+        )
     
     def should_take_break(self) -> bool:
         """Verifica se deve fazer uma pausa"""
@@ -418,9 +654,11 @@ class HumanizationEngine:
         Executa clique humanizado.
         Retorna informações sobre o movimento.
         """
-        # Delay pré-acção
+        # Delay pré-acção (mínimo 150ms para reaction)
         if pre_delay is None:
             pre_delay = self.delays.get_delay("reaction")
+        else:
+            pre_delay = max(0.15, pre_delay)  # enforce human minimum
         time.sleep(pre_delay)
         
         # Verificar se deve "errar"
@@ -430,12 +668,19 @@ class HumanizationEngine:
             x += offset[0]
             y += offset[1]
             is_mistake = True
+            logger.debug("[HUMANIZE] Mistake injected: offset=(%.1f, %.1f)", offset[0], offset[1])
         
         # Gerar caminho (não executamos aqui, só retornamos para o executor)
         # Assumindo posição atual do rato como (0, 0) para exemplo
         path = self.mouse.humanize_path((0, 0), (x, y))
         
         self.action_count += 1
+        
+        logger.debug(
+            "[HUMANIZE] Click: target=(%.1f, %.1f), pre_delay=%.3fs, "
+            "mistake=%s, path_points=%d",
+            x, y, pre_delay, is_mistake, len(path)
+        )
         
         return {
             "target": (x, y),
@@ -458,6 +703,7 @@ class HumanizationEngine:
         if random.random() > accuracy:
             # Miss
             offset = self.mouse.get_mistake_offset(max_offset=100)
+            logger.debug("[HUMANIZE] Aim miss: offset=(%.1f, %.1f)", offset[0], offset[1])
             return (target[0] + offset[0], target[1] + offset[1])
         
         return target
@@ -471,7 +717,13 @@ class HumanizationEngine:
             "config": {
                 "min_delay": self.config.min_delay,
                 "max_delay": self.config.max_delay,
-                "mistake_probability": self.config.mistake_probability
+                "mistake_probability": self.config.mistake_probability,
+                "advanced_humanization": self.config.advanced_humanization,
+                "pink_noise_enabled": self.config.pink_noise_enabled,
+                "fitts_a": self.config.fitts_a,
+                "fitts_b": self.config.fitts_b,
+                "overshoot_probability": self.config.overshoot_probability,
+                "micro_pause_probability": self.config.micro_pause_probability,
             }
         }
 
@@ -490,10 +742,14 @@ class HumanizationEngine:
         """Public API: retorna offset de tremor de rato (x, y) em píxeis.
 
         Usa amplitude configurada em HumanizationConfig.tremor_amplitude.
+        Agora com ruído pink se advanced_humanization estiver ativo.
         """
-        import random as _r
         amp = self.config.tremor_amplitude
-        return (_r.gauss(0, amp), _r.gauss(0, amp))
+        if self.config.advanced_humanization and self.config.pink_noise_enabled:
+            # Usar ruído pink para tremor mais natural
+            pink = PinkNoiseGenerator()
+            return (pink.next() * amp, pink.next() * amp)
+        return (random.gauss(0, amp), random.gauss(0, amp))
 
     def get_path(
         self,

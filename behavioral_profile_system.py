@@ -13,6 +13,7 @@ Funcionalidades:
 
 import random
 import time
+import math
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
@@ -31,10 +32,10 @@ class Personality(Enum):
 
 class SkillLevel(Enum):
     """Níveis de skill."""
-    NOVICE = "novice"       # 200-400ms reaction
-    INTERMEDIATE = "intermediate"  # 150-250ms
-    ADVANCED = "advanced"   # 100-180ms
-    EXPERT = "expert"      # 60-120ms
+    NOVICE = "novice"       # 250-450ms reaction
+    INTERMEDIATE = "intermediate"  # 180-350ms
+    ADVANCED = "advanced"   # 150-300ms
+    EXPERT = "expert"      # 150-250ms (limite humano fisiológico ~150ms)
 
 
 @dataclass
@@ -65,9 +66,19 @@ class SessionProfile:
     hesitation_chance: float = 0.15
     tunnel_vision_chance: float = 0.08
 
-    def get_reaction_time(self) -> float:
-        """Retorna tempo de reação atual baseado no skill e variância."""
-        return self.base_reaction_time + random.gauss(0, self.reaction_variance)
+    def get_reaction_time(self, target_distance: float = 0.0, target_width: float = 40.0) -> float:
+        """Retorna tempo de reação (ms) com mínimo 150ms e Fitts's Law.
+
+        MT = a + b * log2(D / W + 1)  [segundos]
+        Base humano: média ~250ms, std ~50ms, nunca < 150ms.
+        """
+        # Base fisiológico + variância gaussiana
+        rt = 250.0 + random.gauss(0, 50.0)
+        # Fitts's Law: tempo extra proporcional à dificuldade do alvo
+        if target_distance > 0 and target_width > 0:
+            id_val = math.log2(target_distance / target_width + 1.0)
+            rt += (0.08 + 0.12 * id_val) * 1000.0  # converter s -> ms
+        return max(150.0, rt)
 
     def get_session_phase(self) -> str:
         """Retorna a fase atual da sessão."""
@@ -118,21 +129,21 @@ class BehavioralProfileManager:
         if skill_level is None:
             skill_level = random.choice(list(SkillLevel))
 
-        # Configurar tempos de reação baseado no skill
+        # Configurar tempos de reação baseado no skill (mínimo fisiológico ~150ms)
         if skill_level == SkillLevel.NOVICE:
-            base_reaction = random.uniform(250, 400)
+            base_reaction = random.uniform(250, 450)
             variance = 80
             experience = random.uniform(0.3, 0.5)
         elif skill_level == SkillLevel.INTERMEDIATE:
-            base_reaction = random.uniform(150, 250)
+            base_reaction = random.uniform(180, 350)
             variance = 50
             experience = random.uniform(0.5, 0.7)
         elif skill_level == SkillLevel.ADVANCED:
-            base_reaction = random.uniform(100, 180)
+            base_reaction = random.uniform(150, 300)
             variance = 35
             experience = random.uniform(0.7, 0.9)
-        else:  # EXPERT
-            base_reaction = random.uniform(60, 120)
+        else:  # EXPERT — nunca abaixo de 150ms (input lag + rede + processamento visual)
+            base_reaction = random.uniform(150, 250)
             variance = 20
             experience = random.uniform(0.9, 1.0)
 

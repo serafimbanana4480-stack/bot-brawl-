@@ -272,7 +272,7 @@ class ResolutionManager:
                         )
                         logger.info(f"[RES] ADB detectado: {w}x{h}")
                         return profile
-        except (ImportError, ModuleNotFoundError, ConnectionError, TimeoutError, TypeError, RuntimeError, OSError) as e:
+        except (Exception) as e:
             logger.debug(f"[RES] ADB detection failed: {e}")
         return None
 

@@ -32,6 +32,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from core.experience_buffer import ExperienceBuffer
+
 logger = logging.getLogger(__name__)
 
 # Lazy imports para evitar dependência pesada no startup
@@ -59,98 +61,6 @@ class Experience:
     value: float
     log_prob: float
     timestamp: float = field(default_factory=time.time)
-
-
-# ------------------------------------------------------------------
-# Experience Buffer
-# ------------------------------------------------------------------
-
-class ExperienceBuffer:
-    """
-    Rolling experience buffer com gating por reward e amostragem por prioridade.
-    """
-
-    def __init__(self, capacity: int = 10000, min_episode_length: int = 10):
-        self.capacity = capacity
-        self.min_episode_length = min_episode_length
-        self.buffer: deque = deque(maxlen=capacity)
-        self.episode_start_idx: int = 0
-        self.total_collected: int = 0
-
-    def add(self, exp: Experience) -> None:
-        self.buffer.append(exp)
-        self.total_collected += 1
-
-    def start_episode(self) -> None:
-        self.episode_start_idx = len(self.buffer)
-
-    def end_episode(self) -> None:
-        episode_len = len(self.buffer) - self.episode_start_idx
-        if episode_len < self.min_episode_length:
-            # Episódio muito curto: truncar
-            for _ in range(episode_len):
-                self.buffer.pop()
-            logger.debug(f"[BUFFER] Episodio truncado (len={episode_len})")
-
-    def sample(self, batch_size: int) -> Optional[Dict]:
-        if len(self.buffer) < batch_size:
-            return None
-        idxs = np.random.choice(len(self.buffer), batch_size, replace=False)
-        batch = [self.buffer[i] for i in idxs]
-        return self._collate(batch)
-
-    def _collate(self, batch: List[Experience]) -> Dict:
-        states = np.stack([e.state_vector for e in batch])
-        actions = np.array([e.action_idx for e in batch])
-        rewards = np.array([e.reward for e in batch])
-        next_states = np.stack([e.next_state_vector for e in batch])
-        dones = np.array([e.done for e in batch], dtype=np.float32)
-        values = np.array([e.value for e in batch])
-        log_probs = np.array([e.log_prob for e in batch])
-
-        # Grids: usar zero se não disponível
-        grids = []
-        for e in batch:
-            if e.grid is not None:
-                grids.append(e.grid)
-            else:
-                grids.append(np.zeros((21, 21, 1), dtype=np.float32))
-        grids = np.stack(grids)
-
-        return {
-            "states": states,
-            "grids": grids,
-            "actions": actions,
-            "rewards": rewards,
-            "next_states": next_states,
-            "dones": dones,
-            "values": values,
-            "old_log_probs": log_probs,
-        }
-
-    def clear(self) -> None:
-        self.buffer.clear()
-        self.episode_start_idx = 0
-
-    def __len__(self) -> int:
-        return len(self.buffer)
-
-    def save(self, path: Path) -> None:
-        try:
-            with open(path, "wb") as f:
-                pickle.dump(list(self.buffer), f)
-            logger.info(f"[BUFFER] Salvo: {path} ({len(self.buffer)} experiencias)")
-        except Exception as e:
-            logger.warning(f"[BUFFER] Falha ao salvar: {e}")
-
-    def load(self, path: Path) -> None:
-        try:
-            with open(path, "rb") as f:
-                data = pickle.load(f)
-            self.buffer = deque(data, maxlen=self.capacity)
-            logger.info(f"[BUFFER] Carregado: {path} ({len(self.buffer)} experiencias)")
-        except Exception as e:
-            logger.warning(f"[BUFFER] Falha ao carregar: {e}")
 
 
 # ------------------------------------------------------------------
@@ -316,6 +226,7 @@ class RLBridge:
         buffer_capacity: int = 10000,
         train_every_n_steps: int = 1000,
         save_path: Path = Path("data/rl_bridge.pkl"),
+        checkpoint_dir: Path = Path("models/checkpoints"),
     ):
         self.use_neural = use_neural and HAS_TORCH
         self.q_learning_fallback = q_learning_fallback
@@ -323,6 +234,7 @@ class RLBridge:
         self.save_path = Path(save_path)
         self.train_every_n_steps = train_every_n_steps
         self.total_steps = 0
+        self.checkpoint_dir = Path(checkpoint_dir)
 
         # Neural policy
         self.policy: Optional = None
@@ -337,6 +249,9 @@ class RLBridge:
                 self.policy = NeuralPolicy(schema=schema)
                 self.policy.to(self.device)
                 self.trainer = PPOTrainer(self.policy)
+
+                # Warm-start: try loading latest checkpoint from checkpoint_dir
+                self._warm_start_checkpoint()
 
                 if model_path and model_path.exists():
                     self._load_model(model_path)
@@ -366,6 +281,26 @@ class RLBridge:
         self.last_action_idx: Optional[int] = None
         self.last_log_prob: float = 0.0
         self.last_value: float = 0.0
+
+    def _warm_start_checkpoint(self) -> None:
+        """Load the most recent checkpoint from checkpoint_dir if available."""
+        if not self.checkpoint_dir.exists() or not HAS_TORCH:
+            return
+        try:
+            checkpoints = sorted(
+                [f for f in self.checkpoint_dir.iterdir() if f.suffix in (".pt", ".pth", ".ckpt")],
+                key=lambda f: f.stat().st_mtime,
+                reverse=True,
+            )
+            if checkpoints:
+                latest = checkpoints[0]
+                state = torch.load(latest, map_location=self.device)
+                self.policy.load_state_dict(state)
+                logger.info(f"[RL_BRIDGE] Warm-start from checkpoint: {latest}")
+            else:
+                logger.info("[RL_BRIDGE] No checkpoints found for warm-start")
+        except Exception as e:
+            logger.warning(f"[RL_BRIDGE] Warm-start failed: {e}")
 
     def _resolve_device(self, device: Optional[str]) -> str:
         if device is not None:
@@ -463,18 +398,17 @@ class RLBridge:
             next_state_vec = self._state_to_vector(next_state, player_pos, enemies)
             next_grid = self._build_grid(player_pos, detections)
 
-            exp = Experience(
-                state_vector=self.last_state_vec,
-                grid=self._last_grid,
-                action_idx=self.last_action_idx,
+            self.buffer.add(
+                state=self.last_state_vec,
+                action=self.last_action_idx,
                 reward=reward,
-                next_state_vector=next_state_vec,
-                next_grid=next_grid,
+                next_state=next_state_vec,
                 done=done,
                 value=self.last_value,
                 log_prob=self.last_log_prob,
+                grid=self._last_grid,
+                next_grid=next_grid,
             )
-            self.buffer.add(exp)
 
             # Treinar periodicamente
             if self.total_steps % self.train_every_n_steps == 0:
@@ -512,7 +446,19 @@ class RLBridge:
         if self.policy is not None:
             self.policy.reset_hidden_state()
 
-    def get_stats(self) -> Dict:
+    def get_last_experience(self) -> Optional[Dict[str, Any]]:
+        """Retorna os dados da ultima experiencia (state, action, log_prob, value, grid)."""
+        if self.last_state_vec is None:
+            return None
+        return {
+            "state_vector": self.last_state_vec.copy(),
+            "action_idx": self.last_action_idx,
+            "log_prob": self.last_log_prob,
+            "value": self.last_value,
+            "grid": getattr(self, "_last_grid", None),
+        }
+
+    def get_stats(self) -> Dict[str, Any]:
         """Estatísticas para dashboard."""
         stats = {
             "use_neural": self.use_neural,
@@ -594,41 +540,48 @@ class RLBridge:
             if batch is None:
                 return
 
-            # Adaptar batch para interface do PPOTrainer
-            # O PPOTrainer espera: experience_buffer com keys específicas
-            stats = self.trainer.train(
-                experience_buffer=self._adapt_batch(batch),
-                num_updates=1,
-                batch_size=64,
-                ppo_epochs=4,
+            # Compute GAE
+            advantages, returns = self.trainer.compute_gae(
+                batch["rewards"].tolist(),
+                batch["values"].tolist(),
+                batch["dones"].tolist(),
             )
+
+            # Convert to tensors
+            states = torch.from_numpy(batch["states"]).float().to(self.device)
+            actions = torch.from_numpy(batch["actions"]).long().to(self.device)
+            old_log_probs = torch.from_numpy(batch["old_log_probs"]).float().to(self.device)
+            advantages_t = torch.from_numpy(advantages).float().to(self.device)
+            returns_t = torch.from_numpy(returns).float().to(self.device)
+
+            # Optional grids
+            grids = None
+            if "grids" in batch:
+                grids = torch.from_numpy(batch["grids"]).float().to(self.device)
+
+            # Normalize advantages
+            advantages_t = (advantages_t - advantages_t.mean()) / (advantages_t.std() + 1e-8)
+
+            # PPO epochs
+            ppo_epochs = 4
+            for _ in range(ppo_epochs):
+                stats = self.trainer.train_step(
+                    states,
+                    actions,
+                    old_log_probs,
+                    advantages_t,
+                    returns_t,
+                    grids=grids,
+                )
+
+            # Store last stats for dashboard
+            self._last_policy_loss = stats.get("policy_loss", 0.0)
+            self._last_value_loss = stats.get("value_loss", 0.0)
+            self._last_entropy = stats.get("entropy", 0.0)
+
             logger.info(f"[RL_BRIDGE] Treino PPO: {stats}")
         except Exception as e:
             logger.warning(f"[RL_BRIDGE] Falha no treino PPO: {e}")
-
-    def _adapt_batch(self, batch: Dict):
-        """Adapta batch do ExperienceBuffer para interface do PPOTrainer."""
-        # O PPOTrainer.train() espera experience_buffer com keys:
-        # "states", "actions", "rewards", "dones", "values", "old_log_probs"
-        # Nosso batch tem grids + state_vectors, precisamos combinar
-
-        # Criar um objeto mock com método sample()
-        class MockBuffer:
-            def __init__(self, data):
-                self.data = data
-            def sample(self, n):
-                return self.data
-
-        # Combinar state_vector + grid em um único "state"
-        # Para o PPOTrainer, usamos state_vector como proxy (grid é processado internamente)
-        return MockBuffer({
-            "states": batch["states"],  # (B, 44)
-            "actions": batch["actions"],
-            "rewards": batch["rewards"].tolist(),
-            "dones": batch["dones"].tolist(),
-            "values": batch["values"].tolist(),
-            "old_log_probs": batch["old_log_probs"].tolist(),
-        })
 
     @staticmethod
     def _idx_to_action(idx: int) -> str:

@@ -15,6 +15,7 @@ services:
       - LOG_FORMAT=json
       - ADB_SERVER_SOCKET=tcp:host.docker.internal:5037
       - BRAWL_BOT_API_PORT=8003
+      - HEALTH_CHECK_INTERVAL=30
     volumes:
       - ./logs:/app/logs
       - ./models:/app/models
@@ -27,6 +28,19 @@ services:
       start_period: 60s
       retries: 3
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - brawl-bot-net
 

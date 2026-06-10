@@ -68,23 +68,22 @@ class SafetySubsystem:
             logger.error(f"[WRAPPER] HumanizationEngine FATAL: {e}")
             raise RuntimeError("HumanizationEngine failed to initialize - anti-ban protection unavailable") from e
 
-        # Anti-ban
+        # Anti-ban — prefer core.anti_ban (novo, melhorado), fallback para legacy
         try:
-            from pylaai_real.anti_ban_advanced import AdvancedAntiBanSystem
+            from core.anti_ban import AntiBanSystem
 
-            self.anti_ban = AdvancedAntiBanSystem({"enabled": True})
-            logger.info("[WRAPPER] Advanced anti-ban system inicializado")
+            self.anti_ban = AntiBanSystem()
+            logger.info("[WRAPPER] Anti-ban system (core) inicializado")
         except (ImportError, ModuleNotFoundError):
             try:
-                from core.anti_ban import AntiBanSystem
+                from pylaai_real.anti_ban_advanced import AdvancedAntiBanSystem
 
-                self.anti_ban = AntiBanSystem()
-                logger.info("[WRAPPER] Anti-ban system inicializado")
+                self.anti_ban = AdvancedAntiBanSystem({"enabled": True})
+                logger.info("[WRAPPER] Advanced anti-ban system (legacy fallback) inicializado")
             except (ImportError, ModuleNotFoundError) as e:
-                if isinstance(e, ImportError):
-                    logger.warning(f"[WRAPPER] AntiBanSystem indisponível (não instalado): {e}")
-                else:
-                    logger.error(f"[WRAPPER] AntiBanSystem ERRO: {e}")
+                logger.warning(f"[WRAPPER] AntiBanSystem indisponível (não instalado): {e}")
+            except Exception as e:
+                logger.error(f"[WRAPPER] AntiBanSystem ERRO: {e}")
 
         # Error Recovery
         if self.enable_error_recovery:
@@ -172,8 +171,10 @@ class SafetySubsystem:
     # ------------------------------------------------------------------
 
     def run_monitor_loop(self, wrapper: "PylaAIEnhanced", stop_event: threading.Event) -> None:
-        """Main safety / anti-ban / recovery monitor loop."""
+        """Main safety / anti-ban / recovery / health monitor loop."""
         logger.info("[WRAPPER] Monitor loop started")
+        _health_check_counter = 0
+        _health_check_interval = 10  # a cada 10 ciclos (~10-15s)
         while not stop_event.is_set() and wrapper.running:
             cycle_start = time.time()
             try:
@@ -185,6 +186,23 @@ class SafetySubsystem:
                             continue
                     except Exception as e:
                         logger.debug(f"[WRAPPER] V2 cycle start error: {e}")
+
+                # Periodic health check
+                _health_check_counter += 1
+                if _health_check_counter >= _health_check_interval:
+                    _health_check_counter = 0
+                    try:
+                        from core.health_checks import health_shallow
+                        report = health_shallow()
+                        if report.get("overall") != "healthy":
+                            logger.warning(
+                                f"[HEALTH] Sistema não saudável: {report.get('overall')} — "
+                                f"falhas: {[c['name'] for c in report.get('checks', []) if c['status'] != 'pass']}"
+                            )
+                        else:
+                            logger.debug("[HEALTH] Sistema saudável")
+                    except Exception as e:
+                        logger.debug(f"[HEALTH] Health check falhou: {e}")
 
                 # State recovery
                 if wrapper.state_recovery and wrapper.state_recovery.is_recovering():

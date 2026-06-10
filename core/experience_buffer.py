@@ -1,272 +1,97 @@
 """
 Experience Buffer for RL Training
 
-Circular buffer for storing and sampling experience tuples
-for PPO training. Supports prioritized sampling and episode segmentation.
-
-Usage:
-    from core.experience_buffer import ExperienceBuffer
-    
-    buffer = ExperienceBuffer(capacity=10000)
-    buffer.add(state, action, reward, done, value, log_prob)
-    batch = buffer.sample(batch_size=64)
+Thread-safe circular buffer with numpy-backed storage.
 """
 
+import threading
+from collections import deque
+from typing import Dict, Optional
+
 import numpy as np
-from typing import Dict, List, Optional, Tuple
-import random
 
 
 class ExperienceBuffer:
-    """
-    Circular buffer for storing experience tuples.
-    
-    Stores:
-    - States (grid + scalar features)
-    - Actions
-    - Rewards
-    - Dones (episode termination flags)
-    - Values (value function predictions)
-    - Log probabilities (action log probs from policy)
-    """
-    
-    def __init__(self, capacity: int = 10000):
-        """
-        Initialize experience buffer.
-        
-        Args:
-            capacity: Maximum number of experiences to store
-        """
+    """Thread-safe circular experience buffer."""
+
+    def __init__(self, capacity: int = 10000, min_episode_length: int = 10):
         self.capacity = capacity
-        self.size = 0
-        self.pointer = 0
-        
-        # Storage arrays
-        self.states = []
-        self.actions = []
-        self.rewards = []
-        self.dones = []
-        self.values = []
-        self.old_log_probs = []
-        
-    def add(
-        self,
-        state: np.ndarray,
-        action: int,
-        reward: float,
-        done: bool,
-        value: float,
-        log_prob: float
-    ):
-        """
-        Add an experience to the buffer.
-        
-        Args:
-            state: State representation
-            action: Action taken
-            reward: Reward received
-            done: Episode termination flag
-            value: Value function prediction
-            log_prob: Action log probability
-        """
-        if self.size < self.capacity:
-            # Add new experience
-            self.states.append(state)
-            self.actions.append(action)
-            self.rewards.append(reward)
-            self.dones.append(done)
-            self.values.append(value)
-            self.old_log_probs.append(log_prob)
-            self.size += 1
-        else:
-            # Overwrite old experience (circular buffer)
-            self.states[self.pointer] = state
-            self.actions[self.pointer] = action
-            self.rewards[self.pointer] = reward
-            self.dones[self.pointer] = done
-            self.values[self.pointer] = value
-            self.old_log_probs[self.pointer] = log_prob
-        
-        self.pointer = (self.pointer + 1) % self.capacity
-    
-    def sample(self, batch_size: int) -> Dict[str, np.ndarray]:
-        """
-        Sample a random batch of experiences.
-        
-        Args:
-            batch_size: Number of experiences to sample
-            
-        Returns:
-            Dictionary with batched data
-        """
-        indices = np.random.choice(self.size, batch_size, replace=False)
-        
-        return {
-            "states": np.array([self.states[i] for i in indices]),
-            "actions": np.array([self.actions[i] for i in indices]),
-            "rewards": np.array([self.rewards[i] for i in indices]),
-            "dones": np.array([self.dones[i] for i in indices]),
-            "values": np.array([self.values[i] for i in indices]),
-            "old_log_probs": np.array([self.old_log_probs[i] for i in indices]),
-        }
-    
-    def sample_episode(self) -> Optional[Dict[str, np.ndarray]]:
-        """
-        Sample a complete episode (sequence of experiences).
-        
-        Returns:
-            Dictionary with episode data or None if no complete episodes
-        """
-        # Find episode boundaries (where done=True)
-        episode_starts = [0]
-        episode_ends = []
-        
-        for i in range(self.size):
-            if self.dones[i]:
-                episode_ends.append(i)
-                if i + 1 < self.size:
-                    episode_starts.append(i + 1)
-        
-        if not episode_ends:
-            return None  # No complete episodes
-        
-        # Select random episode
-        episode_idx = random.randint(0, len(episode_ends) - 1)
-        start = episode_starts[episode_idx]
-        end = episode_ends[episode_idx]
-        
-        return {
-            "states": np.array(self.states[start:end+1]),
-            "actions": np.array(self.actions[start:end+1]),
-            "rewards": np.array(self.rewards[start:end+1]),
-            "dones": np.array(self.dones[start:end+1]),
-            "values": np.array(self.values[start:end+1]),
-            "old_log_probs": np.array(self.old_log_probs[start:end+1]),
-        }
-    
+        self.min_episode_length = min_episode_length
+        self._lock = threading.Lock()
+        self._size = 0
+        self._episode_start = 0
+        self._buf: deque = deque(maxlen=capacity)
+
+    def add(self, state=None, action=None, reward=None, next_state=None, done=None,
+            value=0.0, log_prob=0.0, grid=None, next_grid=None):
+        """Add transition (thread-safe). Supports duck-typed Experience object."""
+        if state is not None and hasattr(state, "state_vector"):
+            obj = state
+            state = getattr(obj, "state_vector", None)
+            action = getattr(obj, "action_idx", getattr(obj, "action", None))
+            reward = getattr(obj, "reward", None)
+            next_state = getattr(obj, "next_state_vector", getattr(obj, "next_state", None))
+            done = getattr(obj, "done", None)
+            value = getattr(obj, "value", 0.0)
+            log_prob = getattr(obj, "log_prob", 0.0)
+            grid = getattr(obj, "grid", None)
+            next_grid = getattr(obj, "next_grid", None)
+        with self._lock:
+            self._buf.append((
+                np.asarray(state, np.float32),
+                int(action or 0),
+                float(reward or 0.0),
+                np.asarray(next_state, np.float32),
+                bool(done or False),
+                float(value),
+                float(log_prob),
+                np.asarray(grid, np.float32) if grid is not None else None,
+                np.asarray(next_grid, np.float32) if next_grid is not None else None,
+            ))
+            self._size = len(self._buf)
+
+    def start_episode(self):
+        with self._lock:
+            self._episode_start = self._size
+
+    def end_episode(self):
+        with self._lock:
+            ep_len = self._size - self._episode_start
+            if 0 < ep_len < self.min_episode_length:
+                for _ in range(ep_len):
+                    self._buf.pop()
+                self._size = len(self._buf)
+            self._episode_start = self._size
+
+    def sample(self, batch_size: int) -> Optional[Dict[str, np.ndarray]]:
+        with self._lock:
+            if self._size < batch_size:
+                return None
+            idx = np.random.choice(self._size, batch_size, replace=False)
+            batch = [self._buf[i] for i in idx]
+            out = {
+                "states": np.stack([b[0] for b in batch]),
+                "actions": np.array([b[1] for b in batch], dtype=np.int64),
+                "rewards": np.array([b[2] for b in batch], dtype=np.float32),
+                "next_states": np.stack([b[3] for b in batch]),
+                "dones": np.array([b[4] for b in batch], dtype=np.float32),
+                "values": np.array([b[5] for b in batch], dtype=np.float32),
+                "old_log_probs": np.array([b[6] for b in batch], dtype=np.float32),
+            }
+            grids = [b[7] for b in batch]
+            if any(g is not None for g in grids):
+                ref = next(g for g in grids if g is not None)
+                out["grids"] = np.stack([g if g is not None else np.zeros_like(ref) for g in grids])
+                ngrids = [b[8] for b in batch]
+                out["next_grids"] = np.stack([g if g is not None else np.zeros_like(ref) for g in ngrids])
+            return out
+
     def clear(self):
-        """Clear the buffer."""
-        self.states = []
-        self.actions = []
-        self.rewards = []
-        self.dones = []
-        self.values = []
-        self.old_log_probs = []
-        self.size = 0
-        self.pointer = 0
-    
-    def __len__(self) -> int:
-        """Return current buffer size."""
-        return self.size
+        with self._lock:
+            self._buf.clear()
+            self._size = 0
+            self._episode_start = 0
 
-
-class PrioritizedExperienceBuffer(ExperienceBuffer):
-    """
-    Experience buffer with prioritized sampling.
-    
-    Samples experiences with probability proportional to their TD-error,
-    focusing learning on high-error experiences.
-    """
-    
-    def __init__(self, capacity: int = 10000, alpha: float = 0.6):
-        """
-        Initialize prioritized experience buffer.
-        
-        Args:
-            capacity: Maximum number of experiences
-            alpha: Prioritization exponent (0 = uniform, 1 = full prioritization)
-        """
-        super().__init__(capacity)
-        self.alpha = alpha
-        self.priorities = np.zeros(capacity, dtype=np.float32)
-        self.max_priority = 1.0
-        
-    def add(
-        self,
-        state: np.ndarray,
-        action: int,
-        reward: float,
-        done: bool,
-        value: float,
-        log_prob: float,
-        priority: Optional[float] = None
-    ):
-        """
-        Add experience with priority.
-        
-        Args:
-            state: State representation
-            action: Action taken
-            reward: Reward received
-            done: Episode termination flag
-            value: Value function prediction
-            log_prob: Action log probability
-            priority: Optional priority (defaults to max_priority)
-        """
-        if priority is None:
-            priority = self.max_priority
-        
-        if self.size < self.capacity:
-            self.states.append(state)
-            self.actions.append(action)
-            self.rewards.append(reward)
-            self.dones.append(done)
-            self.values.append(value)
-            self.old_log_probs.append(log_prob)
-            self.size += 1
-        else:
-            self.states[self.pointer] = state
-            self.actions[self.pointer] = action
-            self.rewards[self.pointer] = reward
-            self.dones[self.pointer] = done
-            self.values[self.pointer] = value
-            self.old_log_probs[self.pointer] = log_prob
-        
-        self.priorities[self.pointer] = priority
-        self.pointer = (self.pointer + 1) % self.capacity
-        
-    def sample(self, batch_size: int, beta: float = 0.4) -> Tuple[Dict[str, np.ndarray], np.ndarray, np.ndarray]:
-        """
-        Sample batch with priority-based sampling.
-        
-        Args:
-            batch_size: Number of experiences to sample
-            beta: Importance sampling exponent (0 = no correction, 1 = full correction)
-            
-        Returns:
-            (batch_data, indices, weights) tuple
-        """
-        if self.size == 0:
-            return {}, np.array([]), np.array([])
-        
-        # Calculate sampling probabilities
-        priorities = self.priorities[:self.size]
-        probs = priorities ** self.alpha
-        probs /= probs.sum()
-        
-        # Sample indices
-        indices = np.random.choice(self.size, batch_size, p=probs, replace=False)
-        
-        # Calculate importance sampling weights
-        weights = (self.size * probs[indices]) ** (-beta)
-        weights /= weights.max()  # Normalize
-        
-        return {
-            "states": np.array([self.states[i] for i in indices]),
-            "actions": np.array([self.actions[i] for i in indices]),
-            "rewards": np.array([self.rewards[i] for i in indices]),
-            "dones": np.array([self.dones[i] for i in indices]),
-            "values": np.array([self.values[i] for i in indices]),
-            "old_log_probs": np.array([self.old_log_probs[i] for i in indices]),
-        }, indices, weights
-    
-    def update_priorities(self, indices: np.ndarray, priorities: np.ndarray):
-        """
-        Update priorities for sampled experiences.
-        
-        Args:
-            indices: Indices to update
-            priorities: New priority values
-        """
-        self.priorities[indices] = priorities
-        self.max_priority = max(self.max_priority, priorities.max())
+    def __len__(self):
+        with self._lock:
+            return self._size

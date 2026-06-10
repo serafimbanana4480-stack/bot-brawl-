@@ -105,9 +105,8 @@ def setup_logging(
     shared_processors: list = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
-        structlog.processors.add_logger_name,
-        structlog.processors.TimeStamper(fmt="iso", utc=True),
         structlog.stdlib.ExtraAdder(),
+        structlog.processors.TimeStamper(fmt="iso", utc=True),
     ]
 
     if format_type == "json":

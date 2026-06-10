@@ -290,6 +290,10 @@ class PylaAIEnhanced:
             logger.info("[WRAPPER] Starting in ORCHESTRATOR mode")
             try:
                 self.orchestrator.initialize()
+                # Wire non-blocking vision pipeline: orchestrator reads latest snapshot from VisionSubsystem thread
+                if hasattr(self.orchestrator.vision, 'set_snapshot_source'):
+                    self.orchestrator.vision.set_snapshot_source(self.vision_subsystem.get_latest_snapshot)
+                    logger.info("[WRAPPER] VisionAdapter wired to VisionSubsystem (non-blocking)")
                 logger.info("[WRAPPER] BotOrchestrator initialized")
             except Exception as e:
                 logger.error(f"[WRAPPER] BotOrchestrator initialization failed: {e}")
@@ -701,22 +705,43 @@ class PylaAIEnhanced:
             return self.ui_subsystem.get_status(self)
         # Legacy fallback for tests that construct PylaAIEnhanced via __new__
         import time
+
+        def _safe_get(obj_name: str, attr_name: str, default: Any) -> Any:
+            """Safely get attribute from optional subsystem."""
+            obj = getattr(self, obj_name, None)
+            if obj is None:
+                return default
+            return getattr(obj, attr_name, default)
+
+        def _safe_call(obj_name: str, method_name: str, default: Any) -> Any:
+            """Safely call method on optional subsystem."""
+            obj = getattr(self, obj_name, None)
+            if obj is None:
+                return default
+            method = getattr(obj, method_name, None)
+            if method is None:
+                return default
+            try:
+                return method()
+            except Exception:
+                return default
+
         return {
             "running": getattr(self, "running", False),
-            "current_state": getattr(self, "state_manager", type("SM", (), {"current_state": "unknown"})()).current_state,
+            "current_state": _safe_get("state_manager", "current_state", "unknown"),
             "current_brawler": (
                 self.brawler_queue.get_current().name if self.brawler_queue.get_current() else None
             ),
             "matches_played": getattr(self, "matches_played", 0),
             "session_duration_minutes": (time.time() - getattr(self, "session_start", time.time())) / 60.0,
-            "window_active": getattr(self, "emulator_controller", type("EC", (), {"get_status_snapshot": lambda: {"window_active": False}})()).get_status_snapshot().get("window_active", False),
-            "window_title": getattr(self, "emulator_controller", type("EC", (), {"get_status_snapshot": lambda: {"window_title": ""}})()).get_status_snapshot().get("window_title", ""),
+            "window_active": _safe_call("emulator_controller", "get_status_snapshot", {}).get("window_active", False),
+            "window_title": _safe_call("emulator_controller", "get_status_snapshot", {}).get("window_title", ""),
             "diagnostics": {
                 "diagnostic_mode": getattr(self, "diagnostic_mode", False),
-                "lobby": getattr(self, "lobby", type("L", (), {"get_diagnostic_report": lambda: {}})()).get_diagnostic_report(),
-                "screen_state": getattr(self, "state_manager", type("SM", (), {"screen_automation": type("SA", (), {"get_current_state_name": lambda: "unknown"})()})()).screen_automation.get_current_state_name(),
-                "progress": getattr(self, "progress", type("P", (), {"get_stats": lambda: {}})()).get_stats(),
-                "combat": getattr(self, "play_logic", type("PL", (), {"get_last_combat_snapshot": lambda: {}})()).get_last_combat_snapshot(),
+                "lobby": _safe_call("lobby", "get_diagnostic_report", {}),
+                "screen_state": _safe_call("state_manager", "get_current_state_name", "unknown") if hasattr(_safe_get("state_manager", "screen_automation", None), "get_current_state_name") else "unknown",
+                "progress": _safe_call("progress", "get_stats", {}),
+                "combat": _safe_call("play_logic", "get_last_combat_snapshot", {}),
             },
         }
 

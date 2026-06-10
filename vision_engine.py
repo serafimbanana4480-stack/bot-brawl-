@@ -21,6 +21,7 @@ from typing import List, Dict, Tuple, Optional, Any
 from dataclasses import dataclass
 import logging
 import time
+import threading
 
 # Import do otimizador criado anteriormente
 try:
@@ -94,17 +95,20 @@ class AdaptiveFrameSkipper:
         self._last_enemy_count = 0
         self._fps_history: List[float] = []
         self._last_detect_time = time.time()
+        self._lock = threading.RLock()
 
     def update_fps(self, fps: float):
         """Update current FPS measurement."""
-        self._last_fps = fps
-        self._fps_history.append(fps)
-        if len(self._fps_history) > 30:
-            self._fps_history = self._fps_history[-30:]
+        with self._lock:
+            self._last_fps = fps
+            self._fps_history.append(fps)
+            if len(self._fps_history) > 30:
+                self._fps_history = self._fps_history[-30:]
 
     def update_enemy_count(self, count: int):
         """Update number of detected enemies."""
-        self._last_enemy_count = count
+        with self._lock:
+            self._last_enemy_count = count
 
     def should_process(self) -> bool:
         """Determine if this frame should be processed.
@@ -112,53 +116,55 @@ class AdaptiveFrameSkipper:
         Returns True if inference should run on this frame.
         Returns False if the frame should be skipped.
         """
-        self._frames_since_last_inference += 1
+        with self._lock:
+            self._frames_since_last_inference += 1
 
-        # Calculate current skip rate based on FPS
-        avg_fps = sum(self._fps_history) / max(1, len(self._fps_history)) if self._fps_history else self.target_fps
+            # Calculate current skip rate based on FPS
+            avg_fps = sum(self._fps_history) / max(1, len(self._fps_history)) if self._fps_history else self.target_fps
 
-        if avg_fps >= self.target_fps:
-            # FPS is good, minimal skipping
-            desired_skip = 0
-        elif avg_fps >= self.target_fps * 0.75:
-            # FPS is moderate, skip 1 frame
-            desired_skip = 1
-        elif avg_fps >= self.target_fps * 0.5:
-            # FPS is low, skip 2 frames
-            desired_skip = 2
-        else:
-            # FPS is very low, skip max frames
-            desired_skip = self.max_skip
+            if avg_fps >= self.target_fps:
+                # FPS is good, minimal skipping
+                desired_skip = 0
+            elif avg_fps >= self.target_fps * 0.75:
+                # FPS is moderate, skip 1 frame
+                desired_skip = 1
+            elif avg_fps >= self.target_fps * 0.5:
+                # FPS is low, skip 2 frames
+                desired_skip = 2
+            else:
+                # FPS is very low, skip max frames
+                desired_skip = self.max_skip
 
-        # Reduce skipping when enemies are nearby (need faster reactions)
-        if self._last_enemy_count >= 2:
-            desired_skip = max(0, desired_skip - 1)
-        elif self._last_enemy_count >= 1:
-            desired_skip = max(0, desired_skip - 1)
+            # Reduce skipping when enemies are nearby (need faster reactions)
+            if self._last_enemy_count >= 2:
+                desired_skip = max(0, desired_skip - 1)
+            elif self._last_enemy_count >= 1:
+                desired_skip = max(0, desired_skip - 1)
 
-        self._current_skip = min(desired_skip, self.max_skip)
+            self._current_skip = min(desired_skip, self.max_skip)
 
-        # Check if we should process this frame
-        if self._current_skip == 0:
-            self._frames_since_last_inference = 0
-            return True
+            # Check if we should process this frame
+            if self._current_skip == 0:
+                self._frames_since_last_inference = 0
+                return True
 
-        if self._frames_since_last_inference >= self._current_skip + 1:
-            # Enough frames skipped, process this one
-            self._frames_since_last_inference = 0
-            return True
+            if self._frames_since_last_inference >= self._current_skip + 1:
+                # Enough frames skipped, process this one
+                self._frames_since_last_inference = 0
+                return True
 
-        return False
+            return False
 
     def get_stats(self) -> Dict:
         """Return current skip statistics."""
-        avg_fps = sum(self._fps_history) / max(1, len(self._fps_history)) if self._fps_history else 0.0
-        return {
-            "current_skip_rate": self._current_skip,
-            "avg_fps": round(avg_fps, 1),
-            "last_enemy_count": self._last_enemy_count,
-            "frames_since_last_inference": self._frames_since_last_inference,
-        }
+        with self._lock:
+            avg_fps = sum(self._fps_history) / max(1, len(self._fps_history)) if self._fps_history else 0.0
+            return {
+                "current_skip_rate": self._current_skip,
+                "avg_fps": round(avg_fps, 1),
+                "last_enemy_count": self._last_enemy_count,
+                "frames_since_last_inference": self._frames_since_last_inference,
+            }
 
 
 class YOLOVisionEngine:
@@ -200,6 +206,7 @@ class YOLOVisionEngine:
         # Last detection cache for skipped frames
         self._last_detections: List[Detection] = []
         self._last_inference_time: float = 0.0
+        self._lock = threading.RLock()
 
     def _get_device(self) -> str:
         if self.config.inference_device == "auto":
@@ -302,59 +309,60 @@ class YOLOVisionEngine:
     def load_models(self, models_dir: Path) -> bool:
         """Load validated YOLO models from models directory (YOLOv8, YOLO11, YOLO-World)."""
         try:
-            logger.info(f"Loading models from: {models_dir}")
+            with self._lock:
+                logger.info(f"Loading models from: {models_dir}")
 
-            valid_models = self._get_valid_models(models_dir)
-            pending_models = self._get_pending_models(models_dir)
+                valid_models = self._get_valid_models(models_dir)
+                pending_models = self._get_pending_models(models_dir)
 
-            if not valid_models and not pending_models:
-                logger.error("No valid or pending Brawl Stars models found in registry.")
-                logger.error("Train a model first: python -m backend.brawl_bot.train_yolo")
-                self.is_initialized = False
-                return False
+                if not valid_models and not pending_models:
+                    logger.error("No valid or pending Brawl Stars models found in registry.")
+                    logger.error("Train a model first: python -m backend.brawl_bot.train_yolo")
+                    self.is_initialized = False
+                    return False
 
-            # Load valid models
-            for model_name, pt_path in valid_models:
-                try:
-                    from ultralytics import YOLO
-                    model = YOLO(str(pt_path))
-                    if self.device == "cuda" and self.config.use_half_precision:
-                        model.to(self.device).half()
-                    else:
-                        model.to(self.device)
+                # Load valid models
+                for model_name, pt_path in valid_models:
+                    try:
+                        from ultralytics import YOLO
+                        model = YOLO(str(pt_path))
+                        if self.device == "cuda" and self.config.use_half_precision:
+                            model.to(self.device).half()
+                        else:
+                            model.to(self.device)
 
-                    # Store by first valid class name as key
-                    classes = list(model.names.values()) if hasattr(model, "names") else []
-                    self.loaded_classes.update(c.lower() for c in classes)
-                    self.models[model_name] = model
-                    logger.info(f"Loaded {model_name} on {self.device}")
+                        # Store by first valid class name as key
+                        classes = list(model.names.values()) if hasattr(model, "names") else []
+                        self.loaded_classes.update(c.lower() for c in classes)
+                        self.models[model_name] = model
+                        logger.info(f"Loaded {model_name} on {self.device}")
 
-                except Exception as e:
-                    logger.error(f"Failed to load {model_name}: {e}")
+                    except Exception as e:
+                        logger.error(f"Failed to load {model_name}: {e}")
 
-            # Load pending models (YOLO-World, etc.)
-            for model_name, pt_path in pending_models:
-                try:
-                    from ultralytics import YOLO
-                    model = YOLO(str(pt_path))
-                    if self.device == "cuda" and self.config.use_half_precision:
-                        model.to(self.device).half()
-                    else:
-                        model.to(self.device)
+                # Load pending models (YOLO-World, etc.)
+                for model_name, pt_path in pending_models:
+                    try:
+                        from ultralytics import YOLO
+                        model = YOLO(str(pt_path))
+                        if self.device == "cuda" and self.config.use_half_precision:
+                            model.to(self.device).half()
+                        else:
+                            model.to(self.device)
 
-                    self.models[model_name] = model
-                    logger.info(f"Loaded pending model {model_name} on {self.device}")
+                        self.models[model_name] = model
+                        logger.info(f"Loaded pending model {model_name} on {self.device}")
 
-                except Exception as e:
-                    logger.error(f"Failed to load pending model {model_name}: {e}")
+                    except Exception as e:
+                        logger.error(f"Failed to load pending model {model_name}: {e}")
 
-            # Setup model switcher if we have both YOLO11 and YOLO-World
-            self._setup_model_switcher()
+                # Setup model switcher if we have both YOLO11 and YOLO-World
+                self._setup_model_switcher()
 
-            self.is_initialized = len(self.models) > 0
-            if self.is_initialized:
-                logger.info(f"Vision engine ready: {len(self.models)} model(s), classes: {sorted(self.loaded_classes & self.BRAWL_STARS_CLASSES)}")
-            return self.is_initialized
+                self.is_initialized = len(self.models) > 0
+                if self.is_initialized:
+                    logger.info(f"Vision engine ready: {len(self.models)} model(s), classes: {sorted(self.loaded_classes & self.BRAWL_STARS_CLASSES)}")
+                return self.is_initialized
 
         except Exception as e:
             logger.error(f"Fatal error loading models: {e}")
@@ -366,30 +374,38 @@ class YOLOVisionEngine:
         If adaptive frame skip is enabled, may return cached detections
         from the last inference when the current frame is skipped.
         """
-        if not self.is_initialized:
-            return []
+        with self._lock:
+            if not self.is_initialized:
+                return []
 
-        # Adaptive frame skip: check if we should process this frame
-        if self._adaptive_skipper is not None:
-            # Update FPS from inference timing
-            if self._last_inference_time > 0:
-                elapsed = time.time() - self._last_inference_time
-                if elapsed > 0:
-                    self._adaptive_skipper.update_fps(1.0 / elapsed)
+            # Adaptive frame skip: check if we should process this frame
+            if self._adaptive_skipper is not None:
+                # Update FPS from inference timing
+                if self._last_inference_time > 0:
+                    elapsed = time.time() - self._last_inference_time
+                    if elapsed > 0:
+                        self._adaptive_skipper.update_fps(1.0 / elapsed)
 
-            if not self._adaptive_skipper.should_process():
-                self.frame_count += 1
-                return self._last_detections  # Return cached detections
+                if not self._adaptive_skipper.should_process():
+                    self.frame_count += 1
+                    return list(self._last_detections)  # Return copy to avoid external mutation
+
+            self._last_inference_time = time.time()
+
+            # Snapshot shared state for inference outside the lock
+            models = dict(self.models)
+            use_switcher = self.use_model_switcher
+            model_switcher = self.model_switcher
+            config = self.config
 
         detections = []
-        self._last_inference_time = time.time()
 
         # Use model switcher if available
-        if self.use_model_switcher and self.model_switcher:
+        if use_switcher and model_switcher:
             try:
-                result = self.model_switcher.detect(
+                result = model_switcher.detect(
                     screenshot,
-                    conf_threshold=self.config.confidence_threshold
+                    conf_threshold=config.confidence_threshold
                 )
                 
                 if result and result.detections:
@@ -400,8 +416,8 @@ class YOLOVisionEngine:
                             cls_id = int(box.cls[0])
                             
                             # Get class name from the model that produced the result
-                            if result.model_name and result.model_name in self.models:
-                                model = self.models[result.model_name]
+                            if result.model_name and result.model_name in models:
+                                model = models[result.model_name]
                                 class_name = model.names.get(cls_id, "unknown") if hasattr(model, "names") else "unknown"
                             else:
                                 class_name = "unknown"
@@ -423,14 +439,14 @@ class YOLOVisionEngine:
                 logger.error(f"Model switcher error: {e}, falling back to standard detection")
 
         # Standard detection (fallback or if switcher not enabled)
-        for model_name, model in self.models.items():
+        for model_name, model in models.items():
             try:
                 results = model(
                     screenshot,
-                    conf=self.config.confidence_threshold,
+                    conf=config.confidence_threshold,
                     device=self.device,
                     verbose=False,
-                    iou=self.config.iou_threshold,
+                    iou=config.iou_threshold,
                 )
                 for r in results:
                     for box in r.boxes:
@@ -450,19 +466,22 @@ class YOLOVisionEngine:
             except Exception as e:
                 logger.error(f"Inference error on {model_name}: {e}")
 
-        # Cache detections for adaptive frame skip
-        self._last_detections = detections
-        self.frame_count += 1
+        with self._lock:
+            # Cache detections for adaptive frame skip
+            self._last_detections = detections
+            self.frame_count += 1
 
-        # Update adaptive skipper with enemy count
-        if self._adaptive_skipper is not None:
-            enemy_count = sum(1 for d in detections if d.class_name in ("enemy", "player"))
-            self._adaptive_skipper.update_enemy_count(enemy_count)
+            # Update adaptive skipper with enemy count
+            if self._adaptive_skipper is not None:
+                enemy_count = sum(1 for d in detections if d.class_name in ("enemy", "player"))
+                self._adaptive_skipper.update_enemy_count(enemy_count)
 
         return detections
 
     def get_raw_detections(self) -> List[Dict]:
         """Retorna últimas deteções em formato dict serializável."""
+        with self._lock:
+            last = self._last_detections
         return [
             {
                 "class_name": d.class_name,
@@ -474,25 +493,31 @@ class YOLOVisionEngine:
                 "center_x": d.center_x,
                 "center_y": d.center_y,
             }
-            for d in self._last_detections
+            for d in last
         ]
 
     def get_vision_stats(self) -> Dict:
         """Estatísticas do motor de visão para a dashboard."""
-        fps_stats = self._adaptive_skipper.get_stats() if self._adaptive_skipper else {}
-        detections = self._last_detections
+        with self._lock:
+            fps_stats = self._adaptive_skipper.get_stats() if self._adaptive_skipper else {}
+            detections = self._last_detections
+            frame_count = self.frame_count
+            is_initialized = self.is_initialized
+            models_loaded = len(self.models)
+            loaded_classes = sorted(self.loaded_classes & self.BRAWL_STARS_CLASSES)
+            device = self.device
         class_counts = {}
         for d in detections:
             class_counts[d.class_name] = class_counts.get(d.class_name, 0) + 1
         avg_conf = sum(d.confidence for d in detections) / max(1, len(detections))
         return {
-            "initialized": self.is_initialized,
-            "models_loaded": len(self.models),
-            "loaded_classes": sorted(self.loaded_classes & self.BRAWL_STARS_CLASSES),
-            "frame_count": self.frame_count,
+            "initialized": is_initialized,
+            "models_loaded": models_loaded,
+            "loaded_classes": loaded_classes,
+            "frame_count": frame_count,
             "last_detections_count": len(detections),
             "class_counts": class_counts,
             "avg_confidence": round(avg_conf, 3),
-            "device": self.device,
+            "device": device,
             **fps_stats,
         }

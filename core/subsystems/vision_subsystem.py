@@ -8,7 +8,9 @@ AutoCalibrator, OCR, and debug visualizer setup.
 from __future__ import annotations
 
 import logging
+import threading
 import time
+from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -51,6 +53,13 @@ class VisionSubsystem:
             central_config.get("debug_visualizer", False)
             or __import__("os").getenv("PYLAAI_DEBUG_VISUAL", "0") == "1"
         )
+
+        # Threading: inference worker
+        self._inference_stop = threading.Event()
+        self._inference_thread: Optional[threading.Thread] = None
+        self._latest_snapshot: Optional[Any] = None
+        self._snapshot_lock = threading.Lock()
+        self._inference_errors_in_a_row = 0
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -117,9 +126,19 @@ class VisionSubsystem:
         return True
 
     def start(self) -> None:
-        pass
+        """Launch the inference worker thread."""
+        self._inference_stop.clear()
+        self._inference_thread = threading.Thread(
+            target=self._inference_loop, daemon=True, name="vision-inference"
+        )
+        self._inference_thread.start()
 
     def stop(self) -> None:
+        self._inference_stop.set()
+        if self._inference_thread and self._inference_thread.is_alive():
+            self._inference_thread.join(timeout=5.0)
+            if self._inference_thread.is_alive():
+                logger.warning("[VISION] Inference thread não terminou em 5s")
         if self.debug_visualizer:
             try:
                 self.debug_visualizer.stop()
@@ -324,6 +343,111 @@ class VisionSubsystem:
         if not model_loaded:
             logger.error("NO models loaded. Vision will not work.")
         return model_loaded
+
+    # ------------------------------------------------------------------
+    # Threading: inference worker
+    # ------------------------------------------------------------------
+
+    def get_latest_snapshot(self):
+        """Return the most recent GameStateSnapshot (non-blocking)."""
+        with self._snapshot_lock:
+            return self._latest_snapshot
+
+    def _inference_loop(self) -> None:
+        """Consume frames from the emulator buffer and run YOLO + state detection."""
+        from core.ports.vision_port import GameStateSnapshot, HUDState, DetectedObject
+
+        target_interval = 1.0 / 30.0
+        while not self._inference_stop.is_set():
+            frame = None
+            if hasattr(self.wrapper, "emulator_subsystem") and self.wrapper.emulator_subsystem:
+                frame = self.wrapper.emulator_subsystem.get_latest_frame()
+            if frame is None:
+                self._inference_stop.wait(timeout=0.01)
+                continue
+
+            t0 = time.time()
+            snapshot = self._run_inference(frame)
+            if snapshot is not None:
+                with self._snapshot_lock:
+                    self._latest_snapshot = snapshot
+                self._inference_errors_in_a_row = 0
+            else:
+                self._inference_errors_in_a_row += 1
+
+            elapsed = time.time() - t0
+            sleep_time = max(0.0, target_interval - elapsed)
+            self._inference_stop.wait(timeout=sleep_time)
+
+    def _run_inference(self, frame) -> Optional[Any]:
+        """Run detection and state classification on a single frame."""
+        from core.ports.vision_port import GameStateSnapshot, HUDState, DetectedObject
+        import numpy as np
+
+        if frame is None:
+            return None
+        h, w = frame.shape[:2]
+        snapshot = GameStateSnapshot(
+            screenshot=frame,
+            resolution=(w, h),
+            timestamp=time.time(),
+            latency_ms=0.0,
+        )
+
+        # YOLO detection
+        if self.detect_main is not None:
+            try:
+                detections = self.detect_main(frame)
+                snapshot.detected_objects = self._convert_detections(detections, w, h)
+            except Exception as e:
+                logger.debug(f"[VISION] Detection error: {e}")
+
+        # State detection
+        if self.unified_detector is not None:
+            try:
+                result = self.unified_detector.detect(frame)
+                snapshot.game_phase = result.state
+                snapshot.metadata["state_confidence"] = result.confidence
+                snapshot.metadata["state_method"] = result.method
+            except Exception as e:
+                logger.debug(f"[VISION] State detection error: {e}")
+
+        snapshot.latency_ms = (time.time() - snapshot.timestamp) * 1000
+        return snapshot
+
+    def _convert_detections(self, detections, img_w, img_h):
+        """Convert YOLO detections to DetectedObject list."""
+        from core.ports.vision_port import DetectedObject
+        objects = []
+        if detections is None:
+            return objects
+        try:
+            if hasattr(detections, "boxes"):
+                for box in detections.boxes:
+                    x1, y1, x2, y2 = box.xyxy[0].tolist()
+                    cls_id = int(box.cls[0])
+                    conf = float(box.conf[0])
+                    class_name = f"class_{cls_id}"
+                    objects.append(DetectedObject(
+                        class_name=class_name,
+                        confidence=conf,
+                        bbox=(x1 / img_w, y1 / img_h, x2 / img_w, y2 / img_h),
+                        center=((x1 + x2) / (2 * img_w), (y1 + y2) / (2 * img_h)),
+                    ))
+            elif isinstance(detections, list):
+                for d in detections:
+                    if len(d) >= 6:
+                        x1, y1, x2, y2, conf, cls_id = d[:6]
+                        class_name = f"class_{int(cls_id)}"
+                        objects.append(DetectedObject(
+                            class_name=class_name,
+                            confidence=float(conf),
+                            bbox=(x1, y1, x2, y2),
+                            center=((x1 + x2) / 2, (y1 + y2) / 2),
+                        ))
+        except Exception as e:
+            logger.debug(f"[VISION] Detection conversion error: {e}")
+        return objects
 
     # ------------------------------------------------------------------
     # Helpers

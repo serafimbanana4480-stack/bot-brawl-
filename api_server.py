@@ -11,66 +11,184 @@ Fixes Applied:
 - Error #21: remove_brawler actually removes from queue
 - Error #22: match_history populated after each match
 - Error #30: Full OpenAPI documentation on all endpoints
+- Security: API Key auth, rate limiting, CORS whitelist, input sanitization,
+  generic error messages in production
 """
 
 import asyncio
 import json
 import os
+import re
 import socket
-from typing import Dict, List, Optional, Any
+import time
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.responses import JSONResponse, Response
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from starlette.middleware.base import BaseHTTPMiddleware
 
 try:
-    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
     HAS_PROMETHEUS = True
 except ImportError:
     HAS_PROMETHEUS = False
 
-from core.logging_config import setup_logging, get_logger
-from core.metrics import (
-    set_bot_state,
-    inc_matches_completed,
-    inc_errors,
-)
+from core.logging_config import get_logger, setup_logging
+from core.metrics import inc_errors, inc_matches_completed, set_bot_state
 
 setup_logging()
 logger = get_logger(__name__)
 
+# ---------------------------------------------------------------------------
+# Security configuration
+# ---------------------------------------------------------------------------
+
+_LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+_IS_DEBUG = _LOG_LEVEL == "DEBUG"
+
+# Safe CORS whitelist — only these schemes/hosts are allowed
+_SAFE_CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+]
+
+
+def _load_config() -> dict:
+    """Load config.json safely."""
+    try:
+        config_path = Path(__file__).parent / "config.json"
+        if config_path.exists():
+            with open(config_path, encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.warning(f"Failed to load config.json: {e}")
+    return {}
+
+
+def _get_api_key() -> Optional[str]:
+    """Read API key from config.json under api.api_key."""
+    cfg = _load_config()
+    key = cfg.get("api", {}).get("api_key")
+    if isinstance(key, str) and key.strip():
+        return key.strip()
+    return None
+
+
+def _get_cors_origins() -> List[str]:
+    """Return validated CORS origins. Never return arbitrary strings."""
+    cfg = _load_config()
+    raw = cfg.get("api", {}).get("cors_origins", [])
+    validated = []
+    for origin in raw:
+        if not isinstance(origin, str):
+            continue
+        if origin == "*" or origin.strip() == "":
+            logger.warning(f"Rejected unsafe CORS origin: {origin!r}")
+            continue
+        # Strict validation: http(s)://host:port only
+        if re.fullmatch(r"https?://[\w\-.]+(:\d+)?", origin):
+            validated.append(origin)
+        else:
+            logger.warning(f"Rejected invalid CORS origin: {origin}")
+    if validated:
+        return validated
+    logger.info("No valid CORS origins in config; using safe defaults")
+    return list(_SAFE_CORS_ORIGINS)
+
+
+_API_KEY = _get_api_key()
+if _API_KEY is None:
+    logger.warning(
+        "api.api_key not configured in config.json. "
+        "API control endpoints restricted to localhost only."
+    )
 
 # ---------------------------------------------------------------------------
 # Pydantic models for request/response (Error #30 - proper docs)
 # ---------------------------------------------------------------------------
+
+
 class BotConfig(BaseModel):
     """Bot configuration model for updating safety and queue settings."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
     trophy_limit: int = Field(400, description="Maximum trophies before auto-stop")
     warning_trophies: int = Field(380, description="Trophy count that triggers warning")
     max_session_hours: float = Field(3.0, description="Maximum session duration in hours")
     min_apm: int = Field(20, description="Minimum actions per minute")
     max_apm: int = Field(60, description="Maximum actions per minute")
     auto_pause: bool = Field(True, description="Auto-pause on safety trigger")
-    auto_stop_on_detection: bool = Field(True, description="Stop if bot detection suspected")
-    brawler_queue: List[Dict[str, Any]] = Field(default_factory=list, description="Brawler queue config")
-    safety_settings: Dict[str, Any] = Field(default_factory=dict, description="Additional safety settings")
+    auto_stop_on_detection: bool = Field(
+        True, description="Stop if bot detection suspected"
+    )
+    brawler_queue: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Brawler queue config"
+    )
+    safety_settings: Dict[str, Any] = Field(
+        default_factory=dict, description="Additional safety settings"
+    )
     diagnostic_mode: bool = Field(False, description="Enable detailed lobby diagnostics")
+
+    @field_validator("brawler_queue")
+    @classmethod
+    def _validate_brawler_queue(cls, v: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        for item in v:
+            name = item.get("name")
+            if not isinstance(name, str):
+                raise ValueError("brawler_queue items must have a string 'name'")
+            if not re.fullmatch(r"[A-Za-z0-9_\- ]{1,40}", name):
+                raise ValueError(
+                    f"Invalid brawler name: {name!r}. "
+                    "Use 1-40 alphanumerics, spaces, hyphens or underscores."
+                )
+        return v
 
 
 class BrawlerConfigModel(BaseModel):
     """Brawler configuration for adding to queue."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
     name: str = Field(..., description="Brawler name (e.g., 'Colt', 'Shelly')")
     current_trophies: int = Field(0, description="Current trophy count")
     target_trophies: int = Field(350, description="Target trophy count")
     target_wins: int = Field(10, description="Target number of wins")
     priority: int = Field(1, ge=1, le=5, description="Priority 1-5, higher = more priority")
 
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9_\- ]{1,40}", v):
+            raise ValueError(
+                "Brawler name must be 1-40 characters: alphanumerics, spaces, hyphens or underscores."
+            )
+        return v
+
 
 class MatchHistory(BaseModel):
     """Match history entry."""
+
+    model_config = ConfigDict(strict=True)
+
     brawler: str
     result: str
     trophies_gained: int
@@ -112,27 +230,75 @@ def get_bot():
     global _bot_instance, _setup_complete
     if _bot_instance is None:
         from wrapper import PylaAIEnhanced
+
         _bot_instance = PylaAIEnhanced()
         _bot_instance.setup()  # ✅ Call setup after creation
         logger.info("Bot instance created and setup completed")
     return _bot_instance
 
 
-def _load_cors_origins() -> List[str]:
-    """Load CORS origins from config.json or use safe defaults (Fix Error #19)."""
-    try:
-        config_path = Path(__file__).parent / "config.json"
-        if config_path.exists():
-            import json as _json
-            with open(config_path, encoding="utf-8") as f:
-                config = _json.load(f)
-            origins = config.get("api", {}).get("cors_origins", [])
-            if origins:
-                return origins
-    except Exception as e:
-        logger.warning(f"Failed to load CORS from config.json: {e}")
+# ---------------------------------------------------------------------------
+# Slowapi limiter
+# ---------------------------------------------------------------------------
+limiter = Limiter(key_func=get_remote_address)
 
-    return ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000"]
+
+# ---------------------------------------------------------------------------
+# API Key middleware (max 50 linhas)
+# ---------------------------------------------------------------------------
+_PUBLIC_GET_PATHS = {
+    "/health",
+    "/health/deep",
+    "/ready",
+    "/metrics",
+    "/api/brawl-stars/health",
+    "/api/brawl-stars/status",
+    "/api/brawl-stars/metrics",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+}
+
+
+class APIKeyMiddleware(BaseHTTPMiddleware):
+    """Enforces API key on non-public / non-local write requests."""
+
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        method = request.method
+        is_public_get = method == "GET" and (
+            path in _PUBLIC_GET_PATHS
+            or path.startswith("/docs")
+            or path.startswith("/redoc")
+            or path.startswith("/openapi")
+        )
+        if not is_public_get:
+            client_host = request.client.host if request.client else ""
+            is_local = client_host in ("127.0.0.1", "localhost", "::1")
+            if _API_KEY is None:
+                if not is_local:
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "API key not configured. Control endpoints restricted to localhost."},
+                    )
+            else:
+                provided = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
+                if provided != _API_KEY:
+                    return JSONResponse(
+                        status_code=401,
+                        content={"detail": "Invalid or missing API key."},
+                    )
+        try:
+            response = await call_next(request)
+            return response
+        except Exception:
+            logger.exception("Unhandled exception in API request")
+            if _IS_DEBUG:
+                raise
+            return JSONResponse(
+                status_code=500,
+                content={"detail": "Internal server error."},
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -147,17 +313,27 @@ app = FastAPI(
         "- Bot lifecycle management (setup/start/stop)\n"
         "- Brawler queue management\n"
         "- Safety system monitoring\n"
-        "- Match history tracking"
+        "- Match history tracking\n\n"
+        "## Security\n"
+        "- API Key required for control endpoints (header: `X-API-Key`)\n"
+        "- Rate limiting: 10 req/s read, 2 req/s write\n"
+        "- CORS restricted to validated whitelist\n"
     ),
-    version="2.0.0",
+    version="2.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# API key middleware first
+app.add_middleware(APIKeyMiddleware)
+
 # CORS middleware (Fix Error #19 - restricted origins)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_load_cors_origins(),
+    allow_origins=_get_cors_origins(),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
@@ -208,52 +384,62 @@ manager = ConnectionManager()
 # ---------------------------------------------------------------------------
 async def emit_bot_action(action_type: str, details: Dict[str, Any]):
     """Emit bot action event to all WebSocket clients."""
-    await manager.broadcast({
-        "type": "bot_action",
-        "action_type": action_type,
-        "details": details,
-        "timestamp": datetime.now().isoformat()
-    })
+    await manager.broadcast(
+        {
+            "type": "bot_action",
+            "action_type": action_type,
+            "details": details,
+            "timestamp": datetime.now().isoformat(),
+        }
+    )
 
 
 async def emit_match_progress(match_data: Dict[str, Any]):
     """Emit match progress event to all WebSocket clients."""
-    await manager.broadcast({
-        "type": "match_progress",
-        "data": match_data,
-        "timestamp": datetime.now().isoformat()
-    })
+    await manager.broadcast(
+        {
+            "type": "match_progress",
+            "data": match_data,
+            "timestamp": datetime.now().isoformat(),
+        }
+    )
 
 
 async def emit_error(error_type: str, message: str, details: Dict[str, Any] = None):
     """Emit error event to all WebSocket clients."""
-    await manager.broadcast({
-        "type": "error",
-        "error_type": error_type,
-        "message": message,
-        "details": details or {},
-        "timestamp": datetime.now().isoformat()
-    })
+    await manager.broadcast(
+        {
+            "type": "error",
+            "error_type": error_type,
+            "message": message,
+            "details": details or {},
+            "timestamp": datetime.now().isoformat(),
+        }
+    )
 
 
 async def emit_safety_alert(alert_type: str, message: str, severity: str = "warning"):
     """Emit safety alert to all WebSocket clients."""
-    await manager.broadcast({
-        "type": "safety_alert",
-        "alert_type": alert_type,
-        "message": message,
-        "severity": severity,
-        "timestamp": datetime.now().isoformat()
-    })
+    await manager.broadcast(
+        {
+            "type": "safety_alert",
+            "alert_type": alert_type,
+            "message": message,
+            "severity": severity,
+            "timestamp": datetime.now().isoformat(),
+        }
+    )
 
 
 async def emit_telemetry_update(telemetry_data: Dict[str, Any]):
     """Emit telemetry update to all WebSocket clients."""
-    await manager.broadcast({
-        "type": "telemetry",
-        "data": telemetry_data,
-        "timestamp": datetime.now().isoformat()
-    })
+    await manager.broadcast(
+        {
+            "type": "telemetry",
+            "data": telemetry_data,
+            "timestamp": datetime.now().isoformat(),
+        }
+    )
 
 
 def record_match(brawler: str, result: str, trophies: int, duration: int):
@@ -262,6 +448,7 @@ def record_match(brawler: str, result: str, trophies: int, duration: int):
         bot = get_bot()
         if bot and bot.match_controller:
             from match_controller import MatchResult
+
             match_result = MatchResult(
                 match_id=f"api_match_{int(datetime.now().timestamp())}",
                 timestamp=datetime.now().isoformat(),
@@ -277,7 +464,9 @@ def record_match(brawler: str, result: str, trophies: int, duration: int):
             )
             bot.match_controller.history.add_match(match_result)
             inc_matches_completed()
-            logger.info(f"Match recorded via bot: {brawler} - {result} ({trophies:+d} trophies)")
+            logger.info(
+                f"Match recorded via bot: {brawler} - {result} ({trophies:+d} trophies)"
+            )
     except Exception as e:
         logger.warning(f"Failed to record match via bot: {e}")
         inc_errors("record_match")
@@ -297,6 +486,18 @@ async def websocket_endpoint(websocket: WebSocket):
     - safety_alert: When safety limits are approached
     - error: On errors
     """
+    # WebSocket auth: reuse API key or localhost check
+    if _API_KEY is not None:
+        provided = websocket.headers.get("x-api-key") or websocket.headers.get("X-API-Key")
+        if provided != _API_KEY:
+            await websocket.close(code=1008, reason="Invalid or missing API key")
+            return
+    else:
+        client_host = websocket.client.host if websocket.client else ""
+        if client_host not in ("127.0.0.1", "localhost", "::1"):
+            await websocket.close(code=1008, reason="Control endpoints restricted to localhost")
+            return
+
     await manager.connect(websocket)
     try:
         while True:
@@ -306,7 +507,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 if message.get("type") == "ping":
                     await manager.send_personal({"type": "pong"}, websocket)
             except json.JSONDecodeError:
-                logger.warning(f"Invalid JSON received via WebSocket")
+                logger.warning("Invalid JSON received via WebSocket")
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception as e:
@@ -315,38 +516,43 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 # ---------------------------------------------------------------------------
-# Health and Readiness endpoints
+# Health and Readiness endpoints (PUBLIC — no API key required)
 # ---------------------------------------------------------------------------
 @app.get("/health", summary="Shallow health check", tags=["Health"])
-async def health_check():
+@limiter.limit("10/second")
+async def health_check(request: Request):
     """
     Liveness + shallow health check.
     Checks ADB availability and YOLO model presence.
     Does NOT require a running emulator.
+    Does NOT require API key (public endpoint).
     """
     from core.health_checks import health_shallow, to_dict
+
     report = health_shallow()
-    from fastapi.responses import JSONResponse
     status_code = 200 if report.overall == "healthy" else 503
     return JSONResponse(content=to_dict(report), status_code=status_code)
 
 
 @app.get("/health/deep", summary="Deep health check", tags=["Health"])
-async def health_deep_check():
+@limiter.limit("10/second")
+async def health_deep_check(request: Request):
     """
     Deep health check.
     Checks ADB, emulator connection, YOLO model, and screenshot pipeline.
     Requires a running emulator.
+    Does NOT require API key (public endpoint).
     """
     from core.health_checks import health_deep as _health_deep, to_dict
+
     report = _health_deep()
-    from fastapi.responses import JSONResponse
     status_code = 200 if report.overall == "healthy" else 503
     return JSONResponse(content=to_dict(report), status_code=status_code)
 
 
 @app.get("/metrics", summary="Prometheus metrics", tags=["Monitoring"])
-async def metrics():
+@limiter.limit("10/second")
+async def metrics(request: Request):
     """Expose Prometheus metrics."""
     if not HAS_PROMETHEUS:
         return Response(content="prometheus_client not installed", status_code=503)
@@ -354,7 +560,8 @@ async def metrics():
 
 
 @app.get("/ready", summary="Readiness check", tags=["Health"])
-async def readiness_check() -> Dict[str, Any]:
+@limiter.limit("10/second")
+async def readiness_check(request: Request) -> Dict[str, Any]:
     """
     Readiness probe: returns 200 only when the bot instance is
     initialized, the state manager is running, and ADB is connected.
@@ -373,28 +580,32 @@ async def readiness_check() -> Dict[str, Any]:
         checks["bot_instance"] = True
 
         # Check state manager
-        if hasattr(bot, 'state_manager') and bot.state_manager:
-            checks["state_manager_running"] = getattr(bot.state_manager, 'running', False)
-            details["current_state"] = getattr(bot.state_manager, 'current_state', 'unknown')
+        if hasattr(bot, "state_manager") and bot.state_manager:
+            checks["state_manager_running"] = getattr(
+                bot.state_manager, "running", False
+            )
+            details["current_state"] = getattr(
+                bot.state_manager, "current_state", "unknown"
+            )
 
         # Check ADB / emulator controller
-        if hasattr(bot, 'emulator_controller') and bot.emulator_controller:
+        if hasattr(bot, "emulator_controller") and bot.emulator_controller:
             ec = bot.emulator_controller
             # Try a lightweight health check
-            if hasattr(ec, 'adb') and hasattr(ec.adb, 'ping'):
+            if hasattr(ec, "adb") and hasattr(ec.adb, "ping"):
                 try:
                     ec.adb.ping()
                     checks["adb_connected"] = True
                 except Exception:
                     checks["adb_connected"] = False
-            elif hasattr(ec, 'is_connected'):
+            elif hasattr(ec, "is_connected"):
                 checks["adb_connected"] = ec.is_connected()
             else:
                 # Assume connected if controller exists
                 checks["adb_connected"] = True
 
         # Get bot health check if available
-        if hasattr(bot, 'check_health'):
+        if hasattr(bot, "check_health"):
             health = bot.check_health()
             details["health"] = health
 
@@ -411,48 +622,34 @@ async def readiness_check() -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Prometheus metrics endpoint
-# ---------------------------------------------------------------------------
-@app.get("/metrics", summary="Prometheus metrics", tags=["Monitoring"])
-async def metrics() -> Response:
-    """
-    Exposes metrics in Prometheus text exposition format.
-    Requires `prometheus-client` to be installed.
-    """
-    if not HAS_PROMETHEUS:
-        return Response(
-            "# Prometheus client not installed\n",
-            media_type="text/plain",
-            status_code=503,
-        )
-    return Response(
-        generate_latest(),
-        media_type=CONTENT_TYPE_LATEST,
-    )
-
-
-# ---------------------------------------------------------------------------
 # REST API endpoints
 # ---------------------------------------------------------------------------
 @app.get("/api/brawl-stars/status", summary="Get bot status", tags=["Bot Control"])
-async def get_status() -> Dict[str, Any]:
+@limiter.limit("10/second")
+async def get_status(request: Request) -> Dict[str, Any]:
     """
     Returns the current bot status including running state, current brawler,
     session duration, and safety system status.
     """
     bot = get_bot()
     status = bot.get_status()
-    current_state = status.get("current_state", "unknown") if isinstance(status, dict) else "unknown"
+    current_state = (
+        status.get("current_state", "unknown")
+        if isinstance(status, dict)
+        else "unknown"
+    )
     set_bot_state(current_state)
     return {"success": True, "status": status}
 
 
 @app.get("/api/brawl-stars/logs", summary="Get recent logs with filters", tags=["Monitoring"])
+@limiter.limit("10/second")
 async def get_logs(
+    request: Request,
     n: int = 100,
     category: Optional[str] = None,
     level: Optional[str] = None,
-    search: Optional[str] = None
+    search: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Get recent logs from the log manager with optional filters.
@@ -472,7 +669,9 @@ async def get_logs(
         # Apply text search filter if provided
         if search:
             search_lower = search.lower()
-            logs = [log for log in logs if search_lower in log.get("message", "").lower()]
+            logs = [
+                log for log in logs if search_lower in log.get("message", "").lower()
+            ]
 
         # Get statistics
         stats = log_manager.get_stats()
@@ -486,23 +685,24 @@ async def get_logs(
                 "n": n,
                 "category": category,
                 "level": level,
-                "search": search
+                "search": search,
             },
-            "stats": stats
+            "stats": stats,
         }
     except Exception as e:
         logger.error(f"[API] Erro ao obter logs recentes: {e}")
         inc_errors("api_logs")
         return {
             "success": False,
-            "error": str(e),
+            "error": str(e) if _IS_DEBUG else "Failed to retrieve logs.",
             "logs": [],
-            "count": 0
+            "count": 0,
         }
 
 
 @app.get("/api/brawl-stars/telemetry", summary="Get real-time telemetry metrics", tags=["Monitoring"])
-async def get_telemetry() -> Dict[str, Any]:
+@limiter.limit("10/second")
+async def get_telemetry(request: Request) -> Dict[str, Any]:
     """
     Returns detailed real-time telemetry metrics including:
     - APM (Actions Per Minute)
@@ -514,45 +714,53 @@ async def get_telemetry() -> Dict[str, Any]:
     - Session statistics
     """
     bot = get_bot()
-    
+
     # Obter status do bot
     bot_status = bot.get_status()
-    
+
     # Obter status do safety system se disponível
     safety_status = {}
-    if hasattr(bot, 'safety_system') and bot.safety_system:
+    if hasattr(bot, "safety_system") and bot.safety_system:
         safety_status = bot.safety_system.get_status()
-    
+
     # Obter status do tracker se disponível
     tracker_status = {}
-    if hasattr(bot, 'play_logic') and bot.play_logic and hasattr(bot.play_logic, 'enemy_tracker'):
+    if (
+        hasattr(bot, "play_logic")
+        and bot.play_logic
+        and hasattr(bot.play_logic, "enemy_tracker")
+    ):
         if bot.play_logic.enemy_tracker:
             # Usar get_stats() do tracker para obter estatísticas consistentes
             tracker_status = bot.play_logic.enemy_tracker.get_stats()
-    
+
     # Obter métricas recentes de treinamento se disponível
     training_metrics = {}
-    if hasattr(bot, 'training_monitor') and bot.training_monitor:
-        if hasattr(bot.training_monitor, 'get_recent_metrics'):
+    if hasattr(bot, "training_monitor") and bot.training_monitor:
+        if hasattr(bot.training_monitor, "get_recent_metrics"):
             try:
-                training_metrics = bot.training_monitor.get_recent_metrics(n_sessions=10)
-                logger.debug(f"[API] Métricas de treinamento obtidas: {training_metrics}")
+                training_metrics = bot.training_monitor.get_recent_metrics(
+                    n_sessions=10
+                )
+                logger.debug(
+                    f"[API] Métricas de treinamento obtidas: {training_metrics}"
+                )
             except Exception as e:
                 logger.warning(f"[API] Falha ao obter métricas de treinamento: {e}")
-    
+
     # Calcular win rate do histórico de partidas (via bot persistent history)
     mh = _get_bot_match_history()
     win_rate = 0.0
     if mh:
         wins = sum(1 for m in mh if m.get("result") == "win")
         win_rate = wins / len(mh) * 100
-    
+
     # Calcular média de troféus ganhos por partida
     avg_trophies_per_match = 0
     if mh:
         total_trophies = sum(m.get("trophies_change", 0) for m in mh)
         avg_trophies_per_match = total_trophies / len(mh)
-    
+
     telemetry = {
         "success": True,
         "timestamp": datetime.now().isoformat(),
@@ -569,48 +777,63 @@ async def get_telemetry() -> Dict[str, Any]:
                     "brawler": m.get("brawler"),
                     "result": m.get("result"),
                     "trophies_gained": m.get("trophies_change", 0),
-                    "timestamp": m.get("timestamp")
+                    "timestamp": m.get("timestamp"),
                 }
                 for m in mh[-10:]
-            ]
+            ],
         },
         "performance_metrics": {
             "apm": safety_status.get("apm", 0) if safety_status else 0,
-            "suspicion_score": safety_status.get("suspicion_score", 0) if safety_status else 0,
-            "human_likeness_score": safety_status.get("human_likeness_score", 100) if safety_status else 100,
-            "avg_velocity": safety_status.get("avg_velocity", 0) if safety_status else 0,
-            "max_acceleration": safety_status.get("max_acceleration", 0) if safety_status else 0,
-            "curvature_variance": safety_status.get("curvature_variance", 0) if safety_status else 0
-        }
+            "suspicion_score": safety_status.get("suspicion_score", 0)
+            if safety_status
+            else 0,
+            "human_likeness_score": safety_status.get("human_likeness_score", 100)
+            if safety_status
+            else 100,
+            "avg_velocity": safety_status.get("avg_velocity", 0)
+            if safety_status
+            else 0,
+            "max_acceleration": safety_status.get("max_acceleration", 0)
+            if safety_status
+            else 0,
+            "curvature_variance": safety_status.get("curvature_variance", 0)
+            if safety_status
+            else 0,
+        },
     }
-    
+
     return telemetry
 
 
 @app.get("/api/brawl-stars/emulators", summary="Get available emulators", tags=["Emulators"])
-async def get_emulators(emulator_type: Optional[str] = None) -> Dict[str, Any]:
+@limiter.limit("10/second")
+async def get_emulators(request: Request, emulator_type: Optional[str] = None) -> Dict[str, Any]:
     """
     Returns available emulators with optional filter by type.
-    
+
     Parameters:
     - emulator_type: Filter by emulator type (e.g., "LDPlayer", "BlueStacks", "Nox")
     """
     from brawl_bot.emulator_detector import get_emulator_detector
-    
+
     try:
         detector = get_emulator_detector()
         detector.detect_all()
-        
+
         if emulator_type:
             # Usar get_emulators_by_type() se disponível
-            if hasattr(detector, 'get_emulators_by_type'):
+            if hasattr(detector, "get_emulators_by_type"):
                 emulators = detector.get_emulators_by_type(emulator_type)
             else:
                 # Fallback: filtrar manualmente
-                emulators = [e for e in detector.available_emulators if e.type == emulator_type]
+                emulators = [
+                    e
+                    for e in detector.available_emulators
+                    if e.type == emulator_type
+                ]
         else:
             emulators = detector.available_emulators
-        
+
         return {
             "success": True,
             "timestamp": datetime.now().isoformat(),
@@ -620,38 +843,39 @@ async def get_emulators(emulator_type: Optional[str] = None) -> Dict[str, Any]:
                     "type": e.type,
                     "window_title": e.window_title,
                     "adb_path": e.adb_path,
-                    "port": e.port
+                    "port": e.port,
                 }
                 for e in emulators
             ],
-            "count": len(emulators)
+            "count": len(emulators),
         }
     except Exception as e:
         logger.error(f"[API] Erro ao obter emuladores: {e}")
         return {
             "success": False,
-            "error": str(e),
+            "error": str(e) if _IS_DEBUG else "Failed to retrieve emulators.",
             "emulators": [],
-            "count": 0
+            "count": 0,
         }
 
 
 @app.get("/api/brawl-stars/emulators/{name}", summary="Get emulator by name", tags=["Emulators"])
-async def get_emulator_by_name(name: str) -> Dict[str, Any]:
+@limiter.limit("10/second")
+async def get_emulator_by_name(request: Request, name: str) -> Dict[str, Any]:
     """
     Returns specific emulator by name or window title.
-    
+
     Parameters:
     - name: Emulator name or window title
     """
     from brawl_bot.emulator_detector import get_emulator_detector
-    
+
     try:
         detector = get_emulator_detector()
         detector.detect_all()
-        
+
         # Usar get_emulator_by_name() se disponível
-        if hasattr(detector, 'get_emulator_by_name'):
+        if hasattr(detector, "get_emulator_by_name"):
             emulator = detector.get_emulator_by_name(name)
         else:
             # Fallback: buscar manualmente
@@ -660,7 +884,7 @@ async def get_emulator_by_name(name: str) -> Dict[str, Any]:
                 if e.name == name or e.window_title == name:
                     emulator = e
                     break
-        
+
         if emulator:
             return {
                 "success": True,
@@ -670,43 +894,44 @@ async def get_emulator_by_name(name: str) -> Dict[str, Any]:
                     "type": emulator.type,
                     "window_title": emulator.window_title,
                     "adb_path": emulator.adb_path,
-                    "port": emulator.port
-                }
+                    "port": emulator.port,
+                },
             }
         else:
             return {
                 "success": False,
                 "error": f"Emulator '{name}' not found",
-                "emulator": None
+                "emulator": None,
             }
     except Exception as e:
         logger.error(f"[API] Erro ao obter emulador por nome: {e}")
         return {
             "success": False,
-            "error": str(e),
-            "emulator": None
+            "error": str(e) if _IS_DEBUG else "Failed to retrieve emulator.",
+            "emulator": None,
         }
 
 
 @app.get("/api/brawl-stars/recommended-action", summary="Get recommended action", tags=["Bot Control"])
-async def get_recommended_action() -> Dict[str, Any]:
+@limiter.limit("10/second")
+async def get_recommended_action(request: Request) -> Dict[str, Any]:
     """
     Returns the recommended action based on current state.
     Possible actions: "start_match", "switch_brawler", "continue"
     """
     bot = get_bot()
-    
+
     try:
-        if hasattr(bot, 'match_controller') and bot.match_controller:
+        if hasattr(bot, "match_controller") and bot.match_controller:
             # Usar get_recommended_action() se disponível
-            if hasattr(bot.match_controller, 'get_recommended_action'):
+            if hasattr(bot.match_controller, "get_recommended_action"):
                 action = bot.match_controller.get_recommended_action()
                 logger.info(f"[API] Ação recomendada: {action}")
                 return {
                     "success": True,
                     "timestamp": datetime.now().isoformat(),
                     "action": action,
-                    "reason": _get_action_reason(action, bot.match_controller)
+                    "reason": _get_action_reason(action, bot.match_controller),
                 }
             else:
                 # Fallback: inferir ação baseada no estado
@@ -718,21 +943,21 @@ async def get_recommended_action() -> Dict[str, Any]:
                     "success": True,
                     "timestamp": datetime.now().isoformat(),
                     "action": action,
-                    "reason": "Inferred from bot state (get_recommended_action not available)"
+                    "reason": "Inferred from bot state (get_recommended_action not available)",
                 }
         else:
             return {
                 "success": False,
                 "error": "Match controller not available",
-                "action": None
+                "action": None,
             }
     except Exception as e:
         logger.error(f"[API] Erro ao obter ação recomendada: {e}")
         inc_errors("api_recommended_action")
         return {
             "success": False,
-            "error": str(e),
-            "action": None
+            "error": str(e) if _IS_DEBUG else "Failed to retrieve recommended action.",
+            "action": None,
         }
 
 
@@ -749,115 +974,125 @@ def _get_action_reason(action: str, match_controller) -> str:
 
 
 @app.post("/api/brawl-stars/auto-tuning/tune", summary="Run auto-tuning", tags=["Auto-Tuning"])
-async def run_auto_tuning() -> Dict[str, Any]:
+@limiter.limit("2/second")
+async def run_auto_tuning(request: Request) -> Dict[str, Any]:
     """
     Runs auto-tuning cycle to adjust parameters based on match history.
     Analyzes performance and adjusts attack distance, shot cooldown, safety threshold, etc.
     """
     bot = get_bot()
-    
+
     try:
         if not bot.auto_tuner:
             return {
                 "success": False,
-                "error": "Auto-tuner is not enabled or initialized"
+                "error": "Auto-tuner is not enabled or initialized",
             }
-        
+
         if not bot.play_logic or not bot.safety:
             return {
                 "success": False,
-                "error": "Play logic or safety system not available"
+                "error": "Play logic or safety system not available",
             }
-        
+
         # Executar ciclo de auto-tuning
         result = bot.auto_tuner.tune(bot.play_logic, bot.safety)
-        
+
         return {
             "success": result["success"],
             "timestamp": datetime.now().isoformat(),
             "analysis": result.get("analysis"),
             "adjustments": result.get("adjustments"),
             "current_params": result.get("current_params"),
-            "reason": result.get("reason")
+            "reason": result.get("reason"),
         }
     except Exception as e:
         logger.error(f"[API] Erro ao executar auto-tuning: {e}")
         inc_errors("api_auto_tuning")
         return {
             "success": False,
-            "error": str(e)
+            "error": str(e) if _IS_DEBUG else "Auto-tuning failed.",
         }
 
 
 @app.get("/api/brawl-stars/auto-tuning/status", summary="Get auto-tuning status", tags=["Auto-Tuning"])
-async def get_auto_tuning_status() -> Dict[str, Any]:
+@limiter.limit("10/second")
+async def get_auto_tuning_status(request: Request) -> Dict[str, Any]:
     """
     Returns the current status of the auto-tuning system.
     """
     bot = get_bot()
-    
+
     try:
         if not bot.auto_tuner:
             return {
                 "success": False,
                 "error": "Auto-tuner is not enabled or initialized",
-                "enabled": bot.auto_tuning_enabled if hasattr(bot, 'auto_tuning_enabled') else False
+                "enabled": bot.auto_tuning_enabled
+                if hasattr(bot, "auto_tuning_enabled")
+                else False,
             }
-        
+
         status = bot.auto_tuner.get_tuning_status()
-        
+
         return {
             "success": True,
             "timestamp": datetime.now().isoformat(),
-            "enabled": bot.auto_tuning_enabled if hasattr(bot, 'auto_tuning_enabled') else False,
-            "status": status
+            "enabled": bot.auto_tuning_enabled
+            if hasattr(bot, "auto_tuning_enabled")
+            else False,
+            "status": status,
         }
     except Exception as e:
         logger.error(f"[API] Erro ao obter status do auto-tuner: {e}")
         return {
             "success": False,
-            "error": str(e)
+            "error": str(e) if _IS_DEBUG else "Failed to retrieve auto-tuning status.",
         }
 
 
 @app.post("/api/brawl-stars/auto-tuning/reset", summary="Reset auto-tuning parameters", tags=["Auto-Tuning"])
-async def reset_auto_tuning() -> Dict[str, Any]:
+@limiter.limit("2/second")
+async def reset_auto_tuning(request: Request) -> Dict[str, Any]:
     """
     Resets all auto-tuned parameters to their default values.
     """
     bot = get_bot()
-    
+
     try:
         if not bot.auto_tuner:
             return {
                 "success": False,
-                "error": "Auto-tuner is not enabled or initialized"
+                "error": "Auto-tuner is not enabled or initialized",
             }
-        
+
         if not bot.play_logic or not bot.safety:
             return {
                 "success": False,
-                "error": "Play logic or safety system not available"
+                "error": "Play logic or safety system not available",
             }
-        
+
         # Resetar parâmetros
         success = bot.auto_tuner.reset_params(bot.play_logic, bot.safety)
-        
+
         return {
             "success": success,
             "timestamp": datetime.now().isoformat(),
-            "message": "Parameters reset to defaults" if success else "Failed to reset parameters"
+            "message": "Parameters reset to defaults"
+            if success
+            else "Failed to reset parameters",
         }
     except Exception as e:
         logger.error(f"[API] Erro ao resetar auto-tuning: {e}")
         return {
             "success": False,
-            "error": str(e)
+            "error": str(e) if _IS_DEBUG else "Failed to reset auto-tuning.",
         }
 
 
 @app.post("/api/brawl-stars/setup", summary="Setup the bot", tags=["Bot Control"])
-async def setup_bot() -> Dict[str, Any]:
+@limiter.limit("2/second")
+async def setup_bot(request: Request) -> Dict[str, Any]:
     """
     Initialize the bot: connect to emulator, load models, configure components.
     Must be called before starting the bot.
@@ -869,19 +1104,25 @@ async def setup_bot() -> Dict[str, Any]:
     if bot.setup():
         global _setup_complete
         _setup_complete = True
-        await manager.broadcast({
-            "type": "bot_action",
-            "event": "setup_completed",
-            "timestamp": datetime.now().isoformat()
-        })
+        await manager.broadcast(
+            {
+                "type": "bot_action",
+                "event": "setup_completed",
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
         return {"success": True, "message": "Bot setup completed successfully"}
     else:
         await emit_error("setup_failed", "Failed to setup bot. Ensure emulator is running.")
-        return {"success": False, "error": "Failed to setup bot. Ensure emulator is running."}
+        return {
+            "success": False,
+            "error": "Failed to setup bot. Ensure emulator is running.",
+        }
 
 
 @app.post("/api/brawl-stars/start", summary="Start the bot", tags=["Bot Control"])
-async def start_bot() -> Dict[str, Any]:
+@limiter.limit("2/second")
+async def start_bot(request: Request) -> Dict[str, Any]:
     """
     Start the bot automation loop. Requires setup to be completed first.
     """
@@ -893,7 +1134,10 @@ async def start_bot() -> Dict[str, Any]:
     global _setup_complete
     if not _setup_complete:
         if not bot.setup():
-            return {"success": False, "error": "Failed to setup bot. Ensure emulator is running."}
+            return {
+                "success": False,
+                "error": "Failed to setup bot. Ensure emulator is running.",
+            }
         _setup_complete = True
 
     if bot.start():
@@ -904,7 +1148,8 @@ async def start_bot() -> Dict[str, Any]:
 
 
 @app.post("/api/brawl-stars/stop", summary="Stop the bot", tags=["Bot Control"])
-async def stop_bot() -> Dict[str, Any]:
+@limiter.limit("2/second")
+async def stop_bot(request: Request) -> Dict[str, Any]:
     """Stop the bot automation loop gracefully."""
     bot = get_bot()
     if not bot.running:
@@ -918,7 +1163,8 @@ async def stop_bot() -> Dict[str, Any]:
 
 
 @app.get("/api/brawl-stars/config", summary="Get configuration", tags=["Configuration"])
-async def get_config() -> Dict[str, Any]:
+@limiter.limit("10/second")
+async def get_config(request: Request) -> Dict[str, Any]:
     """Returns the current bot configuration including safety settings."""
     bot = get_bot()
     config = {
@@ -933,25 +1179,27 @@ async def get_config() -> Dict[str, Any]:
         "safety_settings": {
             "break_duration_min": bot.safety.config.break_duration_min,
             "break_duration_max": bot.safety.config.break_duration_max,
-            "suspicious_pattern_threshold": bot.safety.config.suspicious_pattern_threshold
-        }
+            "suspicious_pattern_threshold": bot.safety.config.suspicious_pattern_threshold,
+        },
     }
     return {"success": True, "config": config}
 
 
 @app.post("/api/brawl-stars/config", summary="Update configuration", tags=["Configuration"])
-async def update_config(config: BotConfig) -> Dict[str, Any]:
+@limiter.limit("2/second")
+async def update_config(request: Request, config: BotConfig) -> Dict[str, Any]:
     """Update bot configuration. Changes take effect immediately."""
     bot = get_bot()
     try:
         from .safety_system import SafetyConfig
+
         new_safety_config = SafetyConfig(
             max_trophies=config.trophy_limit,
             warning_trophies=config.warning_trophies,
             max_session_hours=config.max_session_hours,
             min_apm=config.min_apm,
             max_apm=config.max_apm,
-            auto_stop_on_detection=config.auto_stop_on_detection
+            auto_stop_on_detection=config.auto_stop_on_detection,
         )
         bot.safety.config = new_safety_config
 
@@ -964,6 +1212,7 @@ async def update_config(config: BotConfig) -> Dict[str, Any]:
 
         # Update brawler queue
         from .pylaai_real.lobby_automator import BrawlerQueue
+
         if not isinstance(bot.brawler_queue, BrawlerQueue):
             bot.brawler_queue = BrawlerQueue()
         else:
@@ -975,22 +1224,28 @@ async def update_config(config: BotConfig) -> Dict[str, Any]:
                 current_trophies=brawler.get("current_trophies", 0),
                 target_trophies=brawler.get("target_trophies", 350),
                 target_wins=brawler.get("target_wins", 10),
-                priority=brawler.get("priority", 1)
+                priority=brawler.get("priority", 1),
             )
 
-        await manager.broadcast({
-            "type": "config_updated",
-            "timestamp": datetime.now().isoformat()
-        })
+        await manager.broadcast(
+            {
+                "type": "config_updated",
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
         return {"success": True, "message": "Configuration updated successfully"}
 
     except Exception as e:
         logger.error(f"Error updating config: {e}")
-        return {"success": False, "error": str(e)}
+        return {
+            "success": False,
+            "error": str(e) if _IS_DEBUG else "Failed to update configuration.",
+        }
 
 
 @app.get("/api/brawl-stars/match-history", summary="Get match history", tags=["Statistics"])
-async def get_match_history(limit: int = 50) -> Dict[str, Any]:
+@limiter.limit("10/second")
+async def get_match_history(request: Request, limit: int = 50) -> Dict[str, Any]:
     """
     Returns the last N matches played from the bot's persistent history.
 
@@ -1001,12 +1256,13 @@ async def get_match_history(limit: int = 50) -> Dict[str, Any]:
     return {
         "success": True,
         "total": len(mh),
-        "matches": mh[-limit:]
+        "matches": mh[-limit:],
     }
 
 
 @app.get("/api/brawl-stars/safety-status", summary="Get safety status", tags=["Safety"])
-async def get_safety_status() -> Dict[str, Any]:
+@limiter.limit("10/second")
+async def get_safety_status(request: Request) -> Dict[str, Any]:
     """Returns current safety system status including APM, session time, and alerts."""
     bot = get_bot()
     safety_status = bot.safety.get_status()
@@ -1014,7 +1270,8 @@ async def get_safety_status() -> Dict[str, Any]:
 
 
 @app.post("/api/brawl-stars/brawler/add", summary="Add brawler to queue", tags=["Brawler Queue"])
-async def add_brawler(brawler: BrawlerConfigModel) -> Dict[str, Any]:
+@limiter.limit("2/second")
+async def add_brawler(request: Request, brawler: BrawlerConfigModel) -> Dict[str, Any]:
     """
     Add a brawler to the automation queue.
 
@@ -1026,13 +1283,14 @@ async def add_brawler(brawler: BrawlerConfigModel) -> Dict[str, Any]:
         current_trophies=brawler.current_trophies,
         target_trophies=brawler.target_trophies,
         target_wins=brawler.target_wins,
-        priority=brawler.priority
+        priority=brawler.priority,
     )
     return {"success": True, "message": f"Brawler {brawler.name} added to queue"}
 
 
 @app.delete("/api/brawl-stars/brawler/{name}", summary="Remove brawler from queue", tags=["Brawler Queue"])
-async def remove_brawler(name: str) -> Dict[str, Any]:
+@limiter.limit("2/second")
+async def remove_brawler(request: Request, name: str) -> Dict[str, Any]:
     """
     Remove a brawler from the queue by name. (Fix Error #21 - now functional)
     """
@@ -1050,35 +1308,39 @@ async def remove_brawler(name: str) -> Dict[str, Any]:
 
 
 @app.get("/api/brawl-stars/queue", summary="Get brawler queue", tags=["Brawler Queue"])
-async def get_queue() -> Dict[str, Any]:
+@limiter.limit("10/second")
+async def get_queue(request: Request) -> Dict[str, Any]:
     """Returns the current brawler queue with status for each brawler."""
     bot = get_bot()
     return {"success": True, "queue": bot.get_queue()}
 
 
 @app.get("/api/brawl-stars/health", summary="Health check", tags=["System"])
-async def health_check() -> Dict[str, Any]:
+@limiter.limit("10/second")
+async def api_health_check(request: Request):
     """
-    Health check endpoint. Returns system status.
+    Health check endpoint. Returns real system status.
 
     **Response fields:**
-    - status: 'healthy' or 'degraded'
+    - status: 'healthy', 'degraded', or 'unhealthy'
     - bot_running: Whether the bot is currently active
     - websocket_connections: Number of active WebSocket clients
     - setup_complete: Whether initial setup has been done
     """
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "bot_running": _bot_instance.running if _bot_instance else False,
-        "websocket_connections": len(manager.active_connections),
-        "setup_complete": _setup_complete,
-        "version": "2.0.0"
-    }
+    from core.health_checks import health_shallow, to_dict
+    report = health_shallow()
+    content = to_dict(report)
+    content["bot_running"] = _bot_instance.running if _bot_instance else False
+    content["websocket_connections"] = len(manager.active_connections)
+    content["setup_complete"] = _setup_complete
+    content["version"] = "2.1.0"
+    status_code = 200 if report.overall == "healthy" else 503
+    return JSONResponse(content=content, status_code=status_code)
 
 
 @app.get("/api/brawl-stars/performance", summary="Get performance metrics", tags=["Statistics"])
-async def get_performance_metrics() -> Dict[str, Any]:
+@limiter.limit("10/second")
+async def get_performance_metrics(request: Request) -> Dict[str, Any]:
     """
     Returns performance metrics including FPS, latency, and match statistics.
     (Fix Error #27 - performance metrics endpoint)
@@ -1099,13 +1361,16 @@ async def get_performance_metrics() -> Dict[str, Any]:
             "avg_duration_seconds": stats.get("avg_duration", 0),
             "total_trophies_gained": stats.get("total_trophies", 0),
             "bot_running": bot.running,
-            "session_duration_minutes": bot.get_status().get("session_duration_minutes", 0),
-        }
+            "session_duration_minutes": bot.get_status().get(
+                "session_duration_minutes", 0
+            ),
+        },
     }
 
 
 @app.get("/api/brawl-stars/diagnostics", summary="Get bot diagnostics", tags=["System"])
-async def get_diagnostics() -> Dict[str, Any]:
+@limiter.limit("10/second")
+async def get_diagnostics(request: Request) -> Dict[str, Any]:
     """Returns a consolidated diagnostic snapshot for lobby, state, queue, safety and progress."""
     bot = get_bot()
     status = bot.get_status()
@@ -1115,15 +1380,19 @@ async def get_diagnostics() -> Dict[str, Any]:
         "success": True,
         "diagnostics": {
             "bot_running": status.get("running") if isinstance(status, dict) else False,
-            "current_state": status.get("current_state") if isinstance(status, dict) else None,
-            "current_brawler": status.get("current_brawler") if isinstance(status, dict) else None,
+            "current_state": status.get("current_state")
+            if isinstance(status, dict)
+            else None,
+            "current_brawler": status.get("current_brawler")
+            if isinstance(status, dict)
+            else None,
             "queue": status.get("queue") if isinstance(status, dict) else [],
             "safety": status.get("safety") if isinstance(status, dict) else None,
             "diagnostic_mode": diagnostics.get("diagnostic_mode"),
             "lobby": diagnostics.get("lobby"),
             "screen_state": diagnostics.get("screen_state"),
             "progress": diagnostics.get("progress"),
-        }
+        },
     }
 
 
@@ -1132,7 +1401,7 @@ async def get_diagnostics() -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
-    
+
     host = os.getenv("BRAWL_BOT_API_HOST", "127.0.0.1")
     port = int(os.getenv("BRAWL_BOT_API_PORT", "8003"))
 
@@ -1149,9 +1418,4 @@ if __name__ == "__main__":
         raise SystemExit(1)
 
     logger.info("Starting Brawl Stars Bot API...")
-    uvicorn.run(
-        app,
-        host=host,
-        port=port,
-        log_level="info"
-    )
+    uvicorn.run(app, host=host, port=port, log_level="info")

@@ -96,22 +96,23 @@ class ModelEnsembleDetector:
 
     def _load_model(self, name: str):
         """Carrega um modelo sob demanda."""
-        if self._models.get(name) is not None:
-            return
+        with self._lock:
+            if self._models.get(name) is not None:
+                return
 
-        config = next((c for c in self._model_configs if c[0] == name), None)
-        if not config:
-            raise ValueError(f"Modelo {name} não configurado")
+            config = next((c for c in self._model_configs if c[0] == name), None)
+            if not config:
+                raise ValueError(f"Modelo {name} não configurado")
 
-        _, path, _ = config
-        try:
-            from ultralytics import YOLO
-            model = YOLO(path)
-            self._models[name] = model
-            logger.info("[ENSEMBLE] Modelo '%s' carregado de %s", name, path)
-        except Exception as e:
-            logger.error("[ENSEMBLE] Falha ao carregar '%s': %s", name, e)
-            self._models[name] = None
+            _, path, _ = config
+            try:
+                from ultralytics import YOLO
+                model = YOLO(path)
+                self._models[name] = model
+                logger.info("[ENSEMBLE] Modelo '%s' carregado de %s", name, path)
+            except Exception as e:
+                logger.error("[ENSEMBLE] Falha ao carregar '%s': %s", name, e)
+                self._models[name] = None
 
     def ensure_loaded(self):
         """Pré-carrega todos os modelos (chamar no startup)."""
@@ -125,19 +126,24 @@ class ModelEnsembleDetector:
     def _run_single_model(self, name: str, image: np.ndarray) -> List[Detection]:
         """Roda inferência em um modelo e normaliza resultados."""
         self._load_model(name)
-        model = self._models.get(name)
+
+        with self._lock:
+            model = self._models.get(name)
+            conf = self._model_confs[name]
+
         if model is None:
             return []
 
-        conf = self._model_confs[name]
         start = time.time()
 
         try:
             results = model(image, conf=conf, verbose=False, device=self.device)
             duration = time.time() - start
-            self._inference_times[name].append(duration)
-            if len(self._inference_times[name]) > 100:
-                self._inference_times[name] = self._inference_times[name][-100:]
+
+            with self._lock:
+                self._inference_times[name].append(duration)
+                if len(self._inference_times[name]) > 100:
+                    self._inference_times[name] = self._inference_times[name][-100:]
 
             detections = []
             for r in results:
@@ -286,27 +292,29 @@ class ModelEnsembleDetector:
 
     def get_inference_stats(self) -> Dict[str, Any]:
         """Retorna estatísticas de latência por modelo."""
-        stats = {}
-        total_avg = 0.0
-        count = 0
-        for name, times in self._inference_times.items():
-            if times:
-                avg = sum(times) / len(times)
-                stats[name] = {
-                    "avg_ms": round(avg * 1000, 1),
-                    "min_ms": round(min(times) * 1000, 1),
-                    "max_ms": round(max(times) * 1000, 1),
-                    "samples": len(times),
-                }
-                total_avg += avg
-                count += 1
-        if count > 0:
-            stats["_ensemble_total_avg_ms"] = round(total_avg * 1000, 1)
-        return stats
+        with self._lock:
+            stats = {}
+            total_avg = 0.0
+            count = 0
+            for name, times in self._inference_times.items():
+                if times:
+                    avg = sum(times) / len(times)
+                    stats[name] = {
+                        "avg_ms": round(avg * 1000, 1),
+                        "min_ms": round(min(times) * 1000, 1),
+                        "max_ms": round(max(times) * 1000, 1),
+                        "samples": len(times),
+                    }
+                    total_avg += avg
+                    count += 1
+            if count > 0:
+                stats["_ensemble_total_avg_ms"] = round(total_avg * 1000, 1)
+            return stats
 
     def get_model_status(self) -> Dict[str, str]:
         """Status de carregamento dos modelos."""
-        return {
-            name: "loaded" if self._models.get(name) is not None else "not_loaded"
-            for name, _, _ in self._model_configs
-        }
+        with self._lock:
+            return {
+                name: "loaded" if self._models.get(name) is not None else "not_loaded"
+                for name, _, _ in self._model_configs
+            }

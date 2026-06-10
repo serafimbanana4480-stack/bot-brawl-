@@ -13,6 +13,7 @@ Wraps:
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -42,6 +43,7 @@ class VisionAdapter(VisionPort):
         state_detector: Any = None,
         images_path: Optional[Path] = None,
         resolution: Tuple[int, int] = (1920, 1080),
+        snapshot_source: Optional[Any] = None,
     ):
         self._screenshot = screenshot_taker
         self._detector = detector
@@ -51,6 +53,12 @@ class VisionAdapter(VisionPort):
         self._last_snapshot: Optional[GameStateSnapshot] = None
         self._errors_in_a_row = 0
         self._max_errors = 5
+        self._lock = threading.RLock()
+        self._snapshot_source = snapshot_source
+
+    def set_snapshot_source(self, source: Optional[Any]) -> None:
+        """Wire a non-blocking snapshot source (e.g. VisionSubsystem thread)."""
+        self._snapshot_source = source
 
     # ------------------------------------------------------------------
     # VisionPort implementation
@@ -58,99 +66,111 @@ class VisionAdapter(VisionPort):
 
     def initialize(self) -> bool:
         """Lazy init — components are injected or created on demand."""
-        if self._screenshot is None:
-            try:
-                from pylaai_real.screenshot_taker import ScreenshotTaker
-                self._screenshot = ScreenshotTaker()
-                if not self._screenshot.find_window():
-                    logger.error("[VISION_ADAPTER] ScreenshotTaker: no window found")
+        with self._lock:
+            if self._screenshot is None:
+                try:
+                    from pylaai_real.screenshot_taker import ScreenshotTaker
+                    self._screenshot = ScreenshotTaker()
+                    if not self._screenshot.find_window():
+                        logger.error("[VISION_ADAPTER] ScreenshotTaker: no window found")
+                        return False
+                except (ImportError, ModuleNotFoundError, ConnectionError, ValueError, TypeError, RuntimeError, OSError) as e:
+                    logger.error(f"[VISION_ADAPTER] Failed to create ScreenshotTaker: {e}")
                     return False
-            except (ImportError, ModuleNotFoundError, ConnectionError, ValueError, TypeError, RuntimeError, OSError) as e:
-                logger.error(f"[VISION_ADAPTER] Failed to create ScreenshotTaker: {e}")
-                return False
 
-        if self._detector is None:
-            try:
-                from pylaai_real.detect import Detect
-                self._detector = Detect(model_path="models/brawlstars_yolov8_8class.pt")
-            except (ImportError, ModuleNotFoundError, FileNotFoundError, ValueError, TypeError, RuntimeError, OSError) as e:
-                logger.warning(f"[VISION_ADAPTER] Detector not available: {e}")
+            if self._detector is None:
+                try:
+                    from pylaai_real.detect import Detect
+                    self._detector = Detect(model_path="models/brawlstars_yolov8_8class.pt")
+                except (ImportError, ModuleNotFoundError, FileNotFoundError, ValueError, TypeError, RuntimeError, OSError) as e:
+                    logger.warning(f"[VISION_ADAPTER] Detector not available: {e}")
 
-        if self._state_detector is None and self._images_path:
-            try:
-                from pylaai_real.unified_state_detector import UnifiedStateDetector
-                self._state_detector = UnifiedStateDetector(
-                    images_path=self._images_path,
-                    window_w=self._resolution[0],
-                    window_h=self._resolution[1],
-                )
-            except (ImportError, ModuleNotFoundError, TypeError) as e:
-                logger.warning(f"[VISION_ADAPTER] State detector not available: {e}")
+            if self._state_detector is None and self._images_path:
+                try:
+                    from pylaai_real.unified_state_detector import UnifiedStateDetector
+                    self._state_detector = UnifiedStateDetector(
+                        images_path=self._images_path,
+                        window_w=self._resolution[0],
+                        window_h=self._resolution[1],
+                    )
+                except (ImportError, ModuleNotFoundError, TypeError) as e:
+                    logger.warning(f"[VISION_ADAPTER] State detector not available: {e}")
 
-        logger.info("[VISION_ADAPTER] Initialized")
-        return True
+            logger.info("[VISION_ADAPTER] Initialized")
+            return True
 
     def capture_and_perceive(self) -> Optional[GameStateSnapshot]:
+        # Fast non-blocking path when wired to a threaded vision subsystem
+        if self._snapshot_source is not None:
+            snapshot = self._snapshot_source()
+            if snapshot is not None:
+                with self._lock:
+                    self._last_snapshot = snapshot
+            return snapshot
+
         t0 = time.time()
 
-        if self._screenshot is None:
-            return None
+        with self._lock:
+            if self._screenshot is None:
+                return None
 
-        # Capture
-        frame = self._screenshot.take()
-        if frame is None:
-            self._errors_in_a_row += 1
-            if self._errors_in_a_row >= self._max_errors:
-                logger.error("[VISION_ADAPTER] Screenshot failing repeatedly")
-            return None
-        self._errors_in_a_row = 0
+            # Capture
+            frame = self._screenshot.take()
+            if frame is None:
+                self._errors_in_a_row += 1
+                if self._errors_in_a_row >= self._max_errors:
+                    logger.error("[VISION_ADAPTER] Screenshot failing repeatedly")
+                return None
+            self._errors_in_a_row = 0
 
-        h, w = frame.shape[:2]
-        snapshot = GameStateSnapshot(
-            screenshot=frame,
-            resolution=(w, h),
-            timestamp=time.time(),
-            latency_ms=0.0,
-        )
+            h, w = frame.shape[:2]
+            snapshot = GameStateSnapshot(
+                screenshot=frame,
+                resolution=(w, h),
+                timestamp=time.time(),
+                latency_ms=0.0,
+            )
 
-        # Detect objects (YOLO)
-        if self._detector is not None:
-            try:
-                detections = self._detector(frame)
-                snapshot.detected_objects = self._convert_detections(detections, w, h)
-            except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
-                logger.debug(f"[VISION_ADAPTER] Detection error: {e}")
+            # Detect objects (YOLO)
+            if self._detector is not None:
+                try:
+                    detections = self._detector(frame)
+                    snapshot.detected_objects = self._convert_detections(detections, w, h)
+                except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
+                    logger.debug(f"[VISION_ADAPTER] Detection error: {e}")
 
-        # Detect game state (lobby, combat, etc.)
-        if self._state_detector is not None:
-            try:
-                result = self._state_detector.detect(frame)
-                snapshot.game_phase = result.state
-                snapshot.metadata["state_confidence"] = result.confidence
-                snapshot.metadata["state_method"] = result.method
-            except (FileNotFoundError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
-                logger.debug(f"[VISION_ADAPTER] State detection error: {e}")
+            # Detect game state (lobby, combat, etc.)
+            if self._state_detector is not None:
+                try:
+                    result = self._state_detector.detect(frame)
+                    snapshot.game_phase = result.state
+                    snapshot.metadata["state_confidence"] = result.confidence
+                    snapshot.metadata["state_method"] = result.method
+                except (FileNotFoundError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
+                    logger.debug(f"[VISION_ADAPTER] State detection error: {e}")
 
-        snapshot.latency_ms = (time.time() - t0) * 1000
-        self._last_snapshot = snapshot
-        return snapshot
+            snapshot.latency_ms = (time.time() - t0) * 1000
+            self._last_snapshot = snapshot
+            return snapshot
 
     def get_detected_objects(self, class_filter: Optional[List[str]] = None) -> List[DetectedObject]:
-        if self._last_snapshot is None:
-            return []
-        objects = self._last_snapshot.detected_objects
+        with self._lock:
+            if self._last_snapshot is None:
+                return []
+            objects = self._last_snapshot.detected_objects
         if class_filter:
             objects = [o for o in objects if o.class_name in class_filter]
         return objects
 
     def health_check(self) -> Dict[str, Any]:
-        return {
-            "screenshot_ok": self._screenshot is not None,
-            "detector_ok": self._detector is not None,
-            "state_detector_ok": self._state_detector is not None,
-            "last_latency_ms": self._last_snapshot.latency_ms if self._last_snapshot else 0.0,
-            "errors_in_a_row": self._errors_in_a_row,
-        }
+        with self._lock:
+            return {
+                "screenshot_ok": self._screenshot is not None or self._snapshot_source is not None,
+                "detector_ok": self._detector is not None,
+                "state_detector_ok": self._state_detector is not None,
+                "last_latency_ms": self._last_snapshot.latency_ms if self._last_snapshot else 0.0,
+                "errors_in_a_row": self._errors_in_a_row,
+            }
 
     def shutdown(self) -> None:
         logger.info("[VISION_ADAPTER] Shutdown")

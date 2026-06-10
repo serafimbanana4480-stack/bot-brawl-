@@ -207,7 +207,7 @@ class AlertSystem:
 
     def resolve(self, alert_id: str) -> bool:
         """Marca alerta como resolvido."""
-        for alert in alert_id in self._alerts:
+        for alert in self._alerts:
             if alert.id == alert_id:
                 alert.auto_resolved = True
                 return True

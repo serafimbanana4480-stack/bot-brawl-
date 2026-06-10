@@ -7,14 +7,23 @@ Provides shallow (/health) and deep (/health/deep) checks.
 
 import os
 import shutil
+import socket
 import subprocess
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from core.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+HEALTH_CHECK_INTERVAL = int(os.getenv("HEALTH_CHECK_INTERVAL", "30"))
+_DISK_WARN_THRESHOLD = float(os.getenv("HEALTH_DISK_THRESHOLD", "80"))
+_MEM_WARN_THRESHOLD = float(os.getenv("HEALTH_MEM_THRESHOLD", "80"))
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -64,7 +73,7 @@ def check_adb() -> HealthResult:
             name="adb",
             status="fail",
             response_time_ms=elapsed,
-            error=str(exc),
+            error=str(e),
         )
 
 
@@ -104,7 +113,7 @@ def check_emulator() -> HealthResult:
             name="emulator",
             status="fail",
             response_time_ms=elapsed,
-            error=str(exc),
+            error=str(e),
         )
 
 
@@ -181,28 +190,101 @@ def check_screenshot() -> HealthResult:
         )
 
 
+def check_memory() -> HealthResult:
+    """Check system memory usage is below threshold."""
+    import time
+    start = time.perf_counter()
+    try:
+        import psutil
+        mem = psutil.virtual_memory()
+        elapsed = (time.perf_counter() - start) * 1000
+        usage_pct = mem.percent
+        status = "pass" if usage_pct < _MEM_WARN_THRESHOLD else "warn" if usage_pct < 95 else "fail"
+        return HealthResult(
+            name="memory",
+            status=status,
+            response_time_ms=elapsed,
+            details={"percent": usage_pct, "available_mb": round(mem.available / (1024 * 1024), 2)},
+            error=f"Memory usage {usage_pct}% exceeds {_MEM_WARN_THRESHOLD}%" if status != "pass" else None,
+        )
+    except Exception as exc:
+        elapsed = (time.perf_counter() - start) * 1000
+        return HealthResult(
+            name="memory",
+            status="warn",
+            response_time_ms=elapsed,
+            error=f"psutil not available: {exc}",
+        )
+
+
+def check_disk() -> HealthResult:
+    """Check disk usage is below threshold."""
+    import time
+    start = time.perf_counter()
+    try:
+        import psutil
+        disk = psutil.disk_usage("/")
+        elapsed = (time.perf_counter() - start) * 1000
+        usage_pct = disk.percent
+        status = "pass" if usage_pct < _DISK_WARN_THRESHOLD else "warn" if usage_pct < 95 else "fail"
+        return HealthResult(
+            name="disk",
+            status=status,
+            response_time_ms=elapsed,
+            details={"percent": usage_pct, "free_gb": round(disk.free / (1024 ** 3), 2)},
+            error=f"Disk usage {usage_pct}% exceeds {_DISK_WARN_THRESHOLD}%" if status != "pass" else None,
+        )
+    except Exception as exc:
+        elapsed = (time.perf_counter() - start) * 1000
+        return HealthResult(
+            name="disk",
+            status="warn",
+            response_time_ms=elapsed,
+            error=f"psutil not available: {exc}",
+        )
+
+
+def check_api_up() -> HealthResult:
+    """Check API process is running and responsive."""
+    import time
+    start = time.perf_counter()
+    try:
+        port = int(os.getenv("BRAWL_BOT_API_PORT", "8003"))
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(1.0)
+            result = sock.connect_ex(("127.0.0.1", port))
+        elapsed = (time.perf_counter() - start) * 1000
+        if result == 0:
+            return HealthResult(
+                name="api",
+                status="pass",
+                response_time_ms=elapsed,
+                details={"port": port, "message": "API is up"},
+            )
+        return HealthResult(
+            name="api",
+            status="fail",
+            response_time_ms=elapsed,
+            error=f"API not listening on port {port}",
+        )
+    except Exception as exc:
+        elapsed = (time.perf_counter() - start) * 1000
+        return HealthResult(
+            name="api",
+            status="warn",
+            response_time_ms=elapsed,
+            error=str(exc),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Aggregators
 # ---------------------------------------------------------------------------
-def check_api_up() -> HealthResult:
-    """Shallow check: API process is running."""
-    import time
-    start = time.perf_counter()
-    elapsed = (time.perf_counter() - start) * 1000
-    return HealthResult(
-        name="api",
-        status="pass",
-        response_time_ms=elapsed,
-        details={"message": "API is up"},
-    )
-
-
-_SHALLOW_CHECKS = [check_api_up]
-_DEEP_CHECKS = [check_adb, check_emulator, check_yolo_model, check_screenshot]
+_SHALLOW_CHECKS = [check_api_up, check_memory, check_disk]
+_DEEP_CHECKS = [check_adb, check_emulator, check_yolo_model, check_screenshot, check_memory, check_disk]
 
 
 def _run_checks(checks: List[Any]) -> HealthReport:
-    from datetime import datetime, timezone
     results: List[HealthResult] = []
     for fn in checks:
         try:

@@ -3,7 +3,7 @@
 # ============================================================================
 
 # ---------------------------------------------------------------------------
-# Stage 1: Builder
+# Stage 1: Builder — pre-build wheels for all dependencies
 # ---------------------------------------------------------------------------
 FROM python:3.11-slim AS builder
 
@@ -20,17 +20,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip and install build tools
 RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Copy only pyproject.toml first for layer caching
-COPY pyproject.toml ./
-
-# Install project in editable mode (dependencies resolved from pyproject.toml)
-RUN pip install --no-cache-dir -e .
+# Copy requirements and build wheels
+COPY requirements.txt .
+RUN pip wheel --no-cache-dir --wheel-dir /build/wheels -r requirements.txt
 
 # ---------------------------------------------------------------------------
-# Stage 2: Runtime
+# Stage 2: Runtime — install from wheels, no site-packages copy
 # ---------------------------------------------------------------------------
 FROM python:3.11-slim AS runtime
 
@@ -55,9 +52,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy installed Python packages from builder
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+# Install Python dependencies from pre-built wheels (layer caching)
+COPY --from=builder /build/wheels /tmp/wheels
+COPY requirements.txt .
+RUN pip install --no-cache-dir --no-index --find-links=/tmp/wheels -r requirements.txt \
+    && rm -rf /tmp/wheels
 
 # Ensure required asset directories exist before copying application code
 RUN mkdir -p /app/images /app/models /app/logs && chown -R brawlbot:brawlbot /app
@@ -75,7 +74,8 @@ ENV PYTHONUNBUFFERED=1 \
     LOG_LEVEL=INFO \
     LOG_FORMAT=json \
     ADB_SERVER_SOCKET=tcp:host.docker.internal:5037 \
-    BRAWL_BOT_API_PORT=8003
+    BRAWL_BOT_API_PORT=8003 \
+    HEALTH_CHECK_INTERVAL=30
 
 # Expose API port (must match config.json and BRAWL_BOT_API_PORT)
 EXPOSE 8003

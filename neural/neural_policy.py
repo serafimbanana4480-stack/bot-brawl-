@@ -198,12 +198,12 @@ class NeuralPolicy(nn.Module):
             if game_state_object is not None:
                 enemy_context = self._encode_enemy_context(game_state_object, grid.device)
             
-            # Forward pass
+            # Forward pass — preserve temporal memory across frames
             policy_logits, value = self.forward(
                 grid,
                 state_features,
                 enemy_context=enemy_context,
-                reset_hidden=True,
+                reset_hidden=False,
             )
             
             # Get action probabilities

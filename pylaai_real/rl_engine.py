@@ -363,12 +363,14 @@ class OnlineLearner:
         q_save_path: Path = Path("data/q_table.pkl"),
         elo_save_path: Path = Path("data/elo_ratings.json"),
         reward_bridge=None,
+        gameplay_collector=None,
         enabled: bool = True,
         use_neural: bool = True,
         neural_schema: str = "core",
     ):
         self.enabled = enabled
         self.reward_bridge = reward_bridge
+        self.gameplay_collector = gameplay_collector
 
         # RL Bridge: NeuralPolicy + PPO + Q-Learning fallback
         self.rl_bridge = None
@@ -399,6 +401,7 @@ class OnlineLearner:
         self.current_brawler: Optional[str] = None
         self.episode_reward: float = 0.0
         self.episode_start_time: Optional[float] = None
+        self._last_experience: Optional[Dict] = None
 
         logger.info(f"[RL] OnlineLearner inicializado: enabled={enabled}, neural={use_neural}")
 
@@ -409,10 +412,16 @@ class OnlineLearner:
         self.episode_reward = 0.0
         self.episode_start_time = time.time()
         self.q_learning.frame_rewards.clear()
+        self._last_experience = None
         if self.rl_bridge is not None:
             self.rl_bridge.start_episode()
         if self.reward_bridge:
             self.reward_bridge.start_match()
+        if self.gameplay_collector:
+            self.gameplay_collector.start_episode(
+                brawler_name=brawler_name,
+                map_name=map_name,
+            )
         logger.info(f"[RL] Episodio iniciado: {brawler_name} @ {map_name or 'unknown'}")
 
     def get_action(self, state: Tuple, default_action: str = "idle", **kwargs) -> Tuple[str, float]:
@@ -423,30 +432,113 @@ class OnlineLearner:
         # NeuralPolicy path
         if self.use_neural and self.rl_bridge is not None:
             try:
-                return self.rl_bridge.get_action(state, **kwargs)
+                action, confidence = self.rl_bridge.get_action(state, **kwargs)
+                # Guarda experiencia para coleta de dados
+                self._last_experience = self.rl_bridge.get_last_experience()
+                return action, confidence
             except Exception as e:
                 logger.debug(f"[RL] NeuralPolicy falhou: {e}, fallback Q-Learning")
 
         # Q-Learning fallback
         action, confidence = self.q_learning.get_action(state)
+        self._last_experience = None
         return action, confidence
 
-    def learn_from_frame(self, state: Tuple, action: str, reward: float, next_state: Tuple, **kwargs):
-        """Atualiza RL com uma transicao de frame."""
+    def learn_from_frame(
+        self,
+        state: Tuple,
+        action: str,
+        reward: float,
+        next_state: Tuple,
+        detections: Optional[Dict] = None,
+        player_pos: Optional[Tuple[float, float]] = None,
+        enemies: Optional[List] = None,
+        damage_dealt: float = 0.0,
+        damage_taken: float = 0.0,
+        power_cubes_collected: int = 0,
+        action_was_good: Optional[bool] = None,
+        **kwargs,
+    ):
+        """Atualiza RL com uma transicao de frame e coleta dados para treino."""
         if not self.enabled:
             return
 
-        # Neural path
+        # 1. Log combat frame no RewardBridge para dense reward shaping
+        if self.reward_bridge is not None:
+            try:
+                self.reward_bridge.log_combat_frame(
+                    enemies_detected=len(enemies) if enemies else 0,
+                    damage_dealt=damage_dealt,
+                    damage_taken=damage_taken,
+                    power_cubes_collected=power_cubes_collected,
+                    action_taken=action,
+                    action_was_good=action_was_good,
+                )
+            except Exception as e:
+                logger.debug(f"[RL] RewardBridge log_combat_frame falhou: {e}")
+
+        # 2. Neural path: atualiza experience buffer
         if self.use_neural and self.rl_bridge is not None:
             try:
-                self.rl_bridge.learn_from_frame(state, action, reward, next_state, **kwargs)
+                self.rl_bridge.learn_from_frame(
+                    state, action, reward, next_state,
+                    player_pos=player_pos,
+                    enemies=enemies,
+                    detections=detections,
+                    **kwargs,
+                )
             except Exception as e:
                 logger.debug(f"[RL] Neural learn falhou: {e}")
 
-        # Q-Learning (sempre atualiza para manter fallback fresco)
+        # 3. Q-Learning (sempre atualiza para manter fallback fresco)
         self.q_learning.update(state, action, reward, next_state)
         self.q_learning.record_reward(reward)
         self.episode_reward += reward
+
+        # 4. Coleta de dados no GameplayCollector
+        if self.gameplay_collector is not None:
+            try:
+                # Constroi dados do frame
+                frame_data = {
+                    "state": "in_game",
+                    "action": {"name": action, "confidence": kwargs.get("confidence", 0.0)},
+                    "detections": detections,
+                    "reward": reward,
+                }
+
+                # Adiciona dados RL da NeuralPolicy se disponiveis
+                if self._last_experience is not None:
+                    frame_data["state_vector"] = self._last_experience.get("state_vector")
+                    frame_data["action_idx"] = self._last_experience.get("action_idx")
+                    frame_data["log_prob"] = self._last_experience.get("log_prob", 0.0)
+                    frame_data["value"] = self._last_experience.get("value", 0.0)
+                    frame_data["grid"] = self._last_experience.get("grid")
+                    # next_state_vector sera preenchido no proximo frame
+                    # done sera True apenas no frame final
+                else:
+                    # Fallback: extrai state_vector simples do estado discreto
+                    from neural.rl_bridge import StateFeatureExtractor
+                    state_vec = StateFeatureExtractor.extract(
+                        player_hp_pct=kwargs.get("player_hp_pct", 1.0),
+                        ammo_ratio=kwargs.get("ammo_ratio", 1.0),
+                        num_enemies=len(enemies) if enemies else 0,
+                        nearest_enemy_dist=kwargs.get("nearest_enemy_dist", 999.0),
+                        player_pos=player_pos or (0.5, 0.5),
+                        enemies=enemies,
+                    )
+                    frame_data["state_vector"] = state_vec
+
+                # Guarda no collector
+                self.gameplay_collector.record_frame(**frame_data)
+            except Exception as e:
+                logger.debug(f"[RL] GameplayCollector record_frame falhou: {e}")
+
+        # Limpa experiencia apos usar (sera sobrescrita no proximo get_action)
+        # Mas mantemos para o proximo frame poder usar como next_state
+        # Na verdade, o collector ja guarda o frame atual; o next_state sera
+        # o state_vector do proximo frame. Isso e resolvido no end_episode
+        # ou numa passagem posterior. Para simplificar, guardamos o frame
+        # como esta e fazemos o backfill no end_episode.
 
     def end_episode(self, result: str, rank: int = 0, damage_dealt: float = 0.0):
         """Finaliza episodio e atualiza ELO."""
@@ -457,18 +549,33 @@ class OnlineLearner:
         if self.episode_start_time:
             survival_time = time.time() - self.episode_start_time
 
-        # Reward final baseado no resultado
-        result_rewards = {"win": 10.0, "draw": 2.0, "loss": -5.0}
-        final_reward = result_rewards.get(result, 0.0)
+        # Reward final baseado no resultado — usa RewardBridge se disponível
+        final_reward = 0.0
+        if self.reward_bridge is not None:
+            try:
+                summary = self.reward_bridge.end_match(
+                    result=result,
+                    final_position=rank,
+                    survival_time=survival_time,
+                )
+                final_reward = summary.get("total_reward", 0.0) if summary else 0.0
+                logger.info(f"[RL] Reward final via RewardBridge: {final_reward:.3f}")
+            except Exception as e:
+                logger.debug(f"[RL] RewardBridge end_match falhou: {e}, usando fallback")
+                result_rewards = {"win": 1.0, "draw": 0.2, "loss": -1.0}
+                final_reward = result_rewards.get(result, 0.0)
+        else:
+            result_rewards = {"win": 1.0, "draw": 0.2, "loss": -1.0}
+            final_reward = result_rewards.get(result, 0.0)
 
         # Bonus/penalidade por rank
         if rank > 0:
             if rank <= 2:
-                final_reward += 5.0
+                final_reward += 0.5
             elif rank <= 4:
-                final_reward += 2.0
+                final_reward += 0.2
             elif rank >= 8:
-                final_reward -= 3.0
+                final_reward -= 0.3
 
         # Neural path
         if self.use_neural and self.rl_bridge is not None:
@@ -478,6 +585,23 @@ class OnlineLearner:
                 logger.debug(f"[RL] Neural end_episode falhou: {e}")
 
         self.q_learning.end_episode(final_reward)
+
+        # Coleta de dados: backfill next_states e finaliza episodio
+        if self.gameplay_collector is not None:
+            try:
+                self.gameplay_collector.backfill_next_states()
+                self.gameplay_collector.end_episode(
+                    result=result,
+                    metrics={
+                        "rank": rank,
+                        "damage_dealt": damage_dealt,
+                        "survival_time": survival_time,
+                        "final_reward": final_reward,
+                        "episode_reward": self.episode_reward,
+                    },
+                )
+            except Exception as e:
+                logger.debug(f"[RL] GameplayCollector end_episode falhou: {e}")
 
         # Atualizar ELO
         if self.elo and self.current_brawler:
@@ -497,6 +621,7 @@ class OnlineLearner:
         self.episode_reward = 0.0
         self.current_brawler = None
         self.current_map = None
+        self._last_experience = None
 
     def suggest_brawler_for_map(self, map_name: str, available: List[str]) -> Optional[str]:
         """Sugere brawler baseado no ELO para o mapa."""

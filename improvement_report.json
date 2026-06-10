@@ -1,7 +1,7 @@
 {
-  "timestamp": "2026-06-09T03:59:55.446163",
+  "timestamp": "2026-06-10T04:12:29.820090",
   "metrics": {
-    "session_start": 1780973995.4451358,
+    "session_start": 1781061149.8170693,
     "session_duration": 0.0,
     "lobby_to_game_time": 0.0,
     "state_transitions": {},
@@ -18,7 +18,7 @@
     "cycle_times": []
   },
   "summary": {
-    "session_duration": 0.0010273456573486328,
+    "session_duration": 0.003021240234375,
     "lobby_to_game_time": 0.0,
     "detection_rate": 0.0,
     "actions_per_minute": 0.0,

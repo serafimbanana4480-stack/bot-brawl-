@@ -73,9 +73,15 @@ class SpatialCNN(nn.Module):
             Output embedding of shape (B, output_dim)
         """
         # Handle channel-last to channel-first conversion
-        if x.shape[-1] == x.shape[1] or x.shape[-1] < 50:
-            # Assume (B, H, W, C) format
+        if x.dim() == 4 and x.shape[-1] == self.conv1.in_channels and x.shape[1] != self.conv1.in_channels:
+            # Assume (B, H, W, C) format — convert to (B, C, H, W)
             x = x.permute(0, 3, 1, 2)
+        elif x.dim() == 3:
+            # Single sample without batch dim: (H, W, C) or (C, H, W)
+            if x.shape[-1] == self.conv1.in_channels and x.shape[0] != self.conv1.in_channels:
+                x = x.permute(2, 0, 1).unsqueeze(0)  # (1, C, H, W)
+            else:
+                x = x.unsqueeze(0)  # (1, C, H, W)
         
         # Conv block 1
         x = self.conv1(x)

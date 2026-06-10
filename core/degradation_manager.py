@@ -240,7 +240,7 @@ class DegradationManager:
             errors_last_min = sum(
                 1 for e in self.recent_errors if e["timestamp"] > window_start
             )
-            error_rate = errors_last_min / 100.0  # baseado no maxlen do deque
+            error_rate = errors_last_min / max(1, len(self.recent_errors))
 
             avg_inference = sum(self.recent_inference_times) / max(1, len(self.recent_inference_times))
             avg_screenshot = sum(self.recent_screenshot_times) / max(1, len(self.recent_screenshot_times))

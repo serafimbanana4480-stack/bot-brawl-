@@ -739,7 +739,7 @@ def with_error_recovery(
                         return func(*args, **kwargs)
                     except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                         # Se falhar novamente, propagar erro
-                        logger.error(f"[ERROR_RECOVERY] Função falhou mesmo após recovery: {e2}")
+                        logger.error(f"[ERROR_RECOVERY] Função falhou mesmo após recovery: {e}")
                         raise
                 
                 # Se não recuperou, propagar erro

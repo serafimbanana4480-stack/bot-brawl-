@@ -245,3 +245,20 @@ mlartifacts/
 # END OF .gitignore
 # ============================================================================
 tools/
+
+# --- Refactor backups ---
+refactor_backup/
+
+# --- Auditoria temporária ---
+auditoria_yolo.py
+auditoria_yolo_completa.json
+auditoria_yolo_completa.md
+run_integration_audit.py
+
+# --- Runtime events ---
+core/events/*.jsonl
+
+# --- Reports (keep only latest master) ---
+MELHORIAS_APLICADAS_SOBERANA_OMEGA.md
+REFACTOR_RELATORIO.md
+RELATORIO_MASTER_AUDITORIA_SOBERANA_OMEGA.md

@@ -110,10 +110,29 @@ class DecisionSubsystem:
         # Online learner
         try:
             from pylaai_real.rl_engine import OnlineLearner
+            from dataset.collector import GameplayCollector
 
             reward_bridge = getattr(self.wrapper, "reward_bridge", None)
-            self.online_learner = OnlineLearner(reward_bridge=reward_bridge, enabled=True)
-            logger.info("[WRAPPER] OnlineLearner (RL + ELO) inicializado")
+            data_collector = getattr(self.wrapper, "data_collector", None)
+            # Usa GameplayCollector se data_collection_mode estiver ativo
+            gameplay_collector = None
+            try:
+                import json
+                from pathlib import Path
+                config_path = Path("config.json")
+                if config_path.exists():
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        cfg = json.load(f)
+                    if cfg.get("rl", {}).get("data_collection_mode", False):
+                        gameplay_collector = data_collector if isinstance(data_collector, GameplayCollector) else GameplayCollector()
+            except Exception:
+                pass
+            self.online_learner = OnlineLearner(
+                reward_bridge=reward_bridge,
+                gameplay_collector=gameplay_collector,
+                enabled=True,
+            )
+            logger.info("[WRAPPER] OnlineLearner (RL + ELO + DataCollection) inicializado")
         except (ImportError, ModuleNotFoundError) as e:
             logger.warning(f"[WRAPPER] OnlineLearner nao disponivel: {e}")
             self.online_learner = None

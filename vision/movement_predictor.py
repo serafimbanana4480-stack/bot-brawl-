@@ -135,11 +135,10 @@ class LSTMPredictor(nn.Module):
             x: Input sequence (batch, seq_len, input_dim)
             
         Returns:
-            Predicted delta position (batch, 2)
+            Predicted delta position for each timestep (batch, seq_len, 2)
         """
-        lstm_out, _ = self.lstm(x)
-        # Use last time step
-        delta = self.fc(lstm_out[:, -1, :])
+        lstm_out, _ = self.lstm(x)  # (batch, seq_len, hidden_dim)
+        delta = self.fc(lstm_out)   # (batch, seq_len, 2)
         return delta
 
 

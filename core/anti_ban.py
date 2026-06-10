@@ -127,7 +127,42 @@ class ScheduleRandomizer:
         return base + timedelta(minutes=variance)
 
     def should_play_now(self) -> bool:
-        """Retorna True — schedule control disabled for manual override."""
+        """Retorna True se o horário atual é compatível com padrões humanos realistas.
+
+        Regras:
+        - Não joga entre 01:00-07:00 (sono)
+        - Não joga durante pausas de refeição (almoço ~12h, jantar ~19h)
+        - Variação de horário de início por dia
+        - Sessões mais curtas durante a semana, mais longas ao fim de semana
+        """
+        now = datetime.now()
+        hour = now.hour + now.minute / 60.0
+
+        # Sleep window: 01:00 - 07:00 (with some variance)
+        sleep_start = 1.0 + random.uniform(-0.5, 0.5)
+        sleep_end = 7.0 + random.uniform(-0.5, 1.0)
+        if sleep_start <= hour <= sleep_end:
+            logger.debug("[ANTI-BAN] Schedule: sleep window")
+            return False
+
+        # Meal breaks with variance
+        lunch_start = 12.0 + random.uniform(-0.5, 0.5)
+        lunch_end = lunch_start + random.uniform(0.5, 1.5)
+        dinner_start = 19.0 + random.uniform(-0.5, 0.5)
+        dinner_end = dinner_start + random.uniform(0.75, 1.5)
+
+        if lunch_start <= hour <= lunch_end:
+            logger.debug("[ANTI-BAN] Schedule: lunch break")
+            return False
+        if dinner_start <= hour <= dinner_end:
+            logger.debug("[ANTI-BAN] Schedule: dinner break")
+            return False
+
+        # Weekend bonus: slightly more lenient on Fri/Sat/Sun evenings
+        weekday = now.weekday()
+        if weekday >= 4 and hour >= 20.0:
+            return True
+
         return True
 
 
@@ -161,12 +196,20 @@ class FingerprintRandomizer:
         self.fingerprint = self._generate_fingerprint()
 
     def _generate_fingerprint(self) -> Dict:
-        """Gera um fingerprint aleatório de comportamento."""
+        """Gera um fingerprint comportamental de 12 dimensões."""
         return {
             "delay_multiplier": random.uniform(0.8, 1.2),
             "reaction_variance": random.uniform(0.8, 1.3),
             "aggression_bias": random.uniform(-0.2, 0.2),
             "preferred_quadrant": random.choice(["top-left", "top-right", "bottom-left", "bottom-right"]),
+            "apm_target": random.uniform(25, 55),  # human APM range
+            "curvature_preference": random.uniform(-0.3, 0.3),  # CW vs CCW bias
+            "pause_frequency": random.uniform(0.05, 0.25),  # micro-pause probability
+            "decision_pattern": random.choice(["deliberate", "impulsive", "balanced"]),
+            "overshoot_tendency": random.uniform(0.02, 0.08),  # 2-8% overshoot rate
+            "typing_speed_wpm": random.uniform(35, 75),
+            "hesitation_base": random.uniform(0.15, 0.45),
+            "fatigue_recovery_rate": random.uniform(0.3, 0.7),
         }
 
     def get_fingerprint(self) -> Dict:
@@ -206,19 +249,42 @@ class AntiBanSystem:
         self.matches_this_hour = 0
         self.hour_start = time.time()
         
+        # Session fatigue tracking
+        self.session_start = time.time()
+        self.session_actions = 0
+        self._fatigue_level = 0.0
+        
         # Session schedule with realistic breaks
         self.session_schedule = SessionSchedule()
         
         # Click heatmap for anti-fingerprinting
         self.click_heatmap = ClickHeatmap(grid_size=50)
 
+    def _update_fatigue(self) -> float:
+        """Atualiza e retorna nível de fadiga da sessão (0.0-1.0)."""
+        elapsed_hours = (time.time() - self.session_start) / 3600.0
+        # Fadiga acumula com tempo e ações
+        time_fatigue = min(1.0, elapsed_hours / 3.0)  # 3h = max fatigue
+        action_fatigue = min(1.0, self.session_actions / 2000.0)  # 2000 actions = max
+        self._fatigue_level = 0.6 * time_fatigue + 0.4 * action_fatigue
+        return self._fatigue_level
+
+    def get_fatigue_factor(self) -> float:
+        """Retorna fator de fadiga para ajustar delays e precisão."""
+        return self._update_fatigue()
+
     def record_action(self, action_type: str, coordinates: Optional[tuple] = None):
         if not self.config.enabled:
             return
         self.pattern_detector.record_action(action_type, coordinates)
+        self.session_actions += 1
         # Record click in heatmap
         if coordinates and action_type in ("tap", "click"):
             self.click_heatmap.record_click(coordinates[0], coordinates[1])
+        logger.debug(
+            "[ANTI-BAN] Action recorded: %s, fatigue=%.3f, actions=%d",
+            action_type, self._update_fatigue(), self.session_actions
+        )
 
     def record_match_result(self, result: str):
         if not self.config.enabled:
@@ -320,6 +386,9 @@ class AntiBanSystem:
             "fingerprint": self.get_fingerprint(),
             "session_schedule": self.session_schedule.get_status(),
             "click_heatmap": self.click_heatmap.get_stats(),
+            "session_fatigue": round(self._update_fatigue(), 3),
+            "session_duration_hours": round((time.time() - self.session_start) / 3600, 2),
+            "total_actions": self.session_actions,
         }
 
 

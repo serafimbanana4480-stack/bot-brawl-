@@ -7,7 +7,10 @@ resolution management, and window lifecycle.
 
 from __future__ import annotations
 
+import collections
 import logging
+import queue
+import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Tuple
@@ -37,6 +40,16 @@ class EmulatorSubsystem:
         self.resolution_manager: Optional[Any] = None
         self._last_window_w: int = 0
         self._last_window_h: int = 0
+
+        # Threading: screenshot buffer + input queue
+        self._frame_buffer = collections.deque(maxlen=3)
+        self._frame_lock = threading.Lock()
+        self._screenshot_stop = threading.Event()
+        self._screenshot_thread: Optional[threading.Thread] = None
+
+        self._input_queue: queue.Queue = queue.Queue(maxsize=20)
+        self._input_stop = threading.Event()
+        self._input_thread: Optional[threading.Thread] = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -154,11 +167,31 @@ class EmulatorSubsystem:
         return True
 
     def start(self) -> None:
-        """No-op start for emulator (connection is done in setup)."""
-        pass
+        """Launch screenshot and input worker threads."""
+        self._screenshot_stop.clear()
+        self._screenshot_thread = threading.Thread(
+            target=self._screenshot_loop, daemon=True, name="emu-screenshot"
+        )
+        self._screenshot_thread.start()
+
+        self._input_stop.clear()
+        self._input_thread = threading.Thread(
+            target=self._input_loop, daemon=True, name="emu-input"
+        )
+        self._input_thread.start()
 
     def stop(self) -> None:
-        """Cleanup emulator connection."""
+        """Signal threads to stop and wait for graceful shutdown."""
+        self._screenshot_stop.set()
+        self._input_stop.set()
+        for thr, name in [
+            (self._screenshot_thread, "screenshot"),
+            (self._input_thread, "input"),
+        ]:
+            if thr and thr.is_alive():
+                thr.join(timeout=5.0)
+                if thr.is_alive():
+                    logger.warning(f"[EMULATOR] Thread {name} não terminou em 5s")
         if self.controller:
             try:
                 self.controller.randomize_window_periodically(interval=0)
@@ -233,6 +266,94 @@ class EmulatorSubsystem:
                 self._last_window_h = new_h
             except (ImportError, ModuleNotFoundError, ConnectionError, ValueError, TypeError, RuntimeError, OSError) as e:
                 logger.debug(f"[WRAPPER] Window resize detection failed: {e}")
+
+    # ------------------------------------------------------------------
+    # Threading: screenshot buffer + input queue
+    # ------------------------------------------------------------------
+
+    def _screenshot_loop(self) -> None:
+        """Capture frames into a circular buffer at ~30 FPS."""
+        target_interval = 1.0 / 30.0
+        while not self._screenshot_stop.is_set():
+            t0 = time.time()
+            frame = self._take_screenshot()
+            if frame is not None:
+                with self._frame_lock:
+                    self._frame_buffer.append(frame)
+            elapsed = time.time() - t0
+            sleep_time = max(0.0, target_interval - elapsed)
+            self._screenshot_stop.wait(timeout=sleep_time)
+
+    def _take_screenshot(self) -> Optional[Any]:
+        """Try screenshot_taker first, then ADB fallback."""
+        if self.screenshot is not None:
+            try:
+                return self.screenshot.take()
+            except Exception as e:
+                logger.debug(f"[EMULATOR] ScreenshotTaker failed: {e}")
+        if self.controller is not None:
+            try:
+                import numpy as np
+                from PIL import Image
+                import io
+
+                data = self.controller.get_screenshot()
+                if data:
+                    return np.array(Image.open(io.BytesIO(data)).convert("RGB"))
+            except Exception as e:
+                logger.debug(f"[EMULATOR] ADB screenshot failed: {e}")
+        return None
+
+    def get_latest_frame(self) -> Optional[Any]:
+        """Return the most recent frame (non-blocking)."""
+        with self._frame_lock:
+            return self._frame_buffer[-1] if self._frame_buffer else None
+
+    def enqueue_input(self, action: dict) -> bool:
+        """Queue an input action for the worker thread."""
+        try:
+            self._input_queue.put(action, block=False)
+            return True
+        except queue.Full:
+            logger.warning("[EMULATOR] Input queue full, dropping action")
+            return False
+
+    def _input_loop(self) -> None:
+        """Consume input actions and dispatch to the controller."""
+        while not self._input_stop.is_set():
+            try:
+                action = self._input_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            try:
+                self._execute_input(action)
+            except Exception as e:
+                logger.error(f"[EMULATOR] Input execution failed: {e}")
+
+    def _execute_input(self, action: dict) -> None:
+        if self.controller is None:
+            return
+        atype = action.get("type")
+        if atype == "tap":
+            x = int(action.get("x", 0))
+            y = int(action.get("y", 0))
+            if hasattr(self.controller, "tap_scaled"):
+                self.controller.tap_scaled(x, y)
+            else:
+                self.controller.tap(x, y)
+        elif atype == "swipe":
+            x1 = int(action.get("x1", 0))
+            y1 = int(action.get("y1", 0))
+            x2 = int(action.get("x2", 0))
+            y2 = int(action.get("y2", 0))
+            duration = action.get("duration_ms", 300)
+            if hasattr(self.controller, "swipe_scaled"):
+                self.controller.swipe_scaled(x1, y1, x2, y2, duration)
+            else:
+                self.controller.swipe(x1, y1, x2, y2, duration)
+        elif atype == "key":
+            keycode = action.get("keycode", 4)
+            self.controller.keyevent(keycode)
 
     # ------------------------------------------------------------------
     # Internal

@@ -517,9 +517,36 @@ Common error codes:
 ---
 
 ## Rate Limiting
-Currently no rate limiting is implemented. Consider adding rate limiting for production use.
+Rate limiting is enforced via `slowapi`:
+- **Read endpoints (GET):** 10 requests per second
+- **Write endpoints (POST/PUT/DELETE):** 2 requests per second
+
+Exceeded limits return HTTP `429 Too Many Requests`.
 
 ---
 
 ## Authentication
-Currently no authentication is implemented. Consider adding authentication for production use.
+Control endpoints (POST/PUT/DELETE and non-public GET) require an API key passed in the `X-API-Key` header.
+
+```bash
+curl -H "X-API-Key: your-api-key" http://localhost:8003/api/brawl-stars/start
+```
+
+The API key is read from `config.json` under `api.api_key`. If `api_key` is `null`, control endpoints are restricted to localhost (`127.0.0.1`, `localhost`, `::1`) only.
+
+### Public Endpoints (no API key required)
+The following endpoints are public and do not require authentication:
+- `GET /health`
+- `GET /health/deep`
+- `GET /ready`
+- `GET /metrics`
+- `GET /api/brawl-stars/health`
+- `GET /api/brawl-stars/status`
+- `GET /docs`
+- `GET /redoc`
+- `GET /openapi.json`
+
+---
+
+## CORS
+CORS origins are validated against the `api.cors_origins` array in `config.json`. The wildcard `*` is explicitly rejected. If no valid origins are configured, safe defaults (`http://localhost:3000`, `http://localhost:5173`) are used.

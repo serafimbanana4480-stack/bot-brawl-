@@ -288,12 +288,22 @@ class OCRStateDetector:
         return None
     
     def _get_reader(self):
-        """Lazy loading do reader OCR."""
+        """Lazy loading do reader OCR com auto-detecção de GPU."""
         if self._reader is None:
             try:
                 import easyocr
-                logger.info("[OCR] Carregando EasyOCR...")
-                self._reader = easyocr.Reader(self.languages, gpu=self.enable_gpu)
+                gpu = self.enable_gpu
+                if not gpu:
+                    # Auto-detect GPU availability
+                    try:
+                        import torch
+                        gpu = torch.cuda.is_available()
+                        if gpu:
+                            logger.info("[OCR] GPU detectada, ativando EasyOCR com CUDA")
+                    except ImportError:
+                        pass
+                logger.info(f"[OCR] Carregando EasyOCR (gpu={gpu})...")
+                self._reader = easyocr.Reader(self.languages, gpu=gpu)
                 logger.info("[OCR] EasyOCR carregado com sucesso")
             except ImportError:
                 logger.error("[OCR] EasyOCR não instalado. Instale com: pip install easyocr")

@@ -1,0 +1,68 @@
+# Git
+.git
+.gitignore
+.github
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.venv
+venv
+env
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Datasets & heavy assets
+dataset
+datasets
+data/raw
+data/processed
+training_reports
+runs
+
+# Models (mount at runtime; avoid baking large weights into image)
+models/*.pt
+models/**/*.pt
+yolo*.pt
+
+# Logs & screenshots
+logs
+*.log
+auto_play.log
+bot_*.log
+debug_*.log
+screenshot_*.png
+debug_*.png
+auto_play_*.png
+temp_*.png
+*.jpg
+*.jpeg
+
+# Docker
+docker-compose.override.yml
+Dockerfile.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+htmlcov
+coverage.json
+type_check_report.txt
+doc_check_report.txt
+performance_report.txt
+improvement_report.json
+installation_report.json
+verify_installation_report.json
+test_report.json

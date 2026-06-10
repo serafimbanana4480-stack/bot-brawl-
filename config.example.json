@@ -1,37 +1,210 @@
 {
-  "diagnostic_mode": false,
-  "enable_recording": false,
-  "auto_retrain_enabled": false,
-  "training_schema": "core",
-  "brawler_selection_enabled": true,
-  "auto_tuning_enabled": false,
-  "debug_visualizer": false,
-  "dashboard_port": 8765,
+  "version": "1.0.0",
+  "game": {
+    "mode": "gem_grab",
+    "brawler": "colt",
+    "language": "en",
+    "resolution": "1920x1080"
+  },
   "emulator": {
+    "type": "bluestacks",
+    "adb_port": 5554,
     "window_title": "BlueStacks App Player",
     "resolution": [
-      1920,
-      1080
+      1600,
+      900
+    ],
+    "dpi": 240
+  },
+  "safety": {
+    "max_trophies": 400,
+    "warning_trophies": 380,
+    "max_session_hours": 3.0,
+    "min_apm": 20,
+    "max_apm": 60,
+    "break_duration_min": 300,
+    "break_duration_max": 900,
+    "auto_stop_on_detection": true,
+    "suspicious_pattern_threshold": 5
+  },
+  "anti_ban": {
+    "enabled": true,
+    "advanced_humanization": true,
+    "max_win_rate": 0.75,
+    "min_win_rate": 0.2,
+    "max_matches_per_hour": 8,
+    "min_break_between_matches_sec": 15.0,
+    "session_fingerprint_change_interval_hours": 24.0,
+    "schedule_variance_minutes": 30,
+    "action_noise_probability": 0.05,
+    "action_noise_max_delay": 2.0
+  },
+  "humanization": {
+    "enabled": true,
+    "mouse_curve": true,
+    "random_delays": true,
+    "min_delay_ms": 50,
+    "max_delay_ms": 200,
+    "bezier_control_points": 3,
+    "jitter_range": 2
+  },
+  "vision": {
+    "main_model": "brawlstars_yolov8.pt",
+    "brawler_id_model": "brawler_id.pt",
+    "confidence_threshold": 0.37,
+    "nms_iou_threshold": 0.45,
+    "classes": [
+      "Player",
+      "Bush",
+      "Enemy",
+      "Cubebox",
+      "Wall",
+      "Powerup",
+      "Bullet",
+      "Super"
+    ],
+    "thresholds": [
+      0.37,
+      0.47,
+      0.57,
+      0.65,
+      0.45,
+      0.5,
+      0.4,
+      0.45
     ]
   },
+  "api": {
+    "host": "127.0.0.1",
+    "port": 8003,
+    "api_key": "your-api-key-here-or-null-for-localhost-only",
+    "rate_limit": {
+      "read_per_second": 10,
+      "write_per_second": 2
+    },
+    "cors_origins": [
+      "http://localhost:3000",
+      "http://localhost:5173",
+      "http://127.0.0.1:3000"
+    ],
+    "enable_swagger": true
+  },
+  "rl": {
+    "enabled": false,
+    "data_collection_mode": true,
+    "collect_screenshots": true,
+    "collect_grids": true,
+    "reward_shaping": {
+      "damage_dealt": 0.1,
+      "damage_taken": -0.1,
+      "power_cube_collected": 0.05,
+      "kill": 0.2,
+      "win": 1.0,
+      "loss": -1.0,
+      "timestep_penalty": -0.001,
+      "survival_time": 0.05,
+      "survival_interval": 5.0,
+      "reward_clip": 1.0,
+      "normalize": true
+    },
+    "experience_buffer_size": 10000,
+    "batch_size": 64,
+    "learning_rate": 0.0003
+  },
+  "mlflow": {
+    "enabled": true,
+    "tracking_uri": "runs/mlflow/ppo",
+    "experiment_name": "soberana_omega_ppo"
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "json",
+    "file": "logs/brawl_bot.log",
+    "max_file_size_mb": 10,
+    "backup_count": 5
+  },
+  "performance": {
+    "target_fps": 30,
+    "screenshot_interval_ms": 100,
+    "action_cooldown_ms": 50
+  },
+  "combat": {
+    "enable_prediction": true,
+    "prediction_time_ahead": 0.2,
+    "enable_aim_assist": true,
+    "aim_smoothing": true,
+    "enable_abilities": true,
+    "gadget_cooldown": 15,
+    "enable_power_cube_collection": true,
+    "power_cube_safe_distance": 300,
+    "tactical_movement": true,
+    "aggression_level": 0.7
+  },
+  "dashboard": {
+    "enabled": true,
+    "port": 8765,
+    "auto_start": true,
+    "replay_auto_record": false,
+    "replay_max_frames": 150,
+    "ab_test_default_variants": {
+      "control": {},
+      "test_v2": {}
+    }
+  },
+  "health_checks": {
+    "enabled": true,
+    "interval_seconds": 30,
+    "shallow_checks": [
+      "api",
+      "memory",
+      "disk"
+    ],
+    "deep_checks": [
+      "adb",
+      "emulator",
+      "yolo_model",
+      "screenshot",
+      "memory",
+      "disk"
+    ],
+    "thresholds": {
+      "memory_warn_percent": 85,
+      "memory_critical_percent": 95,
+      "disk_warn_percent": 80,
+      "disk_critical_percent": 90
+    }
+  },
+  "debug_visualizer": true,
   "brawler_queue": [
     {
       "name": "colt",
-      "current_trophies": 0,
-      "target_trophies": 400,
-      "target_wins": 10,
-      "priority": 1,
-      "enabled": true,
-      "game_mode": "showdown"
+      "target_trophies": 500,
+      "priority": 5,
+      "game_mode": null
     },
     {
       "name": "shelly",
-      "current_trophies": 0,
-      "target_trophies": 350,
-      "target_wins": 10,
+      "target_trophies": 500,
+      "priority": 4,
+      "game_mode": null
+    },
+    {
+      "name": "nita",
+      "target_trophies": 500,
+      "priority": 3,
+      "game_mode": null
+    },
+    {
+      "name": "bull",
+      "target_trophies": 500,
       "priority": 2,
-      "enabled": true,
-      "game_mode": "gem_grab"
+      "game_mode": null
+    },
+    {
+      "name": "jessie",
+      "target_trophies": 500,
+      "priority": 1,
+      "game_mode": null
     }
   ]
 }

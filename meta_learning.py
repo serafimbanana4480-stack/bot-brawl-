@@ -110,7 +110,7 @@ class MetaLearningSystem:
         with self._lock:
             self.total_matches += 1
             if result == "win":
-                self.wins
+                self.wins += 1
 
             # Calcular win rate
             win_rate = self.wins / max(1, self.total_matches)

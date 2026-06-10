@@ -118,6 +118,7 @@ class BotOrchestrator:
         self._paused = False
         self._shutdown_requested = False
         self._lock = threading.Lock()
+        self._worker_thread: Optional[threading.Thread] = None
 
         # Metrics
         self._episode_count = 0
@@ -141,7 +142,8 @@ class BotOrchestrator:
 
     def initialize(self) -> bool:
         """Initialize all ports with graceful degradation."""
-        self._state = BotState.INITIALIZING
+        with self._lock:
+            self._state = BotState.INITIALIZING
         success = True
 
         ports = [
@@ -161,31 +163,48 @@ class BotOrchestrator:
                 logger.error(f"[ORCHESTRATOR] {name} init failed: {e}")
                 success = False
 
-        if success:
-            self._state = BotState.IDLE
-            self.telemetry.record_event("orchestrator_initialized", {})
-        else:
-            self._state = BotState.ERROR
-            self._last_error = "Some ports failed to initialize"
+        with self._lock:
+            if success:
+                self._state = BotState.IDLE
+                self.telemetry.record_event("orchestrator_initialized", {})
+            else:
+                self._state = BotState.ERROR
+                self._last_error = "Some ports failed to initialize"
 
         return success
 
     def run(self) -> None:
-        """Blocking main loop."""
+        """Start the non-blocking main loop in a daemon worker thread."""
+        with self._lock:
+            if self._worker_thread is not None and self._worker_thread.is_alive():
+                logger.warning("[ORCHESTRATOR] Worker thread already running")
+                return
+            self._running = True
+            self._shutdown_requested = False
+            self._worker_thread = threading.Thread(
+                target=self._run_loop, daemon=True, name="orchestrator-worker"
+            )
+            self._worker_thread.start()
+        logger.info("[ORCHESTRATOR] Worker thread started")
+
+    def _run_loop(self) -> None:
+        """Internal blocking loop (runs in worker thread)."""
         if self._state == BotState.ERROR:
             logger.error("[ORCHESTRATOR] Cannot run in ERROR state")
             return
 
-        self._running = True
-        self._state = BotState.CONNECTING
+        with self._lock:
+            self._state = BotState.CONNECTING
         logger.info("[ORCHESTRATOR] Main loop started")
 
         target_cycle_time = 1.0 / self.config.get("target_fps", 10)
         last_time = time.time()
 
         while self._running and not self._shutdown_requested:
-            if self._paused:
-                time.sleep(0.1)
+            with self._lock:
+                paused = self._paused
+            if paused:
+                time.sleep(0.05)
                 continue
 
             cycle_start = time.time()
@@ -224,10 +243,16 @@ class BotOrchestrator:
         self._shutdown()
 
     def stop(self) -> None:
-        """Request graceful shutdown."""
+        """Request graceful shutdown and wait for worker thread."""
         logger.info("[ORCHESTRATOR] Stop requested")
-        self._shutdown_requested = True
-        self._running = False
+        with self._lock:
+            self._shutdown_requested = True
+            self._running = False
+        if self._worker_thread is not None:
+            self._worker_thread.join(timeout=5.0)
+            if self._worker_thread.is_alive():
+                logger.warning("[ORCHESTRATOR] Worker thread did not terminate in 5s")
+            self._worker_thread = None
 
     def pause(self) -> bool:
         """Pause the main loop."""
@@ -374,10 +399,15 @@ class BotOrchestrator:
             (BotState.IN_MATCH, "defeat"): BotState.LOBBY,
         }
 
-        new_state = transitions.get((self._state, game_phase))
-        if new_state and new_state != self._state:
-            old = self._state.name
-            self._state = new_state
+        with self._lock:
+            new_state = transitions.get((self._state, game_phase))
+            if new_state and new_state != self._state:
+                old = self._state.name
+                self._state = new_state
+            else:
+                old = None
+
+        if old is not None:
             logger.info(f"[ORCHESTRATOR] State: {old} -> {new_state.name} (phase={game_phase})")
             self.telemetry.record_event("state_transition", {
                 "from": old,
@@ -434,8 +464,10 @@ class BotOrchestrator:
     # ------------------------------------------------------------------
 
     def status(self) -> BotStatus:
+        with self._lock:
+            state_name = self._state.name.lower()
         return BotStatus(
-            state=self._state.name.lower(),
+            state=state_name,
             fps=self._fps,
             cycle_time_ms=self._cycle_time_ms,
             vision_latency_ms=self.vision.health_check().get("last_latency_ms", 0.0),
@@ -481,7 +513,8 @@ class BotOrchestrator:
         self.persistence.save_state(state, label=f"auto_{int(time.time())}")
 
     def _shutdown(self) -> None:
-        self._state = BotState.SHUTTING_DOWN
+        with self._lock:
+            self._state = BotState.SHUTTING_DOWN
         logger.info("[ORCHESTRATOR] Shutting down...")
 
         for hook in self._shutdown_hooks:
