@@ -89,7 +89,11 @@ class TestDegradationManager:
 
     def test_degradation_on_errors(self):
         from core.degradation_manager import DegradationManager, DegradationMode
-        mgr = DegradationManager(error_threshold_degraded=0.20)
+        mgr = DegradationManager(
+            error_threshold_degraded=0.20,
+            error_threshold_minimal=2.0,
+            error_threshold_emergency=2.0,  # disable higher modes so we can test degraded
+        )
 
         # Simular erros
         for _ in range(25):
@@ -115,6 +119,8 @@ class TestDegradationManager:
         from core.degradation_manager import DegradationManager, DegradationMode
         mgr = DegradationManager(
             error_threshold_degraded=0.20,
+            error_threshold_minimal=2.0,
+            error_threshold_emergency=2.0,
             recovery_improvement_duration=0.1,
         )
 

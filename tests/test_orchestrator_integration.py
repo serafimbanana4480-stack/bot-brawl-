@@ -41,7 +41,14 @@ class TestHappyPath:
         assert result.telemetry_metrics > 0
 
     def test_match_persists_and_actions_execute(self):
+        from core.ports import Decision
         harness = OrchestratorHarness()
+        # Provide distinct decisions so repetition guard does not cooldown them
+        harness.decision._queue = [
+            Decision(action_type="attack", confidence=0.9, target_pos=(0.45, 0.45)),
+            Decision(action_type="attack", confidence=0.9, target_pos=(0.46, 0.46)),
+            Decision(action_type="attack", confidence=0.9, target_pos=(0.47, 0.47)),
+        ]
         # Simulate combat with enemies detected
         scenario = VisionScenario(
             phase="in_game",

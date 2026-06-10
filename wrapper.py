@@ -739,7 +739,11 @@ class PylaAIEnhanced:
             "diagnostics": {
                 "diagnostic_mode": getattr(self, "diagnostic_mode", False),
                 "lobby": _safe_call("lobby", "get_diagnostic_report", {}),
-                "screen_state": _safe_call("state_manager", "get_current_state_name", "unknown") if hasattr(_safe_get("state_manager", "screen_automation", None), "get_current_state_name") else "unknown",
+                "screen_state": (
+                    _safe_get("state_manager", "screen_automation", None).get_current_state_name()
+                    if _safe_get("state_manager", "screen_automation", None) is not None
+                    else "unknown"
+                ),
                 "progress": _safe_call("progress", "get_stats", {}),
                 "combat": _safe_call("play_logic", "get_last_combat_snapshot", {}),
             },
