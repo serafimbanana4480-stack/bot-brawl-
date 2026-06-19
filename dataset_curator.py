@@ -71,20 +71,33 @@ class DatasetCurator:
             "splits": {},
         }
 
-        if not self.images_dir.exists():
+        # Support both dataset structures:
+        #   A) images/{train,val,test} + labels/{train,val,test}
+        #   B) {train,val,test}/images + {train,val,test}/labels
+        img_root = self.images_dir if self.images_dir.exists() else None
+        lbl_root = self.labels_dir if self.labels_dir.exists() else None
+        if img_root is None:
+            # Try split-first format
+            if (self.dataset_path / "train" / "images").exists():
+                img_root = self.dataset_path
+                lbl_root = self.dataset_path
+        if img_root is None:
+            img_root = self.images_dir
+
+        if not img_root.exists():
             report["issues"].append("Diretório de imagens não encontrado")
             return report
 
         # Contar splits
         splits = ["train", "val", "test"]
-        all_images = 0
+        all_images_count = 0
         all_labels = 0
         class_counter = Counter()
         widths, heights = [], []
 
         for split in splits:
-            img_dir = self.images_dir / split
-            lbl_dir = self.labels_dir / split
+            img_dir = img_root / split / "images" if (img_root / split / "images").exists() else img_root / split
+            lbl_dir = lbl_root / split / "labels" if (lbl_root / split / "labels").exists() else lbl_root / split
 
             if not img_dir.exists():
                 continue
@@ -95,7 +108,7 @@ class DatasetCurator:
                 "images": len(imgs),
                 "labels": len(lbls),
             }
-            all_images += len(imgs)
+            all_images_count += len(imgs)
             all_labels += len(lbls)
 
             # Analisar labels
@@ -122,7 +135,7 @@ class DatasetCurator:
                 except Exception:
                     pass
 
-        report["total_images"] = all_images
+        report["total_images"] = all_images_count
         report["total_labels"] = all_labels
         report["total_objects"] = sum(class_counter.values())
 
@@ -140,7 +153,7 @@ class DatasetCurator:
             }
 
         # Verificar problemas comuns
-        report["issues"] = self._find_issues(class_counter, all_images)
+        report["issues"] = self._find_issues(class_counter, all_images_count)
 
         return report
 
@@ -188,8 +201,8 @@ class DatasetCurator:
         seen_hashes = set()
 
         for split in ["train", "val", "test"]:
-            img_dir = self.images_dir / split
-            lbl_dir = self.labels_dir / split
+            img_dir = img_root / split / "images" if (img_root / split / "images").exists() else img_root / split
+            lbl_dir = lbl_root / split / "labels" if (lbl_root / split / "labels").exists() else lbl_root / split
 
             if not img_dir.exists():
                 continue
@@ -265,7 +278,7 @@ class DatasetCurator:
         # Contar objetos por classe
         class_counts = Counter()
         for split in ["train"]:
-            lbl_dir = self.labels_dir / split
+            lbl_dir = lbl_root / split / "labels" if (lbl_root / split / "labels").exists() else lbl_root / split
             if not lbl_dir.exists():
                 continue
             for lbl in lbl_dir.glob("*.txt"):
