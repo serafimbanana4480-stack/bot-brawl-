@@ -16,11 +16,11 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from pylaai_real.lobby_automator import LobbyAutomator, BrawlerQueue, BrawlerConfig
-from pylaai_real.progress_observer import ProgressObserver
 from match_controller import MatchController
+from pylaai_real.lobby_automator import BrawlerConfig, BrawlerQueue, LobbyAutomator
+from pylaai_real.progress_observer import ProgressObserver
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class InfrastructureSystem:
         self,
         install_path: Path,
         images_path: Path,
-        central_config: Dict[str, Any],
+        central_config: dict[str, Any],
         diagnostic_mode: bool = False,
     ):
         self.install_path = install_path
@@ -41,20 +41,20 @@ class InfrastructureSystem:
         self.diagnostic_mode = diagnostic_mode
 
         # Components
-        self.emulator_controller: Optional[Any] = None
-        self.lobby: Optional[LobbyAutomator] = None
-        self.match_controller: Optional[MatchController] = None
-        self.progress: Optional[ProgressObserver] = None
-        self.brawler_queue: Optional[BrawlerQueue] = None
-        self.dashboard: Optional[Any] = None
-        self.gameplay_recorder: Optional[Any] = None
+        self.emulator_controller: Any | None = None
+        self.lobby: LobbyAutomator | None = None
+        self.match_controller: MatchController | None = None
+        self.progress: ProgressObserver | None = None
+        self.brawler_queue: BrawlerQueue | None = None
+        self.dashboard: Any | None = None
+        self.gameplay_recorder: Any | None = None
         self.recording_dir: Path = Path(__file__).parent.parent.parent / "recordings"
-        self.mode_controller: Optional[Any] = None
-        self.state_persistence: Optional[Any] = None
-        self.resolution_manager: Optional[Any] = None
+        self.mode_controller: Any | None = None
+        self.state_persistence: Any | None = None
+        self.resolution_manager: Any | None = None
 
         self._running = False
-        self._threads: List[threading.Thread] = []
+        self._threads: list[threading.Thread] = []
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -62,19 +62,19 @@ class InfrastructureSystem:
 
     def setup(
         self,
-        screenshot_source: Optional[Any] = None,
-        play_logic: Optional[Any] = None,
-        unified_detector: Optional[Any] = None,
-        ocr_detector: Optional[Any] = None,
-        auto_fix: Optional[Any] = None,
-        online_learner: Optional[Any] = None,
-        learning_mode_controller: Optional[Any] = None,
-        brawler_selector: Optional[Any] = None,
-        data_collector: Optional[Any] = None,
-        reward_bridge: Optional[Any] = None,
-        observability: Optional[Any] = None,
-        safety: Optional[Any] = None,
-        humanization: Optional[Any] = None,
+        screenshot_source: Any | None = None,
+        play_logic: Any | None = None,
+        unified_detector: Any | None = None,
+        ocr_detector: Any | None = None,
+        auto_fix: Any | None = None,
+        online_learner: Any | None = None,
+        learning_mode_controller: Any | None = None,
+        brawler_selector: Any | None = None,
+        data_collector: Any | None = None,
+        reward_bridge: Any | None = None,
+        observability: Any | None = None,
+        safety: Any | None = None,
+        humanization: Any | None = None,
         window_w: int = 1920,
         window_h: int = 1080,
     ) -> bool:
@@ -83,7 +83,7 @@ class InfrastructureSystem:
 
         # EmulatorController
         try:
-            from emulator_controller import EmulatorController, EmulatorConfig
+            from emulator_controller import EmulatorConfig, EmulatorController
             from emulator_detector import get_emulator_detector
 
             emu_cfg = self.central_config.get("emulator", {})
@@ -227,7 +227,7 @@ class InfrastructureSystem:
         if self.match_controller:
             try:
                 self.match_controller.history.save()
-            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.warning("[INFRA] Failed to save match history: %s", e)
         return True
 
@@ -235,7 +235,7 @@ class InfrastructureSystem:
     # Status / Health
     # ------------------------------------------------------------------
 
-    def status(self) -> Dict[str, Any]:
+    def status(self) -> dict[str, Any]:
         return {
             "emulator_controller_ok": self.emulator_controller is not None,
             "lobby_ok": self.lobby is not None,
@@ -243,7 +243,7 @@ class InfrastructureSystem:
             "dashboard_ok": self.dashboard is not None,
         }
 
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         issues = []
         if self.emulator_controller is None:
             issues.append("no_emulator_controller")

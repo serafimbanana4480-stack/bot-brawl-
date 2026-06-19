@@ -164,6 +164,8 @@ def test_model_registry_compare_versions(tmp_path):
 
 def test_model_registry_rollback(tmp_path):
     """Testa rollback."""
+    import time
+
     from core.model_registry import ModelRegistry
     reg_dir = tmp_path / "registry_test3"
     reg_dir.mkdir()
@@ -172,6 +174,7 @@ def test_model_registry_rollback(tmp_path):
     dummy = reg_dir / "d.pt"
     dummy.write_bytes(b"x")
     registry.register("rl", dummy, version="v1")
+    time.sleep(0.05)  # ensure distinct created_at timestamps
     registry.register("rl", dummy, version="v2")
     registry.set_active("rl", "v2")
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -27,21 +27,21 @@ class LearningSystem:
         self,
         install_path: Path,
         models_path: Path,
-        central_config: Dict[str, Any],
+        central_config: dict[str, Any],
     ):
         self.install_path = install_path
         self.models_path = models_path
         self.central_config = central_config
 
         # Components
-        self.data_collector: Optional[Any] = None
-        self.reward_bridge: Optional[Any] = None
-        self.meta_learning: Optional[Any] = None
-        self.learning_mode_controller: Optional[Any] = None
-        self.rl_metrics_collector: Optional[Any] = None
-        self.auto_tuner: Optional[Any] = None
-        self.performance_monitor: Optional[Any] = None
-        self.retrain_orchestrator: Optional[Any] = None
+        self.data_collector: Any | None = None
+        self.reward_bridge: Any | None = None
+        self.meta_learning: Any | None = None
+        self.learning_mode_controller: Any | None = None
+        self.rl_metrics_collector: Any | None = None
+        self.auto_tuner: Any | None = None
+        self.performance_monitor: Any | None = None
+        self.retrain_orchestrator: Any | None = None
 
         self._running = False
         self._recording_enabled = bool(central_config.get("enable_recording", False))
@@ -54,12 +54,12 @@ class LearningSystem:
 
     def setup(
         self,
-        match_controller: Optional[Any] = None,
-        play_logic: Optional[Any] = None,
-        lobby: Optional[Any] = None,
-        emulator_controller: Optional[Any] = None,
-        screenshot_source: Optional[Any] = None,
-        state_finder: Optional[Any] = None,
+        match_controller: Any | None = None,
+        play_logic: Any | None = None,
+        lobby: Any | None = None,
+        emulator_controller: Any | None = None,
+        screenshot_source: Any | None = None,
+        state_finder: Any | None = None,
     ) -> bool:
         """Initialize learning components."""
         success = True
@@ -144,7 +144,7 @@ class LearningSystem:
                     models_dir=self.models_path,
                 )
                 logger.info("[LEARNING] Auto-retrain system initialized")
-            except (ImportError, ModuleNotFoundError, FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, OSError, IOError) as e:
+            except (ImportError, ModuleNotFoundError, FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, OSError) as e:
                 logger.debug("[LEARNING] Auto-retrain system unavailable: %s", e)
 
         return success
@@ -173,7 +173,7 @@ class LearningSystem:
         if self.meta_learning and hasattr(self.meta_learning, "save"):
             try:
                 self.meta_learning.save()
-            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.debug("[LEARNING] Failed to save meta_learning: %s", e)
         return True
 
@@ -181,7 +181,7 @@ class LearningSystem:
     # Status / Health
     # ------------------------------------------------------------------
 
-    def status(self) -> Dict[str, Any]:
+    def status(self) -> dict[str, Any]:
         return {
             "data_collector_ok": self.data_collector is not None,
             "reward_bridge_ok": self.reward_bridge is not None,
@@ -192,7 +192,7 @@ class LearningSystem:
             "auto_retrain_ok": self.retrain_orchestrator is not None,
         }
 
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         issues = []
         if self.data_collector is None:
             issues.append("no_data_collector")

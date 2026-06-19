@@ -15,10 +15,10 @@ Aplicações:
 
 import logging
 import time
-import numpy as np
-from typing import Dict, List, Optional, Tuple
-from pathlib import Path
 from collections import deque
+from pathlib import Path
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -51,13 +51,13 @@ class PositioningHeatmap:
 
         # Tracking temporal
         self._bot_position_history: deque = deque(maxlen=max_history)
-        self._last_bot_pos: Optional[Tuple[int, int]] = None
+        self._last_bot_pos: tuple[int, int] | None = None
         self._last_update_time = 0.0
 
         # Zonas de risco calculadas
-        self._danger_zones: List[Tuple[int, int, float]] = []  # cx, cy, radius
+        self._danger_zones: list[tuple[int, int, float]] = []  # cx, cy, radius
 
-    def _pos_to_cell(self, x: int, y: int) -> Tuple[int, int]:
+    def _pos_to_cell(self, x: int, y: int) -> tuple[int, int]:
         """Converte coordenadas pixel para célula do grid."""
         cx = min(x // self.cell_size, self.grid_w - 1)
         cy = min(y // self.cell_size, self.grid_h - 1)
@@ -81,7 +81,7 @@ class PositioningHeatmap:
         self._last_bot_pos = (x, y)
         self._last_update_time = time.time()
 
-    def update_enemy_positions(self, positions: List[Tuple[int, int]]):
+    def update_enemy_positions(self, positions: list[tuple[int, int]]):
         """Atualiza heatmap de inimigos."""
         for x, y in positions:
             cx, cy = self._pos_to_cell(x, y)
@@ -93,7 +93,7 @@ class PositioningHeatmap:
         self.death_heatmap[cy, cx] += 10.0  # Peso alto para mortes
         logger.debug("[HEATMAP] Morte registrada em célula (%d, %d)", cx, cy)
 
-    def compute_danger_zones(self, threshold_ratio: float = 0.8) -> List[Dict]:
+    def compute_danger_zones(self, threshold_ratio: float = 0.8) -> list[dict]:
         """
         Computa zonas de risco baseado no heatmap de mortes + inimigos.
         Retorna lista de zonas com centro e raio.
@@ -138,7 +138,7 @@ class PositioningHeatmap:
                 return True
         return False
 
-    def get_least_visited_escape(self, x: int, y: int, max_distance: int = 300) -> Optional[Tuple[int, int]]:
+    def get_least_visited_escape(self, x: int, y: int, max_distance: int = 300) -> tuple[int, int] | None:
         """
         Encontra direção de escape para zona menos visitada.
         Útil quando o bot está numa zona de risco.
@@ -186,7 +186,7 @@ class PositioningHeatmap:
         except (ImportError, ModuleNotFoundError, ValueError, TypeError, RuntimeError, cv2.error) as e:
             logger.warning("[HEATMAP] Erro ao exportar visualização: %s", e)
 
-    def get_stats(self) -> Dict[str, any]:
+    def get_stats(self) -> dict[str, any]:
         """Retorna estatísticas do heatmap."""
         total_bot_time = float(self.bot_heatmap.sum())
         total_enemies = float(self.enemy_heatmap.sum())

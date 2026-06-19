@@ -145,8 +145,15 @@ class DebugVisualizer:
             self.video_writer.release()
             self.video_writer = None
         
-        # Destruir janela
-        cv2.destroyWindow(self.window_name)
+        # Destruir janela (com guarda contra NULL pointer do OpenCV headless)
+        try:
+            if self.window_name:
+                try:
+                    cv2.destroyWindow(self.window_name)
+                except cv2.error:
+                    pass  # OpenCV headless: janela nao existe
+        except Exception:
+            pass
         
         logger.info("[DEBUG] Visualizer parado")
     

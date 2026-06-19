@@ -15,13 +15,14 @@ Modos:
 Integração com ErrorRecoverySystem para decisões automáticas.
 """
 
-import time
 import logging
 import threading
-from typing import Dict, Optional, Callable, Any, List
-from dataclasses import dataclass, field
-from enum import Enum, auto
+import time
 from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass
+from enum import Enum, auto
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ class DegradationConfig:
     circuit_breaker_enabled: bool = True
 
 
-def _make_configs() -> Dict[DegradationMode, DegradationConfig]:
+def _make_configs() -> dict[DegradationMode, DegradationConfig]:
     return {
         DegradationMode.FULL_QUALITY: DegradationConfig(
             mode=DegradationMode.FULL_QUALITY,
@@ -196,7 +197,7 @@ class DegradationManager:
         self.time_in_current_mode = 0.0
 
         # Callbacks para notificar subsistemas
-        self._listeners: List[Callable[[DegradationMode, DegradationConfig], None]] = []
+        self._listeners: list[Callable[[DegradationMode, DegradationConfig], None]] = []
         self._lock = threading.RLock()
 
         logger.info("[DEGRADATION] Inicializado em modo %s", self.mode.value)
@@ -243,7 +244,7 @@ class DegradationManager:
             error_rate = errors_last_min / max(1, len(self.recent_errors))
 
             avg_inference = sum(self.recent_inference_times) / max(1, len(self.recent_inference_times))
-            avg_screenshot = sum(self.recent_screenshot_times) / max(1, len(self.recent_screenshot_times))
+            sum(self.recent_screenshot_times) / max(1, len(self.recent_screenshot_times))
 
             # Forçar degradação se inferência muito lenta (>2s)
             if avg_inference > 2.0 and self.mode == DegradationMode.FULL_QUALITY:
@@ -346,7 +347,7 @@ class DegradationManager:
     # Status
     # ------------------------------------------------------------------
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Retorna status completo para dashboard/telemetria."""
         with self._lock:
             window_start = time.time() - 60.0

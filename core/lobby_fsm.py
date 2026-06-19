@@ -9,15 +9,14 @@ This module is kept for backward compatibility only.
 Repetition Guard has been extracted to core.repetition_guard.
 """
 
-import warnings
 import logging
-import time
 import threading
-from typing import Dict, List, Optional, Tuple, Set
-from dataclasses import dataclass, field
+import time
+import warnings
+from dataclasses import dataclass
 from enum import Enum
 
-from core.repetition_guard import RepetitionGuard, ActionRecord
+from core.repetition_guard import ActionRecord, RepetitionGuard
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +85,7 @@ class TopLevelState(Enum):
 class FSMState:
     """Current FSM state with timing info."""
     top: TopLevelState = TopLevelState.UNKNOWN
-    sub: Optional[Enum] = None
+    sub: Enum | None = None
     entered_at: float = 0.0
     transitions: int = 0
 
@@ -94,7 +93,7 @@ class FSMState:
 class HierarchicalFSM:
     """
     Hierarchical finite state machine for game state management.
-    
+
     Provides:
     - Nested state tracking (top-level + sub-state)
     - State duration tracking
@@ -128,15 +127,15 @@ class HierarchicalFSM:
     def __init__(self):
         self._state = FSMState(entered_at=time.time())
         self._lock = threading.RLock()
-        self._transition_history: List[Dict] = []
+        self._transition_history: list[dict] = []
 
         logger.info("[HFSM] Initialized")
 
-    def transition(self, top: TopLevelState, sub: Optional[Enum] = None,
+    def transition(self, top: TopLevelState, sub: Enum | None = None,
                    reason: str = ""):
         """
         Transition to a new state.
-        
+
         Args:
             top: Top-level state
             sub: Sub-state (specific enum value)
@@ -190,7 +189,7 @@ class HierarchicalFSM:
         with self._lock:
             return time.time() - self._state.entered_at
 
-    def get_transition_history(self, limit: int = 20) -> List[Dict]:
+    def get_transition_history(self, limit: int = 20) -> list[dict]:
         """Get recent transition history."""
         with self._lock:
             return self._transition_history[-limit:]
@@ -201,7 +200,7 @@ class HierarchicalFSM:
 class LobbySystem:
     """
     Combined hierarchical FSM + repetition guard for lobby management.
-    
+
     Provides a unified interface for:
     - State tracking and transitions
     - Action validation (cooldown + loop detection)
@@ -217,7 +216,7 @@ class LobbySystem:
 
         logger.info("[LOBBY_SYSTEM] Initialized")
 
-    def can_act(self, action: str, target: str = "") -> Tuple[bool, str]:
+    def can_act(self, action: str, target: str = "") -> tuple[bool, str]:
         """Check if an action can be performed."""
         return self.guard.can_execute(action, target)
 
@@ -226,7 +225,7 @@ class LobbySystem:
         """Record an executed action."""
         self.guard.record_action(action, target, result)
 
-    def transition(self, top: TopLevelState, sub: Optional[Enum] = None,
+    def transition(self, top: TopLevelState, sub: Enum | None = None,
                    reason: str = ""):
         """Transition to a new state."""
         self.fsm.transition(top, sub, reason)
@@ -234,10 +233,10 @@ class LobbySystem:
         if self.guard.is_loop_detected():
             self.guard.reset_loop()
 
-    def check_stuck(self) -> Optional[str]:
+    def check_stuck(self) -> str | None:
         """
         Check if the system is stuck and return a recovery action.
-        
+
         Returns None if not stuck, or a recovery action string.
         """
         if self.fsm.is_stuck():
@@ -250,7 +249,7 @@ class LobbySystem:
                 return "force_reset_to_lobby"
 
             state = self.fsm.get_state()
-            duration = self.fsm.get_state_duration()
+            self.fsm.get_state_duration()
 
             # State-specific recovery
             if state.sub == LobbyState.PLAY_BUTTON:
@@ -274,7 +273,7 @@ class LobbySystem:
         self._recovery_attempts = 0
         return None
 
-    def get_state_info(self) -> Dict:
+    def get_state_info(self) -> dict:
         """Get comprehensive state information."""
         return {
             "fsm": {

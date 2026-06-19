@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import abc
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 @dataclass
@@ -21,7 +21,7 @@ class SafetyStatus:
     should_pause: bool = False
     should_stop: bool = False
     warning_message: str = ""
-    metrics: Dict[str, Any] = None  # type: ignore[assignment]
+    metrics: dict[str, Any] = None  # type: ignore[assignment]
 
 
 class SafetyPort(abc.ABC):
@@ -48,5 +48,5 @@ class SafetyPort(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         ...

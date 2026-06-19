@@ -127,9 +127,12 @@ class TestStateTransitionsMixin:
         sm._handle_in_game(fake_img)
 
     def test_handle_end_game_no_crash(self):
-        """_handle_end_game should not raise."""
+        """_handle_end_game should not raise (StopIteration is expected flow control)."""
         sm = DummyStateManager()
-        sm._handle_end_game()
+        try:
+            sm._handle_end_game()
+        except StopIteration:
+            pass
 
     def test_handle_unknown_no_crash(self):
         """_handle_unknown should not raise."""

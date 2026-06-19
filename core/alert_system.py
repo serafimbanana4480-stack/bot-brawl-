@@ -14,12 +14,12 @@ Tipos de alerta:
 - SYSTEM: crash iminente, memória alta
 """
 
-import time
 import logging
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, field
+import time
 from collections import deque
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class Alert:
     timestamp: float
     acknowledged: bool = False
     auto_resolved: bool = False
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class AlertSystem:
@@ -68,7 +68,7 @@ class AlertSystem:
         "memory_usage_max_mb": 2048,
     }
 
-    def __init__(self, thresholds: Optional[Dict[str, Any]] = None):
+    def __init__(self, thresholds: dict[str, Any] | None = None):
         self.thresholds = {**self.DEFAULT_THRESHOLDS, **(thresholds or {})}
         self._alerts: deque = deque(maxlen=100)
         self._alert_counter = 0
@@ -79,7 +79,7 @@ class AlertSystem:
         self,
         cycle_duration: float = 0.0,
         wrapper_state: str = "unknown",
-        degradation_status: Optional[Dict] = None,
+        degradation_status: dict | None = None,
         fps: float = 0.0,
         apm: int = 0,
         error_count: int = 0,
@@ -158,7 +158,7 @@ class AlertSystem:
         severity: AlertSeverity,
         message: str,
         recommendation: str,
-        metadata: Optional[Dict] = None,
+        metadata: dict | None = None,
     ) -> Alert:
         """Emite um novo alerta."""
         self._alert_counter += 1
@@ -178,7 +178,7 @@ class AlertSystem:
         )
         return alert
 
-    def get_active_alerts(self, min_severity: Optional[AlertSeverity] = None) -> List[Dict]:
+    def get_active_alerts(self, min_severity: AlertSeverity | None = None) -> list[dict]:
         """Retorna alertas ativos (não resolvidos)."""
         result = []
         for alert in self._alerts:
@@ -213,7 +213,7 @@ class AlertSystem:
                 return True
         return False
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Estatísticas de alertas."""
         total = len(self._alerts)
         by_severity = {}

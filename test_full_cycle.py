@@ -6,11 +6,11 @@ Simula o fluxo: lobby -> play -> in_game sem iniciar threads.
 """
 
 import sys
-
 import time
+from pathlib import Path
+
 import numpy as np
 from PIL import Image
-from pathlib import Path
 
 print("=" * 60)
 print("TESTE CICLO COMPLETO DO BOT")
@@ -27,7 +27,8 @@ try:
         screenshot = img
     else:
         print("  FALHA: Janela não encontrada. Usando screenshot salvo...")
-        screenshot = np.array(Image.open('c:/Users/rodri/Desktop/bot brawl/screenshot_current.png'))
+        _root = Path(__file__).parent
+        screenshot = np.array(Image.open(str(_root / 'screenshot_current.png')))
 except Exception as e:
     print(f"  ERRO: {e}")
     screenshot = None
@@ -67,7 +68,7 @@ except Exception as e:
 # 4. Lobby Automator (sem ADB)
 print("\n[4/8] Testando lobby automator...")
 try:
-    from pylaai_real.lobby_automator import LobbyAutomator, BrawlerQueue, BrawlerConfig
+    from pylaai_real.lobby_automator import BrawlerConfig, BrawlerQueue, LobbyAutomator
 
     class MockCtrl:
         def __init__(self):
@@ -103,7 +104,8 @@ except Exception as e:
 print("\n[5/8] Testando modelo YOLO...")
 try:
     from ultralytics import YOLO
-    model = YOLO('c:/Users/rodri/Desktop/bot brawl/models/brawlstars_yolov8.pt')
+    _root = Path(__file__).parent
+    model = YOLO(str(_root / 'models' / 'brawlstars_yolov8.pt'))
     results = model(screenshot, conf=0.1, verbose=False)
     for r in results:
         print(f"  Detecções: {len(r.boxes)}")
@@ -134,8 +136,8 @@ except Exception as e:
 # 7. StateManager (sem threads)
 print("\n[7/8] Testando StateManager ciclo único...")
 try:
-    from pylaai_real.state_manager import StateManager
     from pylaai_real.state_finder import StateFinder
+    from pylaai_real.state_manager import StateManager
 
     sf = StateFinder(str(Path("images")))
     sm = StateManager(

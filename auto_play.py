@@ -1,28 +1,24 @@
 #!/usr/bin/env python3
 """Auto-Play System - Soberana Omega"""
 
-import sys
-import os
-import time
-import random
 import math
+import random
 import subprocess
-from pathlib import Path
-from datetime import datetime
+import time
 from collections import deque
+from pathlib import Path
 
 import numpy as np
-from PIL import Image
 
-from core.logging_config import setup_logging, get_logger
-from core.metrics import (
-    set_bot_state,
-    inc_matches_completed,
-    inc_errors,
-    set_detection_confidence,
-    observe_cycle_duration,
-)
 from core.error_recovery import inference_retry
+from core.logging_config import get_logger, setup_logging
+from core.metrics import (
+    inc_errors,
+    inc_matches_completed,
+    observe_cycle_duration,
+    set_bot_state,
+    set_detection_confidence,
+)
 
 logger = get_logger(__name__)
 
@@ -74,7 +70,7 @@ class AutoPlayBot:
         except Exception as e:
             logger.error(f"[AUTO] Falha ao inicializar detector: {e}")
         try:
-            from emulator_controller import EmulatorController, EmulatorConfig
+            from emulator_controller import EmulatorConfig, EmulatorController
             adb_port = 5554
             try:
                 result = subprocess.run(
@@ -137,7 +133,7 @@ class AutoPlayBot:
     def _tap_raw(self, x, y):
         if self.emulator:
             try:
-                self.emulator.tap(x, y)
+                self.emulator.tap_scaled(x, y)
                 return True
             except Exception as e:
                 logger.debug(f"[AUTO] Tap raw error: {e}")
@@ -146,10 +142,11 @@ class AutoPlayBot:
     def _swipe_1080(self, x1, y1, x2, y2, duration=200):
         if self.emulator:
             try:
-                self.emulator.swipe_scaled(x1, y1, x2, y2, duration=duration)
-                return True
+                result = self.emulator.swipe_scaled(x1, y1, x2, y2, duration=duration)
+                logger.info(f"[AUTO] Swipe result: {result} from ({x1},{y1}) to ({x2},{y2})")
+                return result
             except Exception as e:
-                logger.debug(f"[AUTO] Swipe error: {e}")
+                logger.warning(f"[AUTO] Swipe error: {e}")
         return False
 
     def _keyevent(self, keycode):
@@ -227,8 +224,8 @@ class AutoPlayBot:
                     if self._last_screenshot.shape == screenshot.shape:
                         diff = np.mean(np.abs(self._last_screenshot.astype(float) - screenshot.astype(float)))
                         frozen = diff < 2.0
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[AUTO] Screenshot comparison failed: {e}")
             if frozen:
                 logger.warning("[AUTO] Loading screen frozen, restarting app")
                 self._restart_app()
@@ -331,8 +328,8 @@ class AutoPlayBot:
                         logger.info("[AUTO] Recovery succeeded: lobby detected")
                         self.transition_to('lobby')
                         return
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[AUTO] Recovery check failed: {e}")
             if self._recovery_attempts >= 3:
                 logger.error("[AUTO] Recovery failed after 3 attempts, restarting app")
                 self._restart_app()
@@ -345,12 +342,6 @@ class AutoPlayBot:
         if screenshot is None:
             time.sleep(1.0)
             return
-        if self.cycle_count % 10 == 0:
-            try:
-                ts = datetime.now().strftime("%H%M%S")
-                Image.fromarray(screenshot).save(f"auto_play_{ts}_{self.state}.png")
-            except Exception:
-                pass
         self._last_screenshot = screenshot.copy()
         detected_state, conf, button_coords = self.detect_state(screenshot)
         set_detection_confidence(method="state_detector", value=conf)

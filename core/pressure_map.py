@@ -18,11 +18,11 @@ Integration:
 - Navigation: threat gradient used for retreat direction
 """
 
-import math
 import logging
+import math
 import threading
 import time
-from typing import Dict, List, Optional, Tuple
+
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -95,8 +95,8 @@ class PressureMap:
         """Set reference to OccupancyGrid for wall-aware calculations."""
         self._occupancy_grid = grid
 
-    def update(self, enemies: List[Dict], allies: Optional[List[Dict]] = None,
-               player_pos: Optional[Tuple[float, float]] = None):
+    def update(self, enemies: list[dict], allies: list[dict] | None = None,
+               player_pos: tuple[float, float] | None = None):
         """
         Recompute pressure and influence maps from enemy/ally positions.
 
@@ -159,7 +159,7 @@ class PressureMap:
                 return float(self.influence[gy, gx])
             return 0.0
 
-    def get_retreat_direction(self, x: float, y: float) -> Tuple[float, float]:
+    def get_retreat_direction(self, x: float, y: float) -> tuple[float, float]:
         """
         Get the direction to move to reduce pressure.
 
@@ -174,7 +174,7 @@ class PressureMap:
             return (0.0, 0.0)
 
     def get_safest_direction(self, x: float, y: float,
-                             preferred_dir: Optional[Tuple[float, float]] = None) -> Tuple[float, float]:
+                             preferred_dir: tuple[float, float] | None = None) -> tuple[float, float]:
         """
         Get the safest movement direction, optionally biased toward a preferred direction.
 
@@ -214,7 +214,7 @@ class PressureMap:
 
             return best_dir
 
-    def get_pressure_stats(self) -> Dict:
+    def get_pressure_stats(self) -> dict:
         """Get pressure map statistics."""
         with self._lock:
             return {
@@ -288,7 +288,7 @@ class PressureMap:
                     self.gradient_x[gy, gx] = 0.0
                     self.gradient_y[gy, gx] = 0.0
 
-    def _pixel_to_grid(self, px: float, py: float) -> Tuple[int, int]:
+    def _pixel_to_grid(self, px: float, py: float) -> tuple[int, int]:
         gx = int(px / self.cell_w)
         gy = int(py / self.cell_h)
         return (max(0, min(self.GRID_COLS - 1, gx)),

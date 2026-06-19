@@ -21,9 +21,10 @@ Uso:
 
 import logging
 import time
-from typing import Dict, List, Optional, Any, Callable
-from dataclasses import dataclass, field
 from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ class DecisionRecord:
     timestamp: float
     state_hash: str
     action: str
-    scores: Dict[str, float] = field(default_factory=dict)
+    scores: dict[str, float] = field(default_factory=dict)
     confidence: float = 0.0
     source: str = ""  # "real" ou shadow strategy name
 
@@ -44,17 +45,17 @@ class ShadowMode:
     Executor shadow de estratégias de decisão.
     """
 
-    def __init__(self, real_decider: Optional[Any] = None, max_history: int = 1000):
+    def __init__(self, real_decider: Any | None = None, max_history: int = 1000):
         self.real_decider = real_decider
-        self._strategies: Dict[str, Callable[[Dict], str]] = {}
-        self._active_strategy: Optional[str] = None
+        self._strategies: dict[str, Callable[[dict], str]] = {}
+        self._active_strategy: str | None = None
         self._real_history: deque = deque(maxlen=max_history)
         self._shadow_history: deque = deque(maxlen=max_history)
         self._enabled = False
         self._agreement_count = 0
         self._disagreement_count = 0
 
-    def register_strategy(self, name: str, decide_fn: Callable[[Dict], str]):
+    def register_strategy(self, name: str, decide_fn: Callable[[dict], str]):
         """Registra uma estratégia shadow."""
         self._strategies[name] = decide_fn
         logger.info("[SHADOW] Estratégia registrada: %s", name)
@@ -72,7 +73,7 @@ class ShadowMode:
         self._enabled = False
         logger.info("[SHADOW] Desativado")
 
-    def on_cycle(self, context: Dict[str, Any]) -> Optional[str]:
+    def on_cycle(self, context: dict[str, Any]) -> str | None:
         """
         Executa ciclo shadow. Retorna ação que o shadow tomaria.
         NÃO envia comandos ao emulador.
@@ -111,7 +112,7 @@ class ShadowMode:
 
         return shadow_action
 
-    def compare_with_real(self) -> Dict[str, Any]:
+    def compare_with_real(self) -> dict[str, Any]:
         """Compara decisões shadow vs real."""
         total = self._agreement_count + self._disagreement_count
         if total == 0:
@@ -123,8 +124,8 @@ class ShadowMode:
         recent_shadow = list(self._shadow_history)[-100:]
         recent_real = list(self._real_history)[-100:]
 
-        divergence_by_state: Dict[str, int] = {}
-        for s, r in zip(recent_shadow, recent_real):
+        divergence_by_state: dict[str, int] = {}
+        for s, r in zip(recent_shadow, recent_real, strict=False):
             if s.state_hash == r.state_hash and s.action != r.action:
                 key = f"{r.action}_vs_{s.action}"
                 divergence_by_state[key] = divergence_by_state.get(key, 0) + 1
@@ -139,7 +140,7 @@ class ShadowMode:
             "top_divergences": sorted(divergence_by_state.items(), key=lambda x: -x[1])[:5],
         }
 
-    def get_shadow_recommendation(self) -> Optional[str]:
+    def get_shadow_recommendation(self) -> str | None:
         """
         Retorna recomendação: se shadow está performando melhor,
         sugere ativar como real.
@@ -156,14 +157,14 @@ class ShadowMode:
         return None
 
     @staticmethod
-    def _hash_context(ctx: Dict) -> str:
+    def _hash_context(ctx: dict) -> str:
         """Hash simples do contexto para comparação."""
         # Usar apenas chaves relevantes
         keys = ["player_hp", "enemy_count", "game_state", "brawler"]
         parts = [str(ctx.get(k, "")) for k in keys]
         return "|".join(parts)
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         return {
             "enabled": self._enabled,
             "active_strategy": self._active_strategy,

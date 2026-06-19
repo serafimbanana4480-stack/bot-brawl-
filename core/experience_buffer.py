@@ -6,7 +6,6 @@ Thread-safe circular buffer with numpy-backed storage.
 
 import threading
 from collections import deque
-from typing import Dict, Optional
 
 import numpy as np
 
@@ -63,7 +62,7 @@ class ExperienceBuffer:
                 self._size = len(self._buf)
             self._episode_start = self._size
 
-    def sample(self, batch_size: int) -> Optional[Dict[str, np.ndarray]]:
+    def sample(self, batch_size: int) -> dict[str, np.ndarray] | None:
         with self._lock:
             if self._size < batch_size:
                 return None

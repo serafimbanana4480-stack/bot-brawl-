@@ -14,17 +14,17 @@ Separação CQRS:
 - Query side: projeções para leitura otimizada
 """
 
+import gzip
 import json
 import logging
-import time
 import threading
-import gzip
-from pathlib import Path
+import time
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Dict, List, Optional, Callable, Any, Iterator
-from dataclasses import dataclass, asdict, field
-from enum import Enum, auto
-from collections import deque
+from enum import Enum
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -87,11 +87,11 @@ class DomainEvent:
     timestamp: float
     aggregate_id: str           # ex: session_id, match_id
     aggregate_type: str         # ex: "session", "match", "player"
-    payload: Dict[str, Any] = field(default_factory=dict)
+    payload: dict[str, Any] = field(default_factory=dict)
     version: int = 1
-    metadata: Dict[str, str] = field(default_factory=dict)
+    metadata: dict[str, str] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             "event_type": self.event_type.value,
             "timestamp": self.timestamp,
@@ -103,7 +103,7 @@ class DomainEvent:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict) -> "DomainEvent":
+    def from_dict(cls, data: dict) -> "DomainEvent":
         return cls(
             event_type=DomainEventType(data["event_type"]),
             timestamp=data["timestamp"],
@@ -138,8 +138,8 @@ class EventStore:
         self.max_event_age_days = max_event_age_days
 
         self._lock = threading.RLock()
-        self._current_file: Optional[Path] = None
-        self._current_date: Optional[str] = None
+        self._current_file: Path | None = None
+        self._current_date: str | None = None
         self._ensure_daily_file()
 
         # Métricas
@@ -162,11 +162,11 @@ class EventStore:
                     f.write(line + "\n")
                 self._events_appended += 1
                 return True
-            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.error("[EVENT_STORE] Falha ao append evento: %s", e)
                 return False
 
-    def append(self, event_type: DomainEventType, aggregate_id: str, aggregate_type: str, payload: Dict[str, Any] = None, **metadata) -> bool:
+    def append(self, event_type: DomainEventType, aggregate_id: str, aggregate_type: str, payload: dict[str, Any] = None, **metadata) -> bool:
         """Conveniência: cria e persiste evento numa chamada."""
         event = DomainEvent(
             event_type=event_type,
@@ -184,10 +184,10 @@ class EventStore:
 
     def replay_events(
         self,
-        from_timestamp: Optional[float] = None,
-        to_timestamp: Optional[float] = None,
-        event_types: Optional[List[DomainEventType]] = None,
-        aggregate_id: Optional[str] = None,
+        from_timestamp: float | None = None,
+        to_timestamp: float | None = None,
+        event_types: list[DomainEventType] | None = None,
+        aggregate_id: str | None = None,
     ) -> Iterator[DomainEvent]:
         """
         Reconstrói stream de eventos filtrado.
@@ -208,7 +208,7 @@ class EventStore:
                         try:
                             data = json.loads(line)
                             event = DomainEvent.from_dict(data)
-                        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError):
+                        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
                             continue
 
                         # Filtros
@@ -223,14 +223,14 @@ class EventStore:
 
                         self._events_replayed += 1
                         yield event
-            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.warning("[EVENT_STORE] Erro ao ler %s: %s", file_path.name, e)
 
-    def get_events_for_aggregate(self, aggregate_id: str) -> List[DomainEvent]:
+    def get_events_for_aggregate(self, aggregate_id: str) -> list[DomainEvent]:
         """Retorna todos os eventos de um aggregate específico."""
         return list(self.replay_events(aggregate_id=aggregate_id))
 
-    def get_events_between(self, t0: float, t1: float, event_types: Optional[List[DomainEventType]] = None) -> List[DomainEvent]:
+    def get_events_between(self, t0: float, t1: float, event_types: list[DomainEventType] | None = None) -> list[DomainEvent]:
         """Retorna eventos num intervalo temporal."""
         return list(self.replay_events(from_timestamp=t0, to_timestamp=t1, event_types=event_types))
 
@@ -242,9 +242,9 @@ class EventStore:
         self,
         projector: Callable[[Any, DomainEvent], Any],
         initial_state: Any,
-        from_timestamp: Optional[float] = None,
-        to_timestamp: Optional[float] = None,
-        event_types: Optional[List[DomainEventType]] = None,
+        from_timestamp: float | None = None,
+        to_timestamp: float | None = None,
+        event_types: list[DomainEventType] | None = None,
     ) -> Any:
         """
         Aplica função projector a cada evento, acumulando estado.
@@ -255,12 +255,12 @@ class EventStore:
             state = projector(state, event)
         return state
 
-    def rebuild_session_state(self, session_id: str) -> Dict:
+    def rebuild_session_state(self, session_id: str) -> dict:
         """
         Reconstrói estado completo de uma sessão a partir dos eventos.
         Útil para debug pós-mortem.
         """
-        def projector(state: Dict, event: DomainEvent) -> Dict:
+        def projector(state: dict, event: DomainEvent) -> dict:
             state["events_count"] = state.get("events_count", 0) + 1
             state["last_event_time"] = event.timestamp
 
@@ -307,7 +307,7 @@ class EventStore:
     # Diagnóstico pós-mortem
     # ------------------------------------------------------------------
 
-    def post_mortem_analysis(self, session_id: str, minutes_before: float = 10.0) -> Dict[str, Any]:
+    def post_mortem_analysis(self, session_id: str, minutes_before: float = 10.0) -> dict[str, Any]:
         """
         Análise pós-mortem de uma sessão — identifica sequência de eventos
         que levaram a um crash, ban, ou comportamento anômalo.
@@ -364,7 +364,7 @@ class EventStore:
             "recommendation": self._post_mortem_recommendation(suspicious_patterns),
         }
 
-    def _post_mortem_recommendation(self, patterns: List[str]) -> str:
+    def _post_mortem_recommendation(self, patterns: list[str]) -> str:
         """Gera recomendação baseada nos padrões encontrados."""
         if "rate_limit_repeated" in patterns:
             return "Aumentar breaks entre sessões; reduzir matches/hora."
@@ -417,10 +417,10 @@ class EventStore:
                     gz_path.unlink(missing_ok=True)
                     logger.info("[EVENT_STORE] Removido %s (expirado)", file_path.name)
 
-            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.warning("[EVENT_STORE] Erro na manutenção de %s: %s", file_path.name, e)
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Retorna estatísticas do event store."""
         total_files = len(list(self.base_dir.glob("events_*")))
         return {
@@ -435,7 +435,7 @@ class EventStore:
 # Singleton global (opcional)
 # ------------------------------------------------------------------------------
 
-_default_store: Optional[EventStore] = None
+_default_store: EventStore | None = None
 
 
 def get_event_store() -> EventStore:

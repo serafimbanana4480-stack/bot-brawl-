@@ -13,20 +13,17 @@ ZERO dados mock. Tudo vem do bot em execucao.
 """
 
 import json
-import time
 import logging
 import threading
-import base64
-import os
-from pathlib import Path
-from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple
+import time
 from collections import deque
-from dataclasses import dataclass, field, asdict
-import io
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 try:
-    from http.server import HTTPServer, BaseHTTPRequestHandler
+    from http.server import BaseHTTPRequestHandler, HTTPServer
     from socketserver import ThreadingMixIn
     class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
         daemon_threads = True
@@ -45,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 # Phase 2: LogBuffer integration
 try:
-    from core.log_buffer import LogBuffer, install_log_buffer, get_log_buffer
+    from core.log_buffer import LogBuffer, get_log_buffer, install_log_buffer
     HAS_LOGBUFFER = True
 except ImportError:
     HAS_LOGBUFFER = False
@@ -73,8 +70,8 @@ class BotLiveData:
     timestamp: float = 0.0
     running: bool = False
     current_state: str = "unknown"
-    brawler: Optional[str] = None
-    map_name: Optional[str] = None
+    brawler: str | None = None
+    map_name: str | None = None
     matches_total: int = 0
     wins: int = 0
     losses: int = 0
@@ -85,13 +82,13 @@ class BotLiveData:
     epsilon: float = 0.0
     q_states: int = 0
     elo_combinations: int = 0
-    top_elo: List[Dict] = field(default_factory=list)
-    recent_events: List[Dict] = field(default_factory=list)
-    last_error: Optional[str] = None
+    top_elo: list[dict] = field(default_factory=list)
+    recent_events: list[dict] = field(default_factory=list)
+    last_error: str | None = None
     ab_test_active: bool = False
     ab_test_variant: str = "control"
     replay_recording: bool = False
-    screenshot_b64: Optional[str] = None  # ultimo screenshot (base64 jpeg, ~30KB)
+    screenshot_b64: str | None = None  # ultimo screenshot (base64 jpeg, ~30KB)
     combat_mode: str = "neutral"
     enemies_detected: int = 0
     hp_estimate: float = 1.0
@@ -119,17 +116,17 @@ class BotLiveData:
     total_trophies: int = 0
     unlocked_brawlers: int = 0
     total_brawlers: int = 0
-    trophy_history: List[Dict] = field(default_factory=list)  # [{date, trophies}]
-    daily_evolution: List[Dict] = field(default_factory=list)  # [{date, change}]
+    trophy_history: list[dict] = field(default_factory=list)  # [{date, trophies}]
+    daily_evolution: list[dict] = field(default_factory=list)  # [{date, change}]
     # Premium: Per-brawler stats
-    brawler_stats: List[Dict] = field(default_factory=list)  # [{name, wr, picks, kills, deaths, trophies, gadget, sp, maps}]
+    brawler_stats: list[dict] = field(default_factory=list)  # [{name, wr, picks, kills, deaths, trophies, gadget, sp, maps}]
     # Premium: Match analysis
-    recent_matches: List[Dict] = field(default_factory=list)  # [{brawler, map, result, kills, deaths, duration, analysis}]
-    match_analysis: Optional[Dict] = None  # latest analysis
-    ai_pick_suggestion: Optional[Dict] = None  # {brawler, map, confidence, reason}
+    recent_matches: list[dict] = field(default_factory=list)  # [{brawler, map, result, kills, deaths, duration, analysis}]
+    match_analysis: dict | None = None  # latest analysis
+    ai_pick_suggestion: dict | None = None  # {brawler, map, confidence, reason}
     win_prediction: float = 0.0  # 0-1 predicted win chance
-    coach_tips: List[str] = field(default_factory=list)
-    weekly_progress: Optional[Dict] = None  # {trophies_change, winrate_change, matches, best_brawler}
+    coach_tips: list[str] = field(default_factory=list)
+    weekly_progress: dict | None = None  # {trophies_change, winrate_change, matches, best_brawler}
 
 
 class DashboardDataBridge:
@@ -322,11 +319,11 @@ class DashboardDataBridge:
         except Exception as e:
             logger.debug(f"[DASHBOARD] update_from_wrapper error: {e}")
 
-    def get_snapshot(self) -> Dict:
+    def get_snapshot(self) -> dict:
         with self._lock:
             return asdict(self._data)
 
-    def get_history(self) -> List[Dict]:
+    def get_history(self) -> list[dict]:
         with self._lock:
             return list(self._history)
 
@@ -334,7 +331,7 @@ class DashboardDataBridge:
         with self._lock:
             self._rewards_history.append({"t": time.time(), "r": reward})
 
-    def get_rewards_history(self) -> List[Dict]:
+    def get_rewards_history(self) -> list[dict]:
         with self._lock:
             return list(self._rewards_history)
 
@@ -346,11 +343,11 @@ class DashboardDataBridge:
 @dataclass
 class ReplayFrame:
     timestamp: float
-    screenshot_path: Optional[str]
+    screenshot_path: str | None
     state: str
     action: str
     enemies: int = 0
-    player_pos: Optional[Tuple[float, float]] = None
+    player_pos: tuple[float, float] | None = None
     reward: float = 0.0
 
 
@@ -364,13 +361,13 @@ class ReplayRecorder:
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
         self._active = False
-        self._current_replay: List[ReplayFrame] = []
+        self._current_replay: list[ReplayFrame] = []
         self._current_name: str = ""
         self._frame_counter = 0
         self._max_frames = 150
         self._quality = 60  # jpeg quality
 
-    def start(self, name: Optional[str] = None):
+    def start(self, name: str | None = None):
         self._active = True
         self._current_replay = []
         self._frame_counter = 0
@@ -430,12 +427,12 @@ class ReplayRecorder:
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2, ensure_ascii=False)
 
-    def list_replays(self) -> List[Dict]:
+    def list_replays(self) -> list[dict]:
         replays = []
         for entry in self.save_dir.iterdir():
             if entry.is_dir() and (entry / "replay.json").exists():
                 try:
-                    with open(entry / "replay.json", "r", encoding="utf-8") as f:
+                    with open(entry / "replay.json", encoding="utf-8") as f:
                         data = json.load(f)
                     replays.append({
                         "name": data["name"],
@@ -455,7 +452,7 @@ class ReplayRecorder:
 @dataclass
 class ABTestVariant:
     name: str
-    config: Dict[str, Any]
+    config: dict[str, Any]
     matches: int = 0
     wins: int = 0
     losses: int = 0
@@ -473,11 +470,11 @@ class ABTestManager:
         self.save_path = Path(save_path)
         self.active = False
         self.current_variant: str = "control"
-        self.variants: Dict[str, ABTestVariant] = {}
+        self.variants: dict[str, ABTestVariant] = {}
         self._match_count = 0
         self._load()
 
-    def define_variants(self, variants: Dict[str, Dict[str, Any]]):
+    def define_variants(self, variants: dict[str, dict[str, Any]]):
         """Define variantes a partir de dicts de config."""
         for name, config in variants.items():
             if name not in self.variants:
@@ -521,7 +518,7 @@ class ABTestManager:
         logger.info(f"[ABTEST] {variant}: {result} (wins={v.wins}/{v.matches})")
         self._save()
 
-    def get_summary(self) -> Dict:
+    def get_summary(self) -> dict:
         if not self.variants:
             return {}
         summary = {
@@ -553,7 +550,7 @@ class ABTestManager:
         if not self.save_path.exists():
             return
         try:
-            with open(self.save_path, "r", encoding="utf-8") as f:
+            with open(self.save_path, encoding="utf-8") as f:
                 data = json.load(f)
             for k, v in data.items():
                 self.variants[k] = ABTestVariant(**v)
@@ -571,7 +568,7 @@ class BrawlerStatsTracker:
     def __init__(self, save_path: Path = Path("data/dashboard_brawler_stats.json")):
         self.save_path = Path(save_path)
         self.save_path.parent.mkdir(parents=True, exist_ok=True)
-        self._stats: Dict[str, Dict] = {}
+        self._stats: dict[str, dict] = {}
         self._total_matches = 0
         self._load()
 
@@ -623,15 +620,17 @@ class BrawlerStatsTracker:
             if md["matches"] >= 2:
                 wr = md["wins"] / md["matches"]
                 if wr > best_wr:
-                    best_wr = wr; s["best_map"] = mn
+                    best_wr = wr
+                    s["best_map"] = mn
                 if wr < worst_wr:
-                    worst_wr = wr; s["worst_map"] = mn
+                    worst_wr = wr
+                    s["worst_map"] = mn
         self._save()
 
-    def get_all_stats(self) -> List[Dict]:
+    def get_all_stats(self) -> list[dict]:
         """Get stats for all brawlers as a list."""
         result = []
-        for key, s in self._stats.items():
+        for _key, s in self._stats.items():
             wr = s["wins"] / max(1, s["matches"]) * 100
             pick_rate = s["matches"] / max(1, self._total_matches) * 100
             avg_kills = s["kills"] / max(1, s["matches"])
@@ -678,7 +677,7 @@ class BrawlerStatsTracker:
     def _load(self):
         try:
             if self.save_path.exists():
-                with open(self.save_path, "r", encoding="utf-8") as f:
+                with open(self.save_path, encoding="utf-8") as f:
                     data = json.load(f)
                 self._total_matches = data.get("total_matches", 0)
                 self._stats = data.get("brawlers", {})
@@ -702,8 +701,8 @@ class MatchAnalyzer:
         "penny": "damage", "carl": "damage", "pam": "support",
         "frank": "tank", "gene": "support", "max": "speedster",
         "mortis": "assassin", "tara": "damage", "sprout": "thrower",
-        "bea": "damage", "nita": "controller", "ricco": "damage",
-        "darryl": "assassin", "penny": "damage", "crow": "assassin",
+        "bea": "damage", "ricco": "damage",
+        "darryl": "assassin", "crow": "assassin",
         "leon": "assassin", "spike": "damage", "surge": "damage",
     }
 
@@ -728,9 +727,11 @@ class MatchAnalyzer:
     }
 
     def analyze_match(self, brawler: str, map_name: str, result: str,
-                      kills: int = 0, deaths: int = 0, enemies: List[str] = [],
-                      duration: float = 0.0) -> Dict:
+                      kills: int = 0, deaths: int = 0, enemies: list[str] = None,
+                      duration: float = 0.0) -> dict:
         """Analyze a completed match and return insights."""
+        if enemies is None:
+            enemies = []
         analysis = {
             "brawler": brawler,
             "map": map_name,
@@ -791,9 +792,11 @@ class MatchAnalyzer:
 
         return analysis
 
-    def suggest_pick(self, map_name: str, available_brawlers: List[str],
-                     enemy_brawlers: List[str] = []) -> Dict:
+    def suggest_pick(self, map_name: str, available_brawlers: list[str],
+                     enemy_brawlers: list[str] = None) -> dict:
         """Suggest the best brawler pick for a given map and enemy comp."""
+        if enemy_brawlers is None:
+            enemy_brawlers = []
         map_lower = map_name.lower() if map_name else ""
         best_brawler = None
         best_score = -1
@@ -837,8 +840,10 @@ class MatchAnalyzer:
             "alternatives": available_brawlers[:3],
         }
 
-    def predict_win(self, brawler: str, map_name: str, enemy_brawlers: List[str] = []) -> float:
+    def predict_win(self, brawler: str, map_name: str, enemy_brawlers: list[str] = None) -> float:
         """Predict win probability (0-1) based on matchup analysis."""
+        if enemy_brawlers is None:
+            enemy_brawlers = []
         score = 0.5  # base 50%
         role = self.BRAWLER_ROLES.get(brawler.lower(), "damage")
         map_lower = map_name.lower() if map_name else ""
@@ -858,8 +863,10 @@ class MatchAnalyzer:
 
         return max(0.1, min(0.9, score))
 
-    def get_coach_tips(self, brawler: str, recent_results: List[str] = []) -> List[str]:
+    def get_coach_tips(self, brawler: str, recent_results: list[str] = None) -> list[str]:
         """Generate coaching tips based on recent performance."""
+        if recent_results is None:
+            recent_results = []
         tips = []
         role = self.BRAWLER_ROLES.get(brawler.lower(), "damage")
 
@@ -920,7 +927,7 @@ class TrophyTracker:
     def __init__(self, save_path: Path = Path("data/trophy_history.json")):
         self.save_path = Path(save_path)
         self.save_path.parent.mkdir(parents=True, exist_ok=True)
-        self._history: List[Dict] = []
+        self._history: list[dict] = []
         self._load()
 
     def record(self, total_trophies: int, brawler: str = "", trophies: int = 0):
@@ -940,12 +947,12 @@ class TrophyTracker:
             self._history = self._history[-500:]
         self._save()
 
-    def get_trophy_history(self, days: int = 30) -> List[Dict]:
+    def get_trophy_history(self, days: int = 30) -> list[dict]:
         """Get trophy history for the last N days."""
         cutoff = time.time() - days * 86400
         return [h for h in self._history if h["timestamp"] >= cutoff]
 
-    def get_daily_evolution(self, days: int = 14) -> List[Dict]:
+    def get_daily_evolution(self, days: int = 14) -> list[dict]:
         """Get daily trophy changes."""
         daily = {}
         for h in self._history:
@@ -963,7 +970,7 @@ class TrophyTracker:
             prev = daily[d]["max"]
         return result
 
-    def get_weekly_progress(self) -> Dict:
+    def get_weekly_progress(self) -> dict:
         """Get weekly progress summary."""
         now = datetime.now()
         week_ago = (now - __import__("datetime").timedelta(days=7)).strftime("%Y-%m-%d")
@@ -991,7 +998,7 @@ class TrophyTracker:
     def _load(self):
         try:
             if self.save_path.exists():
-                with open(self.save_path, "r", encoding="utf-8") as f:
+                with open(self.save_path, encoding="utf-8") as f:
                     self._history = json.load(f)
         except Exception as e:
             logger.debug(f"[DASHBOARD] serve loop stopped: {e}")

@@ -14,10 +14,10 @@ Regras:
 - APM alto: skip para reduzir carga
 """
 
-import time
 import logging
-from typing import Optional, Dict, Any
+import time
 from collections import deque
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ class SmartFrameSkipper:
         frame_counter: int,
         current_state: str,
         degradation_mode: str = "full_quality",
-        apm: Optional[int] = None,
+        apm: int | None = None,
         combat_active: bool = False,
     ) -> bool:
         """
@@ -111,7 +111,7 @@ class SmartFrameSkipper:
 
         return should_process
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Retorna estatísticas de skip."""
         if not self._history:
             return {"processed_ratio": 1.0, "total_frames": 0}

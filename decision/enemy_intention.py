@@ -22,11 +22,10 @@ This information feeds into:
 - Target priority: bait enemies are dangerous
 """
 
-import math
 import logging
-import time
+import math
 import threading
-from typing import Dict, List, Optional, Tuple
+import time
 from dataclasses import dataclass
 from enum import Enum
 
@@ -50,9 +49,9 @@ class EnemyIntention(Enum):
 class EnemyTrack:
     """Tracking data for a single enemy over time."""
     track_id: int
-    positions: List[Tuple[float, float, float]] = None  # (x, y, timestamp)
-    velocities: List[Tuple[float, float]] = None  # (vx, vy) in pixels/s
-    health_history: List[Tuple[float, float]] = None  # (health, timestamp)
+    positions: list[tuple[float, float, float]] = None  # (x, y, timestamp)
+    velocities: list[tuple[float, float]] = None  # (vx, vy) in pixels/s
+    health_history: list[tuple[float, float]] = None  # (health, timestamp)
     class_name: str = ""
     current_intention: EnemyIntention = EnemyIntention.UNKNOWN
     intention_confidence: float = 0.0
@@ -104,15 +103,15 @@ class EnemyIntentionPredictor:
     BAIT_REVERSAL_WINDOW = 2.0  # seconds to look back for reversal
 
     def __init__(self):
-        self._tracks: Dict[int, EnemyTrack] = {}
-        self._player_pos: Optional[Tuple[float, float]] = None
+        self._tracks: dict[int, EnemyTrack] = {}
+        self._player_pos: tuple[float, float] | None = None
         self._lock = threading.RLock()
 
         logger.info("[ENEMY_INTENT] Initialized")
 
-    def update(self, enemy_detections: List[Dict],
-               player_pos: Tuple[float, float],
-               ally_positions: Optional[List[Tuple[float, float]]] = None):
+    def update(self, enemy_detections: list[dict],
+               player_pos: tuple[float, float],
+               ally_positions: list[tuple[float, float]] | None = None):
         """
         Update enemy tracking and predict intentions.
 
@@ -168,7 +167,7 @@ class EnemyIntentionPredictor:
             for tid in stale_ids:
                 del self._tracks[tid]
 
-    def get_enemy_intention(self, track_id: int) -> Tuple[EnemyIntention, float]:
+    def get_enemy_intention(self, track_id: int) -> tuple[EnemyIntention, float]:
         """
         Get the predicted intention for a specific enemy.
 
@@ -181,7 +180,7 @@ class EnemyIntentionPredictor:
                 return (track.current_intention, track.intention_confidence)
             return (EnemyIntention.UNKNOWN, 0.0)
 
-    def get_all_intentions(self) -> Dict[int, Tuple[EnemyIntention, float]]:
+    def get_all_intentions(self) -> dict[int, tuple[EnemyIntention, float]]:
         """Get intentions for all tracked enemies."""
         with self._lock:
             return {
@@ -189,28 +188,28 @@ class EnemyIntentionPredictor:
                 for tid, track in self._tracks.items()
             }
 
-    def get_rushers(self) -> List[int]:
+    def get_rushers(self) -> list[int]:
         """Get track IDs of enemies currently rushing toward us."""
         with self._lock:
             return [tid for tid, t in self._tracks.items()
                     if t.current_intention == EnemyIntention.RUSH
                     and t.intention_confidence > 0.5]
 
-    def get_flankers(self) -> List[int]:
+    def get_flankers(self) -> list[int]:
         """Get track IDs of enemies attempting to flank."""
         with self._lock:
             return [tid for tid, t in self._tracks.items()
                     if t.current_intention == EnemyIntention.FLANK
                     and t.intention_confidence > 0.4]
 
-    def get_baiters(self) -> List[int]:
+    def get_baiters(self) -> list[int]:
         """Get track IDs of enemies that might be baiting."""
         with self._lock:
             return [tid for tid, t in self._tracks.items()
                     if t.current_intention == EnemyIntention.BAIT
                     and t.intention_confidence > 0.3]
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get predictor statistics."""
         with self._lock:
             intent_counts = {}
@@ -260,8 +259,8 @@ class EnemyIntentionPredictor:
             track.velocities = track.velocities[-self.MAX_HISTORY:]
 
     def _predict_intention(self, track: EnemyTrack,
-                           player_pos: Tuple[float, float],
-                           ally_positions: Optional[List[Tuple[float, float]]]):
+                           player_pos: tuple[float, float],
+                           ally_positions: list[tuple[float, float]] | None):
         """Predict the intention of a single enemy."""
         if len(track.positions) < self.MIN_OBSERVATIONS:
             track.current_intention = EnemyIntention.UNKNOWN
@@ -397,7 +396,7 @@ class EnemyIntentionPredictor:
         track.intention_confidence = min(1.0, best_score)
 
     def _detect_bait(self, track: EnemyTrack,
-                     player_pos: Tuple[float, float]) -> float:
+                     player_pos: tuple[float, float]) -> float:
         """
         Detect bait pattern: enemy was retreating then stopped/reversed.
 
@@ -407,8 +406,7 @@ class EnemyIntentionPredictor:
         if len(track.velocities) < 4:
             return 0.0
 
-        now = time.time()
-        window = self.BAIT_REVERSAL_WINDOW
+        time.time()
 
         # Check if enemy was moving away then stopped or reversed
         was_retreating = False

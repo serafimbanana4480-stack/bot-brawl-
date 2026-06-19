@@ -14,16 +14,14 @@ Funcionalidades:
 - Recovery automático com fallback progressivo
 """
 
+import threading
 import time
-import logging
 import traceback
-from typing import Dict, List, Optional, Callable, Type
+from collections import defaultdict, deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import wraps
-from collections import deque, defaultdict
-import threading
-import subprocess
 
 from core.logging_config import get_logger
 
@@ -33,7 +31,7 @@ logger = get_logger(__name__)
 # Tenacity-based circuit breakers
 # ---------------------------------------------------------------------------
 try:
-    from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_result, retry_if_exception_type
+    from tenacity import retry, retry_if_exception_type, retry_if_result, stop_after_attempt, wait_exponential
     HAS_TENACITY = True
 except ImportError:  # pragma: no cover
     HAS_TENACITY = False
@@ -102,7 +100,7 @@ class ErrorContext:
     timestamp: float = field(default_factory=time.time)
     component: str = ""
     operation: str = ""
-    additional_info: Dict = field(default_factory=dict)
+    additional_info: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -110,8 +108,8 @@ class RecoveryAction:
     """Ação de recovery a ser executada."""
     strategy: RecoveryStrategy
     description: str
-    handler: Optional[Callable] = None
-    params: Dict = field(default_factory=dict)
+    handler: Callable | None = None
+    params: dict = field(default_factory=dict)
     max_attempts: int = 3
     delay_between_attempts: float = 1.0
 
@@ -120,8 +118,8 @@ class RecoveryAction:
 class ErrorStats:
     """Estatísticas de erros."""
     total_errors: int = 0
-    errors_by_type: Dict[ErrorType, int] = field(default_factory=lambda: defaultdict(int))
-    errors_by_severity: Dict[ErrorSeverity, int] = field(default_factory=lambda: defaultdict(int))
+    errors_by_type: dict[ErrorType, int] = field(default_factory=lambda: defaultdict(int))
+    errors_by_severity: dict[ErrorSeverity, int] = field(default_factory=lambda: defaultdict(int))
     recovery_success: int = 0
     recovery_failure: int = 0
     last_error_time: float = 0.0
@@ -131,13 +129,13 @@ class ErrorStats:
 class CircuitBreaker:
     """
     Circuit breaker para evitar chamadas a componentes com falhas recorrentes.
-    
+
     Estados:
     - CLOSED: Operação normal
     - OPEN: Componente com falhas, não tentar
     - HALF_OPEN: Tentar uma vez para ver se recuperou
     """
-    
+
     def __init__(
         self,
         failure_threshold: int = 5,
@@ -147,13 +145,13 @@ class CircuitBreaker:
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self.half_open_attempts = half_open_attempts
-        
+
         self.failures = 0
         self.last_failure_time = 0.0
         self.half_open_success_count = 0
         self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
         self.lock = threading.Lock()
-    
+
     def record_success(self):
         """Registra sucesso."""
         with self.lock:
@@ -165,18 +163,18 @@ class CircuitBreaker:
                     logger.info("[CIRCUIT] Circuit breaker fechado (recuperado)")
             else:
                 self.failures = max(0, self.failures - 1)
-    
+
     def record_failure(self):
         """Registra falha."""
         with self.lock:
             self.failures += 1
             self.last_failure_time = time.time()
-            
+
             if self.failures >= self.failure_threshold:
                 self.state = "OPEN"
                 self.half_open_success_count = 0
                 logger.warning(f"[CIRCUIT] Circuit breaker aberto ({self.failures} falhas)")
-    
+
     def can_execute(self) -> bool:
         """Verifica se pode executar operação."""
         with self.lock:
@@ -192,7 +190,7 @@ class CircuitBreaker:
             elif self.state == "HALF_OPEN":
                 return True
             return False
-    
+
     def get_state(self) -> str:
         """Retorna estado atual."""
         with self.lock:
@@ -202,7 +200,7 @@ class CircuitBreaker:
 class ErrorRecoverySystem:
     """
     Sistema de recovery de erros.
-    
+
     Gerencia:
     - Classificação de erros
     - Seleção de estratégias de recovery
@@ -210,7 +208,7 @@ class ErrorRecoverySystem:
     - Estatísticas de erros
     - Logging detalhado
     """
-    
+
     def __init__(
         self,
         enable_auto_recovery: bool = True,
@@ -220,30 +218,30 @@ class ErrorRecoverySystem:
         self.enable_auto_recovery = enable_auto_recovery
         self.max_recovery_attempts = max_recovery_attempts
         self.global_circuit_breaker = global_circuit_breaker
-        
+
         # Circuit breakers por componente
-        self.circuit_breakers: Dict[str, CircuitBreaker] = {}
-        
+        self.circuit_breakers: dict[str, CircuitBreaker] = {}
+
         # Estatísticas
         self.stats = ErrorStats()
-        
+
         # Histórico de erros
         self.error_history: deque = deque(maxlen=100)
-        
+
         # Handlers customizados de recovery
-        self.recovery_handlers: Dict[ErrorType, List[RecoveryAction]] = {}
-        
+        self.recovery_handlers: dict[ErrorType, list[RecoveryAction]] = {}
+
         # Lock para thread safety
         self.lock = threading.Lock()
-        
+
         # Configurar handlers padrão
         self._setup_default_handlers()
-        
+
         logger.info("[ERROR_RECOVERY] Sistema inicializado")
-    
+
     def _setup_default_handlers(self):
         """Configura handlers de recovery padrão."""
-        
+
         # Screenshot failure
         self.recovery_handlers[ErrorType.SCREENSHOT_FAILURE] = [
             RecoveryAction(
@@ -263,7 +261,7 @@ class ErrorRecoverySystem:
                 handler=self._restart_screenshot_taker
             )
         ]
-        
+
         # ADB failure - auto-reconnect strategy
         self.recovery_handlers[ErrorType.ADB_FAILURE] = [
             RecoveryAction(
@@ -283,7 +281,7 @@ class ErrorRecoverySystem:
                 handler=self._restart_adb_connection
             )
         ]
-        
+
         # State detection failure
         self.recovery_handlers[ErrorType.STATE_DETECTION_FAILURE] = [
             RecoveryAction(
@@ -302,7 +300,7 @@ class ErrorRecoverySystem:
                 handler=self._degrade_state_detection
             )
         ]
-        
+
         # ADB failure
         self.recovery_handlers[ErrorType.ADB_FAILURE] = [
             RecoveryAction(
@@ -317,7 +315,7 @@ class ErrorRecoverySystem:
                 handler=self._restart_adb_connection
             )
         ]
-        
+
         # YOLO failure
         self.recovery_handlers[ErrorType.YOLO_FAILURE] = [
             RecoveryAction(
@@ -331,7 +329,7 @@ class ErrorRecoverySystem:
                 handler=self._degrade_vision
             )
         ]
-        
+
         # Memory error
         self.recovery_handlers[ErrorType.MEMORY_ERROR] = [
             RecoveryAction(
@@ -345,7 +343,7 @@ class ErrorRecoverySystem:
                 max_attempts=1
             )
         ]
-        
+
         # Network error
         self.recovery_handlers[ErrorType.NETWORK_ERROR] = [
             RecoveryAction(
@@ -359,7 +357,7 @@ class ErrorRecoverySystem:
                 description="Skip network-dependent operation"
             )
         ]
-        
+
         # Timeout error
         self.recovery_handlers[ErrorType.TIMEOUT_ERROR] = [
             RecoveryAction(
@@ -372,7 +370,7 @@ class ErrorRecoverySystem:
                 description="Skip slow operation"
             )
         ]
-        
+
         # Unknown error
         self.recovery_handlers[ErrorType.UNKNOWN_ERROR] = [
             RecoveryAction(
@@ -385,26 +383,26 @@ class ErrorRecoverySystem:
                 description="Skip to avoid cascading failures"
             )
         ]
-    
+
     def classify_error(self, exception: Exception, component: str = "", operation: str = "") -> ErrorContext:
         """
         Classifica um erro e determina seu tipo e severidade.
-        
+
         Args:
             exception: A exceção ocorrida
             component: Componente onde ocorreu o erro
             operation: Operação que estava sendo executada
-        
+
         Returns:
             ErrorContext com classificação do erro
         """
-        
+
         error_type = ErrorType.UNKNOWN_ERROR
         severity = ErrorSeverity.MEDIUM
-        
+
         # Classificar por tipo de exceção
         exception_name = type(exception).__name__
-        
+
         if exception_name in ["MemoryError", "OutOfMemoryError"]:
             error_type = ErrorType.MEMORY_ERROR
             severity = ErrorSeverity.HIGH
@@ -426,7 +424,7 @@ class ErrorRecoverySystem:
         elif "state" in str(exception).lower():
             error_type = ErrorType.STATE_DETECTION_FAILURE
             severity = ErrorSeverity.MEDIUM
-        
+
         # Criar contexto
         context = ErrorContext(
             error_type=error_type,
@@ -436,31 +434,31 @@ class ErrorRecoverySystem:
             component=component,
             operation=operation
         )
-        
+
         logger.error(f"[ERROR_RECOVERY] Erro classificado: {error_type.value} ({severity.value}) - {component}.{operation}")
-        
+
         return context
-    
+
     def handle_error(
         self,
         context: ErrorContext,
-        wrapper_instance: Optional[object] = None
+        wrapper_instance: object | None = None
     ) -> bool:
         """
         Tenta recuperar de um erro automaticamente.
-        
+
         Args:
             context: Contexto do erro
             wrapper_instance: Instância do wrapper para recovery
-        
+
         Returns:
             True se recovery foi bem-sucedido, False caso contrário
         """
-        
+
         if not self.enable_auto_recovery:
             logger.warning("[ERROR_RECOVERY] Auto-recovery desabilitado")
             return False
-        
+
         # Atualizar estatísticas
         with self.lock:
             self.stats.total_errors += 1
@@ -468,28 +466,28 @@ class ErrorRecoverySystem:
             self.stats.errors_by_severity[context.severity] += 1
             self.stats.last_error_time = time.time()
             self.error_history.append(context)
-        
+
         # Verificar circuit breaker do componente
         if self.global_circuit_breaker and context.component:
             if context.component not in self.circuit_breakers:
                 self.circuit_breakers[context.component] = CircuitBreaker()
-            
+
             cb = self.circuit_breakers[context.component]
             if not cb.can_execute():
                 logger.warning(f"[ERROR_RECOVERY] Circuit breaker aberto para {context.component}")
                 return False
-        
+
         # Obter ações de recovery
         actions = self.recovery_handlers.get(context.error_type, [])
-        
+
         if not actions:
             logger.warning(f"[ERROR_RECOVERY] Nenhuma ação de recovery para {context.error_type.value}")
             return False
-        
+
         # Tentar cada ação de recovery
         for action in actions:
             logger.info(f"[ERROR_RECOVERY] Tentando recovery: {action.description} ({action.strategy.value})")
-            
+
             try:
                 # Executar handler se existir
                 if action.handler:
@@ -497,55 +495,55 @@ class ErrorRecoverySystem:
                 else:
                     # Handler padrão
                     success = self._default_recovery_handler(action, wrapper_instance)
-                
+
                 if success:
                     # Registrar sucesso no circuit breaker
                     if context.component and context.component in self.circuit_breakers:
                         self.circuit_breakers[context.component].record_success()
-                    
+
                     with self.lock:
                         self.stats.recovery_success += 1
-                    
+
                     logger.info(f"[ERROR_RECOVERY] Recovery bem-sucedido: {action.description}")
                     return True
                 else:
                     logger.debug(f"[ERROR_RECOVERY] Recovery falhou: {action.description}")
-            
+
             except (ValueError, TypeError, RuntimeError, AttributeError) as e:
                 logger.error(f"[ERROR_RECOVERY] Erro ao executar recovery: {e}")
-        
+
         # Todas as tentativas falharam
         if context.component and context.component in self.circuit_breakers:
             self.circuit_breakers[context.component].record_failure()
-        
+
         with self.lock:
             self.stats.recovery_failure += 1
-        
+
         logger.error(f"[ERROR_RECOVERY] Todas as tentativas de recovery falharam para {context.error_type.value}")
         return False
-    
+
     def _default_recovery_handler(
         self,
         action: RecoveryAction,
-        wrapper_instance: Optional[object]
+        wrapper_instance: object | None
     ) -> bool:
         """Handler padrão para ações sem handler específico."""
-        
+
         if action.strategy == RecoveryStrategy.RETRY:
             # Simplesmente retorna True para tentar novamente
             return True
-        
+
         elif action.strategy == RecoveryStrategy.RETRY_WITH_DELAY:
             time.sleep(action.delay_between_attempts)
             return True
-        
+
         elif action.strategy == RecoveryStrategy.SKIP:
             return True  # Skip é sempre "bem-sucedido"
-        
+
         return False
-    
+
     # Handlers específicos de recovery
-    
+
     def _fallback_screenshot_method(self, wrapper, context, params) -> bool:
         """Usa método alternativo de captura de tela."""
         if wrapper and hasattr(wrapper, 'screenshot'):
@@ -558,7 +556,7 @@ class ErrorRecoverySystem:
             except (ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.error(f"[ERROR_RECOVERY] Fallback screenshot falhou: {e}")
         return False
-    
+
     def _restart_screenshot_taker(self, wrapper, context, params) -> bool:
         """Reinicia o screenshot taker."""
         if wrapper and hasattr(wrapper, 'screenshot'):
@@ -571,7 +569,7 @@ class ErrorRecoverySystem:
             except (ImportError, ModuleNotFoundError, ConnectionError, ValueError, TypeError, RuntimeError, OSError) as e:
                 logger.error(f"[ERROR_RECOVERY] Falha ao reiniciar screenshot taker: {e}")
         return False
-    
+
     def _fallback_state_detector(self, wrapper, context, params) -> bool:
         """Usa detector de estado alternativo."""
         if wrapper and hasattr(wrapper, 'state_manager'):
@@ -583,7 +581,7 @@ class ErrorRecoverySystem:
             except (ValueError, TypeError, RuntimeError, AttributeError) as e:
                 logger.error(f"[ERROR_RECOVERY] Fallback state detector falhou: {e}")
         return False
-    
+
     def _degrade_state_detection(self, wrapper, context, params) -> bool:
         """Degrada detecção de estado para método mais simples."""
         if wrapper and hasattr(wrapper, 'state_manager'):
@@ -594,7 +592,7 @@ class ErrorRecoverySystem:
             except (ValueError, TypeError, RuntimeError, AttributeError) as e:
                 logger.error(f"[ERROR_RECOVERY] Degradation falhou: {e}")
         return False
-    
+
     def _restart_adb_connection(self, wrapper, context, params) -> bool:
         """Reinicia conexão ADB."""
         if wrapper and hasattr(wrapper, 'emulator_controller'):
@@ -605,7 +603,7 @@ class ErrorRecoverySystem:
             except (ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.error(f"[ERROR_RECOVERY] Falha ao reiniciar ADB: {e}")
         return False
-    
+
     def _reconnect_adb(self, wrapper, context, params) -> bool:
         """Attempt ADB reconnect with exponential backoff and ResilientADB support.
 
@@ -665,7 +663,7 @@ class ErrorRecoverySystem:
 
         logger.error(f"[ERROR_RECOVERY] ADB reconnect failed after {max_attempts} attempts")
         return False
-    
+
     def _degrade_vision(self, wrapper, context, params) -> bool:
         """Degrada sistema de visão para heurísticas."""
         try:
@@ -674,7 +672,7 @@ class ErrorRecoverySystem:
         except (ValueError, TypeError, RuntimeError, AttributeError) as e:
             logger.error(f"[ERROR_RECOVERY] Vision degradation falhou: {e}")
         return False
-    
+
     def _reduce_memory_usage(self, wrapper, context, params) -> bool:
         """Reduz uso de memória."""
         try:
@@ -685,7 +683,7 @@ class ErrorRecoverySystem:
         except (ImportError, ModuleNotFoundError, TypeError) as e:
             logger.error(f"[ERROR_RECOVERY] Memory reduction falhou: {e}")
         return False
-    
+
     def get_stats(self) -> dict:
         """Retorna estatísticas de erros."""
         with self.lock:
@@ -698,7 +696,7 @@ class ErrorRecoverySystem:
                 "recovery_rate": self.stats.recovery_success / max(1, self.stats.total_errors),
                 "last_error_time": self.stats.last_error_time,
                 "circuit_breakers": {
-                    comp: cb.get_state() 
+                    comp: cb.get_state()
                     for comp, cb in self.circuit_breakers.items()
                 }
             }
@@ -712,27 +710,27 @@ def with_error_recovery(
 ):
     """
     Decorator para tratamento automático de erros.
-    
+
     Args:
         error_recovery: Instância do ErrorRecoverySystem
         component: Nome do componente
         operation: Nome da operação
     """
-    
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
             # Tentar executar função
             try:
                 return func(*args, **kwargs)
-            
+
             except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 # Classificar erro
                 context = error_recovery.classify_error(e, component, operation)
-                
+
                 # Tentar recovery
                 recovered = error_recovery.handle_error(context, args[0] if args else None)
-                
+
                 if recovered:
                     # Tentar novamente após recovery
                     try:
@@ -741,10 +739,10 @@ def with_error_recovery(
                         # Se falhar novamente, propagar erro
                         logger.error(f"[ERROR_RECOVERY] Função falhou mesmo após recovery: {e}")
                         raise
-                
+
                 # Se não recuperou, propagar erro
                 raise
-        
+
         return wrapper
     return decorator
 
@@ -752,54 +750,54 @@ def with_error_recovery(
 # Classe de conveniência para integrar com wrapper
 class ErrorRecoveryIntegration:
     """Integração do sistema de recovery com o wrapper."""
-    
+
     def __init__(self, wrapper):
         self.wrapper = wrapper
         self.error_recovery = ErrorRecoverySystem()
         self.enabled = True
-    
+
     def enable(self):
         """Habilita sistema de recovery."""
         self.enabled = True
         logger.info("[ERROR_RECOVERY] Sistema habilitado")
-    
+
     def disable(self):
         """Desabilita sistema de recovery."""
         self.enabled = False
         logger.info("[ERROR_RECOVERY] Sistema desabilitado")
-    
+
     def wrap_method(self, method_name: str, component: str = "", operation: str = ""):
         """Envolve um método do wrapper com tratamento de erro."""
-        
+
         if not hasattr(self.wrapper, method_name):
             logger.warning(f"[ERROR_RECOVERY] Método {method_name} não encontrado")
             return
-        
+
         original_method = getattr(self.wrapper, method_name)
-        
+
         @with_error_recovery(self.error_recovery, component, operation or method_name)
         def wrapped_method(*args, **kwargs):
             return original_method(*args, **kwargs)
-        
+
         setattr(self.wrapper, method_name, wrapped_method)
         logger.info(f"[ERROR_RECOVERY] Método {method_name} envolvido com tratamento de erro")
-    
+
     def wrap_main_loop(self):
         """Envolve o loop principal do wrapper com tratamento de erro."""
         self.wrap_method("_main_loop", "wrapper", "main_loop")
-    
+
     def wrap_screenshot(self):
         """Envolve captura de screenshot com tratamento de erro."""
         if hasattr(self.wrapper, 'screenshot'):
             original_capture = self.wrapper.screenshot.capture
-            
+
             @with_error_recovery(self.error_recovery, "screenshot", "capture")
             def wrapped_capture(*args, **kwargs):
                 return original_capture(*args, **kwargs)
-            
+
             self.wrapper.screenshot.capture = wrapped_capture
             logger.info("[ERROR_RECOVERY] Screenshot.capture envolvido com tratamento de erro")
-    
+
     def get_recovery_stats(self) -> dict:
         """Retorna estatísticas de recovery."""
         return self.error_recovery.get_stats()

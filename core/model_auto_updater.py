@@ -20,13 +20,15 @@ Uso:
 """
 
 import logging
-import time
 import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Dict, Any, Optional, Callable
+from typing import Any
+
 try:
-    from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
+    from watchdog.observers import Observer
     WATCHDOG_AVAILABLE = True
 except ImportError:
     Observer = None
@@ -62,7 +64,7 @@ class ModelAutoUpdater:
     def __init__(
         self,
         model_registry: Any,
-        alert_system: Optional[Any] = None,
+        alert_system: Any | None = None,
         min_improvement: float = 0.02,  # 2% mínimo para trocar
         rollback_on_degradation: bool = True,
     ):
@@ -71,12 +73,12 @@ class ModelAutoUpdater:
         self.min_improvement = min_improvement
         self.rollback_on_degradation = rollback_on_degradation
 
-        self._observer: Optional[Observer] = None
-        self._watch_path: Optional[Path] = None
+        self._observer: Observer | None = None
+        self._watch_path: Path | None = None
         self._last_scan: float = 0.0
         self._scan_interval = 60.0  # segundos
         self._lock = threading.Lock()
-        self._performance_log: Dict[str, list] = {}  # name -> [scores]
+        self._performance_log: dict[str, list] = {}  # name -> [scores]
 
     # ------------------------------------------------------------------
     # Watchdog
@@ -229,7 +231,7 @@ class ModelAutoUpdater:
                             source="auto_updater",
                         )
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Status do auto-updater."""
         return {
             "watching": self._observer is not None,

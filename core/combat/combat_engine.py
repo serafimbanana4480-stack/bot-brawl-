@@ -6,34 +6,27 @@ Provides CombatEngineMixin with enemy detection, attack logic,
 position prediction, and combat decision making.
 """
 
-import time
-import math
-import numpy as np
 import logging
-import random
-from collections import deque, defaultdict
-from typing import Optional, List, Dict, Tuple
+import math
+import time
 from pathlib import Path
 
 # Utilitarios de humanizacao
-from pylaai_real.humanization_utils import human_delay, jitter_value, HumanPauseSimulator
+from core.humanization_utils import jitter_value
 
 # Sistema de combate avancado (Phase 5)
 from pylaai_real.combat_advanced import (
-    LeadingShotEngine, KitingEngine, CoverEngine, ComboManager, AdvancedCombatStrategy,
-    _center, _pixel_distance, BRAWLER_PROJECTILES,
+    AdvancedCombatStrategy,
+    _center,
 )
 
 logger = logging.getLogger(__name__)
 
 try:
-    from tracker import EnemyTracker
-    TRACKER_AVAILABLE = True
-    logger.debug("[PLAY] EnemyTracker importado com sucesso")
-except ImportError:
+    import importlib.util as _ilu
+    TRACKER_AVAILABLE = _ilu.find_spec("tracker") is not None
+except Exception:
     TRACKER_AVAILABLE = False
-    logger.warning("[PLAY] EnemyTracker não disponível - tracking de inimigos desativado")
-    logger.warning("[PLAY] EnemyTracker não disponível, usando enemy_history fallback")
 
 try:
     from realtime_logs import get_log_manager
@@ -73,9 +66,7 @@ except ImportError:
 
 # Phase 10: Central Coordinator
 try:
-    from core.central_coordinator import (
-        CentralCoordinator, Recommendation, DecisionType, Priority
-    )
+    from core.central_coordinator import CentralCoordinator, DecisionType, Priority, Recommendation
     HAS_COORDINATOR = True
 except ImportError:
     HAS_COORDINATOR = False
@@ -131,7 +122,7 @@ class CombatEngineMixin:
     def _load_brawler_strategies(self):
         """Carrega estratégias específicas por brawler do lobby.toml"""
         try:
-            config_path = Path(__file__).parent.parent / "lobby.toml"
+            config_path = Path(__file__).parent.parent.parent / "lobby.toml"
             if config_path.exists():
                 import toml
                 config = toml.load(str(config_path))
@@ -195,7 +186,7 @@ class CombatEngineMixin:
             except Exception as e:
                 logger.debug(f"[PLAY] IntentSystem PvE mode update failed: {e}")
 
-    def get_brawler_strategy(self) -> Dict:
+    def get_brawler_strategy(self) -> dict:
         """Retorna a estratégia atual do brawler"""
         return self.brawler_strategy or self.brawler_strategies.get("default", {})
 
@@ -212,7 +203,7 @@ class CombatEngineMixin:
         self._power_cubes_collected = 0
         logger.info("[PLAY] Estado de combate resetado para nova partida (phase=early)")
 
-    def get_last_combat_snapshot(self) -> Dict[str, object]:
+    def get_last_combat_snapshot(self) -> dict[str, object]:
         """Retorna o último snapshot de combate para overlay/diagnóstico."""
         snapshot = dict(self.last_combat_snapshot)
 
@@ -221,7 +212,7 @@ class CombatEngineMixin:
             try:
                 state_summary = self.vision_state.get_state_summary(self.vision_state)
                 snapshot["vision_state_summary"] = state_summary
-                logger.debug(f"[PLAY] State summary adicionado ao snapshot")
+                logger.debug("[PLAY] State summary adicionado ao snapshot")
             except Exception as e:
                 logger.warning(f"[PLAY] Falha ao obter state summary: {e}")
 
@@ -236,7 +227,7 @@ class CombatEngineMixin:
             return 0
         return hash((bbox[0] // 50, bbox[1] // 50, bbox[2] // 50, bbox[3] // 50))
 
-    def _get_track_info(self, enemy_bbox) -> Optional[Dict]:
+    def _get_track_info(self, enemy_bbox) -> dict | None:
         """Retorna informações detalhadas do track associado ao inimigo se disponível."""
         if not self.enemy_tracker or not TRACKER_AVAILABLE:
             return None
@@ -269,7 +260,7 @@ class CombatEngineMixin:
 
         return None
 
-    def _get_enemy_tracks(self) -> List:
+    def _get_enemy_tracks(self) -> list:
         """Retorna todos os tracks de classe 'enemy' se disponível."""
         if not self.enemy_tracker or not TRACKER_AVAILABLE:
             return []
@@ -292,7 +283,7 @@ class CombatEngineMixin:
             logger.warning(f"[PLAY] Falha ao obter tracks de inimigos: {e}")
             return []
 
-    def _predict_position(self, enemy_bbox, time_ahead=0.25) -> Tuple[int, int]:
+    def _predict_position(self, enemy_bbox, time_ahead=0.25) -> tuple[int, int]:
         """Calcula posição predita do inimigo (usa tracker se disponível, fallback para estimativa simples)."""
         # Usar predict_position do EnemyTracker se disponível
         if self.enemy_tracker and TRACKER_AVAILABLE:
@@ -379,15 +370,15 @@ class CombatEngineMixin:
 
         return (pred_x, pred_y)
 
-    def _get_leading_shot_position(self, enemy_bbox, projectile_speed=15.0, frame_delay=0) -> Tuple[int, int]:
+    def _get_leading_shot_position(self, enemy_bbox, projectile_speed=15.0, frame_delay=0) -> tuple[int, int]:
         """
         Calcula posição para leading shot usando o tracker se disponível.
-        
+
         Args:
             enemy_bbox: Bounding box do inimigo [x1, y1, x2, y2]
             projectile_speed: Velocidade do projétil em pixels/frame
             frame_delay: Delay adicional em frames
-            
+
         Returns:
             Posição (x, y) para mirar
         """
@@ -459,7 +450,7 @@ class CombatEngineMixin:
             logger.debug(f"[META] Matchup evaluation error: {e}")
         return 0.0
 
-    def _get_enemy_brawler_name(self, enemy_bbox) -> Optional[str]:
+    def _get_enemy_brawler_name(self, enemy_bbox) -> str | None:
         """Extract brawler name from enemy bbox if available."""
         return None
 
@@ -505,7 +496,7 @@ class CombatEngineMixin:
             logger.debug(f"[META] Combat adjustment error: {e}")
         return 0.0
 
-    def _find_best_cover_position(self, player, enemies) -> Optional[Tuple[int, int]]:
+    def _find_best_cover_position(self, player, enemies) -> tuple[int, int] | None:
         """Find best cover position using CoverSystem."""
         if not self.cover_system or not player:
             return None
@@ -655,7 +646,7 @@ class CombatEngineMixin:
 
     def _get_target_position_for_attack(self, player, enemies):
         """Calcula a posição predita do alvo para ataque (sem executar o ataque)."""
-        logger.debug(f"[TARGET] Calculando posição predita do alvo")
+        logger.debug("[TARGET] Calculando posição predita do alvo")
         if not enemies:
             logger.debug("[COMBAT] Nenhum inimigo para calcular alvo")
             return None
@@ -674,7 +665,7 @@ class CombatEngineMixin:
         Usa distância em tiles (resolução-independente) e swipe no botão de ataque
         para mirar na direção do inimigo (como jogador real faz).
         """
-        logger.debug(f"[ATTACK] Avaliando ataque")
+        logger.debug("[ATTACK] Avaliando ataque")
         brawler_strategy = self.get_brawler_strategy()
 
         # Usar cooldown específico do brawler com jitter humano
@@ -696,7 +687,6 @@ class CombatEngineMixin:
         # Escolher alvo mais próximo com base em track info
         closest_enemy = None
         closest_dist = float('inf')
-        best_track_info = None
 
         for enemy in enemies:
             dist = self._distance(player, enemy)
@@ -710,7 +700,6 @@ class CombatEngineMixin:
             if adjusted_dist < closest_dist:
                 closest_dist = adjusted_dist
                 closest_enemy = enemy
-                best_track_info = track_info
 
         # Calcular distância em tiles (resolução-independente)
         attack_range_tiles = brawler_strategy.get("attack_range_tiles", 9.33)
@@ -777,7 +766,7 @@ class CombatEngineMixin:
                 self.last_shot_time = time.time()
                 self._apm_action_count += 1
                 self.last_combat_snapshot = {**self.last_combat_snapshot, "attack_taken": True}
-                logger.info(f"[ATTACK] Ataque direcional executado")
+                logger.info("[ATTACK] Ataque direcional executado")
 
             except Exception as e:
                 logger.warning(f"[ATTACK] Erro no ataque direcional, fallback para tap: {e}")
@@ -799,7 +788,7 @@ class CombatEngineMixin:
         Similar ao original mas ja recebe predicted_pos calculada.
         """
         logger.debug(f"[ATTACK_AVANCADO] Ataque com leading shot predito: {predicted_pos}")
-        brawler_strategy = self.get_brawler_strategy()
+        self.get_brawler_strategy()
 
         # Usar cooldown específico do brawler com jitter humano
         effective_cooldown = jitter_value(self.shot_cooldown, self.shot_cooldown_jitter, min_val=0.2)
@@ -837,6 +826,20 @@ class CombatEngineMixin:
                 swipe_end_x = int(attack_btn_x + dx / dist * swipe_len)
                 swipe_end_y = int(attack_btn_y + dy / dist * swipe_len)
 
+                # --- SOVERANA FIX 2026-06-19: aim humanization (jitter) ---
+                try:
+                    aim_cfg = getattr(self, 'central_config', {}).get("aim_humanization", {}) if hasattr(self, 'central_config') else {}
+                    if aim_cfg.get("enabled", True):
+                        base_sigma = aim_cfg.get("base_aim_sigma_px", 3.0)
+                        dist_scaling = aim_cfg.get("distance_scaling", 0.02)
+                        import random as _r
+                        sigma = base_sigma + (dist / 100.0) * dist_scaling
+                        swipe_end_x = int(swipe_end_x + _r.gauss(0, sigma))
+                        swipe_end_y = int(swipe_end_y + _r.gauss(0, sigma))
+                except Exception:
+                    pass
+                # --- end fix ---
+
                 self.emulator_controller.swipe_scaled(
                     attack_btn_x, attack_btn_y,
                     swipe_end_x, swipe_end_y,
@@ -867,8 +870,8 @@ class CombatEngineMixin:
         else:
             w, h = self._get_safe_resolution()
 
-        attack_btn_x = round(w * 0.90)
-        attack_btn_y = round(h * 0.82)
+        round(w * 0.90)
+        round(h * 0.82)
         super_btn_x = round(w * 0.75)
         super_btn_y = round(h * 0.69)
         gadget_btn_x = round(w * 0.78)
@@ -941,7 +944,6 @@ class CombatEngineMixin:
         """Map UtilityAI ActionScore to combat action dict used by play_round."""
         from decision.utility_ai import Action
         action = action_score.action
-        target_pos = action_score.target_position
         player_c = _center(player) if player else (0, 0)
 
         if action == Action.ATTACK:

@@ -21,11 +21,9 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
-
-logger = logging.getLogger(__name__)
 
 from vision.game_state import (
     GameState,
@@ -33,6 +31,8 @@ from vision.game_state import (
     PlayerStatus,
     YoloDetection,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class MultimodalPipeline:
@@ -51,7 +51,7 @@ class MultimodalPipeline:
 
     # Mapeamento de classes YOLO → nomes
     # Ajustar conforme o modelo YOLO treinado
-    CLASS_NAMES: Dict[int, str] = {
+    CLASS_NAMES: dict[int, str] = {
         0: "player",
         1: "enemy",
         2: "brawler",
@@ -63,7 +63,7 @@ class MultimodalPipeline:
 
     def __init__(
         self,
-        resolution: Tuple[int, int] = (1920, 1080),
+        resolution: tuple[int, int] = (1920, 1080),
         enable_ocr: bool = True,
         enable_player_state: bool = True,
         enable_hud: bool = True,
@@ -74,8 +74,8 @@ class MultimodalPipeline:
         self.enable_hud = enable_hud
 
         # Lazy-loaded components
-        self._ocr_extractor: Optional[Any] = None
-        self._player_detector: Optional[Any] = None
+        self._ocr_extractor: Any | None = None
+        self._player_detector: Any | None = None
         self._has_ocr = False
         self._has_player_detector = False
 
@@ -138,13 +138,13 @@ class MultimodalPipeline:
     # Conversão de detecções
     # ------------------------------------------------------------------
     def _convert_detections(
-        self, raw_detections: List[Dict]
-    ) -> Tuple[List[YoloDetection], Optional[YoloDetection], List[YoloDetection], List[YoloDetection]]:
+        self, raw_detections: list[dict]
+    ) -> tuple[list[YoloDetection], YoloDetection | None, list[YoloDetection], list[YoloDetection]]:
         """Converte detecções YOLO raw para YoloDetection estruturado."""
-        all_dets: List[YoloDetection] = []
-        player_det: Optional[YoloDetection] = None
-        enemies: List[YoloDetection] = []
-        powerups: List[YoloDetection] = []
+        all_dets: list[YoloDetection] = []
+        player_det: YoloDetection | None = None
+        enemies: list[YoloDetection] = []
+        powerups: list[YoloDetection] = []
 
         w, h = self.resolution
 
@@ -215,7 +215,7 @@ class MultimodalPipeline:
     # Camada Player State
     # ------------------------------------------------------------------
     def _extract_player_state(
-        self, screenshot: np.ndarray, detections: List[Dict]
+        self, screenshot: np.ndarray, detections: list[dict]
     ) -> PlayerStatus:
         """Extrai estado do jogador via PlayerStateDetector."""
         if not self._ensure_player_detector() or self._player_detector is None:
@@ -293,7 +293,7 @@ class MultimodalPipeline:
     def process(
         self,
         screenshot: np.ndarray,
-        yolo_detections: List[Dict],
+        yolo_detections: list[dict],
         game_state_hint: str = "unknown",
         game_state_confidence: float = 0.0,
         frame_id: int = 0,
@@ -365,7 +365,7 @@ class MultimodalPipeline:
 
         return game_state
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Estatísticas do pipeline."""
         return {
             "frame_count": self.frame_count,

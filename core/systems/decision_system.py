@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
-from pylaai_real.play import PlayLogic
-from pylaai_real.movement import Movement
 from decision.brawler_selector import BrawlerSelector
+from pylaai_real.movement import Movement
+from pylaai_real.play import PlayLogic
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ class DecisionSystem:
 
     def __init__(
         self,
-        central_config: Dict[str, Any],
+        central_config: dict[str, Any],
         images_path: Path,
         models_path: Path,
     ):
@@ -37,21 +37,21 @@ class DecisionSystem:
         self.models_path = models_path
 
         # Components
-        self.play_logic: Optional[PlayLogic] = None
-        self.movement: Optional[Any] = None
-        self.online_learner: Optional[Any] = None
-        self.brawler_selector: Optional[BrawlerSelector] = None
-        self.utility_ai: Optional[Any] = None
-        self.sticky_target: Optional[Any] = None
-        self.intent_system: Optional[Any] = None
-        self.enemy_intention: Optional[Any] = None
-        self.meta_awareness: Optional[Any] = None
-        self.cover_system: Optional[Any] = None
-        self.central_coordinator: Optional[Any] = None
-        self.world_model: Optional[Any] = None
-        self.pressure_map: Optional[Any] = None
-        self.world_model_integrator: Optional[Any] = None
-        self.behavioral_profile: Optional[Any] = None
+        self.play_logic: PlayLogic | None = None
+        self.movement: Any | None = None
+        self.online_learner: Any | None = None
+        self.brawler_selector: BrawlerSelector | None = None
+        self.utility_ai: Any | None = None
+        self.sticky_target: Any | None = None
+        self.intent_system: Any | None = None
+        self.enemy_intention: Any | None = None
+        self.meta_awareness: Any | None = None
+        self.cover_system: Any | None = None
+        self.central_coordinator: Any | None = None
+        self.world_model: Any | None = None
+        self.pressure_map: Any | None = None
+        self.world_model_integrator: Any | None = None
+        self.behavioral_profile: Any | None = None
 
         self._running = False
 
@@ -61,10 +61,10 @@ class DecisionSystem:
 
     def setup(
         self,
-        detect_main: Optional[Any] = None,
-        detect_enemies: Optional[Any] = None,
-        emulator_controller: Optional[Any] = None,
-        humanization: Optional[Any] = None,
+        detect_main: Any | None = None,
+        detect_enemies: Any | None = None,
+        emulator_controller: Any | None = None,
+        humanization: Any | None = None,
         window_w: int = 1920,
         window_h: int = 1080,
     ) -> bool:
@@ -95,8 +95,8 @@ class DecisionSystem:
 
         # OnlineLearner (RL)
         try:
-            from pylaai_real.rl_engine import OnlineLearner
             from dataset.collector import GameplayCollector
+            from pylaai_real.rl_engine import OnlineLearner
 
             reward_bridge = getattr(self, "reward_bridge", None)
             gameplay_collector = None
@@ -105,7 +105,7 @@ class DecisionSystem:
                 from pathlib import Path
                 config_path = Path("config.json")
                 if config_path.exists():
-                    with open(config_path, "r", encoding="utf-8") as f:
+                    with open(config_path, encoding="utf-8") as f:
                         cfg = json.load(f)
                     if cfg.get("rl", {}).get("data_collection_mode", False):
                         gameplay_collector = GameplayCollector()
@@ -192,12 +192,12 @@ class DecisionSystem:
         if self.online_learner:
             try:
                 self.online_learner.save()
-            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.warning("[DECISION] Failed to save OnlineLearner: %s", e)
         if self.behavioral_profile and hasattr(self.behavioral_profile, "save"):
             try:
                 self.behavioral_profile.save()
-            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.warning("[DECISION] Failed to save behavioral_profile: %s", e)
         return True
 
@@ -205,7 +205,7 @@ class DecisionSystem:
     # Status / Health
     # ------------------------------------------------------------------
 
-    def status(self) -> Dict[str, Any]:
+    def status(self) -> dict[str, Any]:
         return {
             "play_logic_ok": self.play_logic is not None,
             "movement_ok": self.movement is not None,
@@ -213,7 +213,7 @@ class DecisionSystem:
             "brawler_selector_ok": self.brawler_selector is not None,
         }
 
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         issues = []
         if self.play_logic is None:
             issues.append("no_play_logic")

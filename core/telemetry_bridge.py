@@ -15,12 +15,12 @@ Endpoints expostos:
 - /api/v2/telemetry     → stream de dados em tempo real
 """
 
-import time
 import logging
 import threading
-from typing import Dict, Any, Optional
-from dataclasses import dataclass, field
+import time
 from collections import deque
+from dataclasses import dataclass, field
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +41,11 @@ class TelemetrySnapshot:
     win_streak: int = 0
     loss_streak: int = 0
     # Brawler
-    current_brawler: Optional[str] = None
-    current_playstyle: Optional[str] = None
+    current_brawler: str | None = None
+    current_playstyle: str | None = None
     # Checkpoints
     checkpoint_count: int = 0
-    checkpoint_age_seconds: Optional[float] = None
+    checkpoint_age_seconds: float | None = None
     # Alerts
     active_alerts: int = 0
     alerts: list = field(default_factory=list)
@@ -156,7 +156,7 @@ class TelemetryBridge:
         with self._lock:
             return list(self._history)[-limit:]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Converte snapshot atual para dict JSON-serializável."""
         snap = self.get_current()
         return {

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from wrapper import PylaAIEnhanced
@@ -24,17 +24,17 @@ class LearningSubsystem:
 
     def __init__(
         self,
-        wrapper: "PylaAIEnhanced",
+        wrapper: PylaAIEnhanced,
         central_config: dict,
     ):
         self.wrapper = wrapper
         self.central_config = central_config
-        self.data_collector: Optional[Any] = None
-        self.reward_bridge: Optional[Any] = None
-        self.meta_learning: Optional[Any] = None
-        self.gameplay_recorder: Optional[Any] = None
-        self.performance_monitor: Optional[Any] = None
-        self.retrain_orchestrator: Optional[Any] = None
+        self.data_collector: Any | None = None
+        self.reward_bridge: Any | None = None
+        self.meta_learning: Any | None = None
+        self.gameplay_recorder: Any | None = None
+        self.performance_monitor: Any | None = None
+        self.retrain_orchestrator: Any | None = None
         self.recording_enabled = bool(
             central_config.get("enable_recording", False)
         )
@@ -66,7 +66,7 @@ class LearningSubsystem:
             logger.info("[WRAPPER] Reward bridge inicializado")
         except ImportError as e:
             logger.warning(f"[WRAPPER] RewardBridge indisponível (não instalado): {e}")
-        except (ImportError, ModuleNotFoundError) as e:
+        except ModuleNotFoundError as e:
             logger.error(f"[WRAPPER] RewardBridge ERRO (Q-Learning vai usar heurísticas): {e}")
 
         # Meta-learning
@@ -116,7 +116,7 @@ class LearningSubsystem:
             try:
                 self.data_collector.flush()
                 logger.info("[CLEANUP] Data collector flushed")
-            except (FileNotFoundError, PermissionError, OSError, IOError, RuntimeError, AttributeError) as e:
+            except (FileNotFoundError, PermissionError, OSError, RuntimeError, AttributeError) as e:
                 logger.warning(f"[CLEANUP] Falha ao flush data_collector: {e}")
 
         online_learner = getattr(self.wrapper, "online_learner", None)
@@ -125,7 +125,7 @@ class LearningSubsystem:
                 online_learner.save()
                 stats = online_learner.get_stats()
                 logger.info(f"[CLEANUP] OnlineLearner salvo: {stats}")
-            except (FileNotFoundError, PermissionError, OSError, IOError, RuntimeError, AttributeError) as e:
+            except (FileNotFoundError, PermissionError, OSError, RuntimeError, AttributeError) as e:
                 logger.warning(f"[CLEANUP] Falha ao salvar OnlineLearner: {e}")
 
         if self.reward_bridge is not None:
@@ -175,7 +175,7 @@ class LearningSubsystem:
         except ImportError as e:
             logger.warning(f"[WRAPPER] GameplayRecorder not available: {e}")
             return False
-        except (ImportError, ModuleNotFoundError, FileNotFoundError, PermissionError, ConnectionError, TimeoutError, ValueError, RuntimeError, OSError, IOError) as e:
+        except (ModuleNotFoundError, FileNotFoundError, PermissionError, ConnectionError, TimeoutError, ValueError, RuntimeError, OSError) as e:
             logger.error(f"[WRAPPER] Failed to initialize gameplay recorder: {e}")
             return False
 
@@ -214,7 +214,7 @@ class LearningSubsystem:
         except ImportError as e:
             logger.warning(f"[WRAPPER] Auto-retrain system not available: {e}")
             return False
-        except (ImportError, ModuleNotFoundError, FileNotFoundError, ValueError, TypeError, RuntimeError, OSError) as e:
+        except (ModuleNotFoundError, FileNotFoundError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.error(f"[WRAPPER] Failed to initialize auto-retrain system: {e}")
             return False
 
@@ -241,7 +241,7 @@ class LearningSubsystem:
     # Performance / retraining helpers (extracted from wrapper.py)
     # ------------------------------------------------------------------
 
-    def record_performance_metric(self, wrapper: "PylaAIEnhanced", metric_type: str, **kwargs):
+    def record_performance_metric(self, wrapper: PylaAIEnhanced, metric_type: str, **kwargs):
         pm = getattr(wrapper, "performance_monitor", None)
         if not pm:
             return
@@ -268,7 +268,7 @@ class LearningSubsystem:
         except Exception as e:
             logger.error(f"[WRAPPER] Failed to record performance metric: {e}")
 
-    def check_retrain_trigger(self, wrapper: "PylaAIEnhanced") -> tuple[bool, str]:
+    def check_retrain_trigger(self, wrapper: PylaAIEnhanced) -> tuple[bool, str]:
         if not getattr(wrapper, "retrain_orchestrator", None):
             return False, "Auto-retrain not enabled"
         try:
@@ -277,7 +277,7 @@ class LearningSubsystem:
             logger.error(f"[WRAPPER] Failed to check retrain trigger: {e}")
             return False, "Error checking trigger"
 
-    def trigger_retrain(self, wrapper: "PylaAIEnhanced") -> bool:
+    def trigger_retrain(self, wrapper: PylaAIEnhanced) -> bool:
         if not getattr(wrapper, "retrain_orchestrator", None):
             logger.warning("[WRAPPER] Auto-retrain not enabled")
             return False

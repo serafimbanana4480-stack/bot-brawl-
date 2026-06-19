@@ -3,19 +3,13 @@ Dashboard HTTP request handler (extracted from dashboard_server.py).
 """
 
 import json
-import time
 import logging
-import base64
-import os
+import time
 from pathlib import Path
-from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple
-from collections import deque
-from dataclasses import dataclass, field, asdict
-import io
+from typing import Any
 
 try:
-    from http.server import HTTPServer, BaseHTTPRequestHandler
+    from http.server import BaseHTTPRequestHandler, HTTPServer
     from socketserver import ThreadingMixIn
     class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
         daemon_threads = True
@@ -25,15 +19,15 @@ except ImportError:
     BaseHTTPRequestHandler = None
 
 try:
-    import numpy as np
-    HAS_NUMPY = True
-except ImportError:
+    import importlib.util as _ilu
+    HAS_NUMPY = _ilu.find_spec("numpy") is not None
+except Exception:
     HAS_NUMPY = False
 
 logger = logging.getLogger(__name__)
 
 try:
-    from core.log_buffer import LogBuffer, install_log_buffer, get_log_buffer
+    from core.log_buffer import LogBuffer, get_log_buffer, install_log_buffer
     HAS_LOGBUFFER = True
 except ImportError:
     HAS_LOGBUFFER = False
@@ -49,34 +43,34 @@ except ImportError:
     NotificationManager = None
     get_notification_manager = None
 
-from core.dashboard_logic import (
-    BotLiveData,
-    DashboardDataBridge,
-    ReplayFrame,
-    ReplayRecorder,
-    ABTestVariant,
+from core.dashboard_logic import (  # noqa: E402
     ABTestManager,
-    BrawlerStatsTracker,
-    MatchAnalyzer,
-    TrophyTracker,
+    DashboardDataBridge,
+    ReplayRecorder,
 )
+from core.dashboard_templates import _DASHBOARD_HTML  # noqa: E402
 
-from core.dashboard_templates import _DASHBOARD_HTML
+# Import for BrawlerConfig used in farm mode
+try:
+    from pylaai_real.lobby_automator import BrawlerConfig
+except ImportError:
+    BrawlerConfig = None
+
 
 class DashboardHandler(BaseHTTPRequestHandler):
     """Handler que serve dashboard HTML e API JSON."""
 
-    bridge: Optional[DashboardDataBridge] = None
-    recorder: Optional[ReplayRecorder] = None
-    ab_test: Optional[ABTestManager] = None
-    wrapper_ref: Optional[Any] = None  # Reference to wrapper for bot control
-    log_buffer: Optional[Any] = None  # Phase 2: LogBuffer for real-time logs
-    notification_manager: Optional[Any] = None  # Phase 3: NotificationManager
+    bridge: DashboardDataBridge | None = None
+    recorder: ReplayRecorder | None = None
+    ab_test: ABTestManager | None = None
+    wrapper_ref: Any | None = None  # Reference to wrapper for bot control
+    log_buffer: Any | None = None  # Phase 2: LogBuffer for real-time logs
+    notification_manager: Any | None = None  # Phase 3: NotificationManager
 
     def log_message(self, format, *args):
         pass  # Silenciar logs de acesso
 
-    def _send_json(self, data: Dict, status: int = 200):
+    def _send_json(self, data: dict, status: int = 200):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -91,7 +85,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_GET(self):
+    def do_GET(self):  # noqa: N802
         path = self.path.split("?")[0]
 
         if path == "/" or path == "/dashboard":
@@ -288,7 +282,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             config_path = Path("config.json")
             if config_path.exists():
                 try:
-                    with open(config_path, "r", encoding="utf-8") as f:
+                    with open(config_path, encoding="utf-8") as f:
                         data = json.load(f)
                     self._send_json(data)
                 except Exception as e:
@@ -335,7 +329,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         for pt_file in models_dir.glob("*.pt"):
                             if pt_file.stem not in ["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"]:
                                 try:
-                                    registry.register(f"yolo_scanned", pt_file, version=None, metrics={})
+                                    registry.register("yolo_scanned", pt_file, version=None, metrics={})
                                     scanned += 1
                                 except Exception:
                                     pass
@@ -378,7 +372,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             try:
                 reports = sorted(Path("runs").glob("*/training_report.json"), key=lambda p: p.stat().st_mtime, reverse=True)
                 if reports:
-                    with open(reports[0], "r", encoding="utf-8") as f:
+                    with open(reports[0], encoding="utf-8") as f:
                         import json as _json
                         report = _json.load(f)
                     training_data["last_training"] = {
@@ -526,7 +520,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 import threading
                 listener = threading.Event()
                 self.log_buffer.add_listener(listener)
-                last_count = len(self.log_buffer.get_lines(limit=1))
+                len(self.log_buffer.get_lines(limit=1))
                 try:
                     while True:
                         # FIX #12: Add safety timeout to prevent infinite loop
@@ -540,7 +534,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         lines = self.log_buffer.get_lines(limit=50)
                         if lines:
                             data = json.dumps({"lines": lines}, ensure_ascii=False)
-                            self.wfile.write(f"data: {data}\n\n".encode("utf-8"))
+                            self.wfile.write(f"data: {data}\n\n".encode())
                             self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError):
                     logger.debug('[DASHBOARD] SSE client disconnected')
@@ -553,7 +547,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         else:
             self._send_json({"error": "not found"}, 404)
 
-    def do_POST(self):
+    def do_POST(self):  # noqa: N802
         path = self.path.split("?")[0]
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length).decode("utf-8") if content_length else "{}"

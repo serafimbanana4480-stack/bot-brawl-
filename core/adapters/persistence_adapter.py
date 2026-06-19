@@ -7,7 +7,7 @@ Adapter: StatePersistence -> PersistencePort
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from core.ports.persistence_port import PersistencePort
 
@@ -20,7 +20,7 @@ class PersistenceAdapter(PersistencePort):
     def __init__(self, persistence=None):
         self._persist = persistence
 
-    def save_state(self, state: Dict[str, Any], label: str = "checkpoint") -> bool:
+    def save_state(self, state: dict[str, Any], label: str = "checkpoint") -> bool:
         if self._persist is None:
             return False
         try:
@@ -31,7 +31,7 @@ class PersistenceAdapter(PersistencePort):
             logger.warning(f"[PERSISTENCE_ADAPTER] Save failed: {e}")
         return False
 
-    def load_state(self, label: str = "checkpoint") -> Optional[Dict[str, Any]]:
+    def load_state(self, label: str = "checkpoint") -> dict[str, Any] | None:
         if self._persist is None:
             return None
         try:
@@ -41,7 +41,7 @@ class PersistenceAdapter(PersistencePort):
             logger.warning(f"[PERSISTENCE_ADAPTER] Load failed: {e}")
         return None
 
-    def list_checkpoints(self) -> Dict[str, Any]:
+    def list_checkpoints(self) -> dict[str, Any]:
         if self._persist is None:
             return {}
         try:

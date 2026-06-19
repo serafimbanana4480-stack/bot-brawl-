@@ -7,11 +7,10 @@ Improvements:
 - Ammo-aware scoring (don't attack without ammo, prioritize reload when empty)
 """
 
-from typing import List, Optional, Tuple, Dict
-from dataclasses import dataclass
+import logging
 import math
 import random
-import logging
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -58,17 +57,17 @@ class TargetScore:
     """Score breakdown for a target."""
     target_id: int
     total_score: float
-    
+
     # Component scores
     health_score: float  # 0-1, lower health = higher score
     distance_score: float  # 0-1, optimal distance = higher score
     threat_score: float  # 0-1, lower threat = higher score
     vulnerability_score: float  # 0-1, exposed targets = higher score
-    
+
     # Modifiers
     kill_pressure: float  # Bonus for enemies that can be killed quickly
     positioning_score: float  # Score for favorable positioning
-    
+
     reasoning: str
 
 
@@ -76,17 +75,17 @@ class TargetScorer:
     """
     Scores potential targets based on multiple factors.
     Used to prioritize which enemy to attack first.
-    
+
     Supports brawler-specific scoring weights and ammo-aware decisions.
     """
-    
+
     def __init__(
         self,
         optimal_range: float = 150.0,
         max_range: float = 500.0,
         low_health_threshold: float = 0.4,
         danger_distance: float = 300.0,
-        brawler_name: Optional[str] = None,
+        brawler_name: str | None = None,
         current_ammo: int = 3,
         max_ammo: int = 3,
     ):
@@ -96,58 +95,58 @@ class TargetScorer:
         self.danger_distance = danger_distance
         self.current_ammo = current_ammo
         self.max_ammo = max_ammo
-        
+
         # Set brawler role and weights
         self.brawler_name = brawler_name
         self.brawler_role = BRAWLER_ROLE_MAP.get(brawler_name, "fighter") if brawler_name else "fighter"
         self.role_weights = BRAWLER_ROLES.get(self.brawler_role, BRAWLER_ROLES["fighter"])
-        
+
         # Override optimal range based on brawler role
         if brawler_name:
             self.optimal_range = self.role_weights["optimal_range"]
-    
+
     def set_ammo(self, current: int, maximum: int = 3):
         """Update current ammo state."""
         self.current_ammo = current
         self.max_ammo = maximum
-    
+
     def has_ammo(self) -> bool:
         """Check if player has ammo to attack."""
         return self.current_ammo > 0
-    
+
     def should_reload(self) -> bool:
         """Check if player should prioritize reloading over attacking."""
         return self.current_ammo <= 0 or (self.current_ammo == 1 and self.max_ammo >= 3)
-        
+
     def score_target(
         self,
         target,
-        player_position: Tuple[float, float],
+        player_position: tuple[float, float],
         player_health: float,
-        all_enemies: List,
-        walls: List
+        all_enemies: list,
+        walls: list
     ) -> TargetScore:
         """
         Calculate comprehensive score for a target.
-        
+
         Args:
             target: EnemyInfo object
             player_position: Current player position
             player_health: Current player health (0-1)
             all_enemies: List of all visible enemies
             walls: List of walls for cover calculation
-            
+
         Returns:
             TargetScore with breakdown
         """
         distance = target.distance
-        
+
         # Health score (inverse of health, with bonus for low health)
         if target.health_estimate <= self.low_health_threshold:
             health_score = 1.0 + (self.low_health_threshold - target.health_estimate) * 2
         else:
             health_score = 1.0 - target.health_estimate
-        
+
         # Distance score (peaks at optimal range, drops off)
         if distance <= self.optimal_range:
             distance_score = 0.7 + 0.3 * (1 - distance / self.optimal_range)
@@ -157,10 +156,10 @@ class TargetScorer:
             distance_score = 0.7 * (1 - t)
         else:
             distance_score = 0.0
-        
+
         # Threat score (inverse of threat level)
         threat_score = 1.0 - target.threat_level
-        
+
         # Vulnerability (isolated enemies are more vulnerable)
         nearby_allies = sum(
             1 for e in all_enemies
@@ -168,7 +167,7 @@ class TargetScorer:
             self._distance(target.position, e.position) < 200
         )
         vulnerability_score = 1.0 / (1 + nearby_allies)
-        
+
         # Kill pressure (can we kill them quickly?)
         time_to_kill = target.health_estimate / self._estimate_dps(distance)
         if time_to_kill < 2.0:  # Can kill in under 2 seconds
@@ -177,19 +176,19 @@ class TargetScorer:
             kill_pressure = 1.2
         else:
             kill_pressure = 0.8
-        
+
         # Positioning score (do we have advantage?)
         positioning_score = self._calculate_positioning_score(
             player_position, target, walls
         )
-        
+
         # Combined score with weights (brawler-specific)
         dist_w = self.role_weights["distance_weight"]
         hp_w = self.role_weights["health_weight"]
         threat_w = 0.20
         vuln_w = 0.10
         pos_w = 0.15 - dist_w  # Adjust positioning weight
-        
+
         total_score = (
             health_score * hp_w +
             distance_score * dist_w +
@@ -197,25 +196,25 @@ class TargetScorer:
             vulnerability_score * vuln_w +
             positioning_score * max(0.05, pos_w)
         ) * kill_pressure
-        
+
         # Apply brawler aggression bonus
         aggression_bonus = self.role_weights.get("aggression_bonus", 0.0)
         total_score += aggression_bonus * 0.1
-        
+
         # Ammo penalty: if no ammo, drastically reduce attack score
         if not self.has_ammo():
             total_score *= 0.1  # 90% reduction when out of ammo
             reasoning = "NO AMMO - reload first"
         elif self.current_ammo == 1 and self.max_ammo >= 3:
             total_score *= 0.6  # 40% reduction when low on ammo
-        
+
         # Add randomization (non-deterministic behavior)
         total_score *= random.uniform(0.95, 1.05)
-        
+
         reasoning = self._generate_reasoning(
             target, health_score, distance_score, threat_score, kill_pressure
         )
-        
+
         return TargetScore(
             target_id=target.track_id,
             total_score=total_score,
@@ -227,17 +226,17 @@ class TargetScorer:
             positioning_score=positioning_score,
             reasoning=reasoning
         )
-    
+
     def rank_targets(
         self,
-        enemies: List,
-        player_position: Tuple[float, float],
+        enemies: list,
+        player_position: tuple[float, float],
         player_health: float,
-        walls: List
-    ) -> List[TargetScore]:
+        walls: list
+    ) -> list[TargetScore]:
         """
         Rank all potential targets by score.
-        
+
         Returns:
             List of TargetScore sorted by total_score (highest first)
         """
@@ -247,17 +246,17 @@ class TargetScorer:
                 enemy, player_position, player_health, enemies, walls
             )
             scores.append(score)
-        
+
         return sorted(scores, key=lambda s: -s.total_score)
-    
+
     def _distance(
         self,
-        p1: Tuple[float, float],
-        p2: Tuple[float, float]
+        p1: tuple[float, float],
+        p2: tuple[float, float]
     ) -> float:
         """Calculate Euclidean distance."""
         return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
-    
+
     def _estimate_dps(self, distance: float) -> float:
         """Estimate damage per second at given distance."""
         # Simplified: closer = more DPS
@@ -267,34 +266,34 @@ class TargetScorer:
             return 300  # Mid range
         else:
             return 100  # Long range
-    
+
     def _calculate_positioning_score(
         self,
-        player_pos: Tuple[float, float],
+        player_pos: tuple[float, float],
         target,
-        walls: List
+        walls: list
     ) -> float:
         """Calculate positioning advantage score."""
         score = 0.5  # Base score
-        
+
         # Do we have cover?
         for wall in walls:
             if self._is_between(player_pos, target.position, wall.center, 50):
                 score += 0.3  # We have cover
                 break
-        
+
         # Are we flanking?
         # Simplified: check if we're at an angle to enemy
         # (In full implementation, would check enemy facing direction)
         score += 0.2  # Assume good positioning
-        
+
         return min(1.0, score)
-    
+
     def _is_between(
         self,
-        p1: Tuple[float, float],
-        p2: Tuple[float, float],
-        check: Tuple[float, float],
+        p1: tuple[float, float],
+        p2: tuple[float, float],
+        check: tuple[float, float],
         tolerance: float
     ) -> bool:
         """Check if check point is approximately between p1 and p2."""
@@ -302,9 +301,9 @@ class TargetScorer:
         d1 = self._distance(p1, check)
         d2 = self._distance(check, p2)
         d_total = self._distance(p1, p2)
-        
+
         return abs(d1 + d2 - d_total) < tolerance
-    
+
     def _generate_reasoning(
         self,
         target,
@@ -315,7 +314,7 @@ class TargetScorer:
     ) -> str:
         """Generate human-readable reasoning for the score."""
         reasons = []
-        
+
         if health_score > 0.7:
             reasons.append("low health")
         if distance_score > 0.7:
@@ -324,10 +323,10 @@ class TargetScorer:
             reasons.append("low threat")
         if kill_pressure > 1.2:
             reasons.append("kill pressure")
-        
+
         if not reasons:
             return "average target"
-        
+
         return ", ".join(reasons)
 
 
@@ -335,7 +334,7 @@ class ActionScorer:
     """
     Scores potential actions based on predicted outcomes.
     """
-    
+
     def __init__(self):
         self.weights = {
             "damage_dealt": 1.0,
@@ -345,7 +344,7 @@ class ActionScorer:
             "position_improvement": 0.5,
             "resource_gain": 0.3,
         }
-    
+
     def score_action(
         self,
         action_name: str,
@@ -353,47 +352,47 @@ class ActionScorer:
     ) -> float:
         """
         Score an action based on predicted outcome.
-        
+
         Args:
             action_name: Name of the action
             predicted_outcome: Dict with predicted metrics
-            
+
         Returns:
             Score value (higher = better)
         """
         score = 0.0
-        
+
         for metric, value in predicted_outcome.items():
             weight = self.weights.get(metric, 0.0)
             score += value * weight
-        
+
         # Add small randomization
         score *= random.uniform(0.98, 1.02)
-        
+
         return score
-    
+
     def compare_actions(
         self,
-        actions: List[Tuple[str, dict]]
-    ) -> List[Tuple[str, float, str]]:
+        actions: list[tuple[str, dict]]
+    ) -> list[tuple[str, float, str]]:
         """
         Compare multiple actions and return ranked list.
-        
+
         Args:
             actions: List of (action_name, predicted_outcome) tuples
-            
+
         Returns:
             List of (action_name, score, reasoning) sorted by score
         """
         results = []
-        
+
         for action_name, outcome in actions:
             score = self.score_action(action_name, outcome)
             reasoning = self._generate_action_reasoning(action_name, outcome)
             results.append((action_name, score, reasoning))
-        
+
         return sorted(results, key=lambda x: -x[1])
-    
+
     def _generate_action_reasoning(
         self,
         action_name: str,
@@ -401,7 +400,7 @@ class ActionScorer:
     ) -> str:
         """Generate reasoning for action score."""
         reasons = []
-        
+
         if outcome.get("damage_dealt", 0) > 0:
             reasons.append(f"deal {outcome['damage_dealt']:.0f} dmg")
         if outcome.get("kill_potential", 0) > 0.5:
@@ -410,7 +409,7 @@ class ActionScorer:
             reasons.append("HIGH RISK")
         elif outcome.get("damage_taken", 0) > 0:
             reasons.append(f"take {outcome['damage_taken']:.0f} dmg")
-        
+
         return ", ".join(reasons) if reasons else "neutral action"
 
 
@@ -419,15 +418,15 @@ class SituationScorer:
     Scores overall game situation.
     Used to determine if we should play aggressive or defensive.
     """
-    
+
     def __init__(self):
         self.aggression_threshold = 0.6
         self.defense_threshold = 0.4
-    
+
     def score_situation(self, game_state) -> dict:
         """
         Score the current game situation.
-        
+
         Returns:
             Dict with situation analysis
         """
@@ -437,39 +436,39 @@ class SituationScorer:
             "positioning": self._positioning_score(game_state),
             "objective_control": self._objective_score(game_state),
         }
-        
+
         # Overall situation score
         overall = sum(scores.values()) / len(scores)
-        
+
         recommendation = "neutral"
         if overall > self.aggression_threshold:
             recommendation = "aggressive"
         elif overall < self.defense_threshold:
             recommendation = "defensive"
-        
+
         return {
             "scores": scores,
             "overall": overall,
             "recommendation": recommendation,
             "confidence": min(1.0, abs(overall - 0.5) * 2)
         }
-    
+
     def _health_advantage(self, game_state) -> float:
         """Calculate health advantage score."""
         if not game_state.enemies:
             return 1.0
-        
+
         player_health = game_state.player_health
         avg_enemy_health = sum(e.health_estimate for e in game_state.enemies) / len(game_state.enemies)
-        
+
         # Score based on health differential
         diff = player_health - avg_enemy_health
         return 0.5 + diff * 0.5  # Center at 0.5
-    
+
     def _number_advantage(self, game_state) -> float:
         """Calculate number advantage score."""
         num_enemies = len(game_state.enemies)
-        
+
         if num_enemies == 0:
             return 1.0
         elif num_enemies == 1:
@@ -478,12 +477,12 @@ class SituationScorer:
             return 0.5
         else:
             return 0.2
-    
+
     def _positioning_score(self, game_state) -> float:
         """Calculate positioning score."""
         # Simplified: based on danger score
         return 1.0 - game_state.danger_score
-    
+
     def _objective_score(self, game_state) -> float:
         """Calculate objective control score."""
         # Placeholder for objective-based modes
@@ -493,7 +492,7 @@ class SituationScorer:
         return 0.5  # Neutral default
 
 
-def create_default_scorers() -> Tuple[TargetScorer, ActionScorer, SituationScorer]:
+def create_default_scorers() -> tuple[TargetScorer, ActionScorer, SituationScorer]:
     """Factory to create all default scorers."""
     return (
         TargetScorer(),

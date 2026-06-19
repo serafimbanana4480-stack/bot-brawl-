@@ -13,14 +13,14 @@ Expõe métricas live para a dashboard.
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class ModeStatus:
-    active_mode: Optional[str] = None
+    active_mode: str | None = None
     training_active: bool = False
     farm_active: bool = False
     learn_active: bool = False
@@ -42,11 +42,11 @@ class ModeController:
 
     def __init__(
         self,
-        wrapper_ref: Optional[Any] = None,
-        learning_mode_controller: Optional[Any] = None,
-        rl_engine: Optional[Any] = None,
-        live_collector: Optional[Any] = None,
-        esp_overlay: Optional[Any] = None,
+        wrapper_ref: Any | None = None,
+        learning_mode_controller: Any | None = None,
+        rl_engine: Any | None = None,
+        live_collector: Any | None = None,
+        esp_overlay: Any | None = None,
     ):
         self.wrapper = wrapper_ref
         self.learning_mode_controller = learning_mode_controller
@@ -61,7 +61,7 @@ class ModeController:
     # Start / Stop
     # ------------------------------------------------------------------
 
-    def start_mode(self, mode: str, config: Optional[Dict] = None) -> bool:
+    def start_mode(self, mode: str, config: dict | None = None) -> bool:
         config = config or {}
         if mode not in self.VALID_MODES:
             logger.error("[MODE_CTRL] Modo invalido: %s", mode)
@@ -83,7 +83,7 @@ class ModeController:
             return False
         return False
 
-    def stop_mode(self, mode: Optional[str] = None) -> bool:
+    def stop_mode(self, mode: str | None = None) -> bool:
         if mode is None:
             mode = self._status.active_mode
         if mode is None:
@@ -110,7 +110,7 @@ class ModeController:
     # Training
     # ------------------------------------------------------------------
 
-    def _start_training(self, config: Dict) -> bool:
+    def _start_training(self, config: dict) -> bool:
         max_matches = config.get("max_matches", 5)
         brawler = config.get("brawler", None)
         logger.info("[MODE_CTRL] Iniciando Modo Treinamento (max_matches=%s)", max_matches)
@@ -139,7 +139,7 @@ class ModeController:
     # Farm
     # ------------------------------------------------------------------
 
-    def _start_farm(self, config: Dict) -> bool:
+    def _start_farm(self, config: dict) -> bool:
         max_matches = config.get("max_matches", 0)
         max_time = config.get("max_time_minutes", 0)
         brawler = config.get("brawler", None)
@@ -175,7 +175,7 @@ class ModeController:
     # Learn (RL + Data Collection)
     # ------------------------------------------------------------------
 
-    def _start_learn(self, config: Dict) -> bool:
+    def _start_learn(self, config: dict) -> bool:
         rl_enabled = config.get("rl_enabled", True)
         collection_enabled = config.get("collection_enabled", True)
         max_matches = config.get("max_matches", 10)
@@ -227,7 +227,7 @@ class ModeController:
     # Metrics
     # ------------------------------------------------------------------
 
-    def get_status(self) -> Dict:
+    def get_status(self) -> dict:
         s = self._status
         s.session_duration_seconds = time.time() - s.session_start if s.active_mode else 0.0
         return {

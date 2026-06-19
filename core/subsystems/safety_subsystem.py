@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from wrapper import PylaAIEnhanced
@@ -26,7 +26,7 @@ class SafetySubsystem:
 
     def __init__(
         self,
-        wrapper: "PylaAIEnhanced",
+        wrapper: PylaAIEnhanced,
         safety_config: Any,
         humanization_config: Any,
         enable_error_recovery: bool,
@@ -35,12 +35,12 @@ class SafetySubsystem:
         self.safety_config = safety_config
         self.humanization_config = humanization_config
         self.enable_error_recovery = enable_error_recovery
-        self.safety: Optional[Any] = None
-        self.humanization: Optional[Any] = None
-        self.anti_ban: Optional[Any] = None
-        self.error_recovery: Optional[Any] = None
-        self.recovery_integration: Optional[Any] = None
-        self.state_recovery: Optional[Any] = None
+        self.safety: Any | None = None
+        self.humanization: Any | None = None
+        self.anti_ban: Any | None = None
+        self.error_recovery: Any | None = None
+        self.recovery_integration: Any | None = None
+        self.state_recovery: Any | None = None
         self._last_action_time = time.time()
         self._health_lock = threading.Lock()
         self._shutdown_hooks: list = []
@@ -51,8 +51,8 @@ class SafetySubsystem:
 
     def setup(self) -> bool:
         """Initialize safety, anti-ban, recovery, and health systems."""
-        from safety_system import SafetySystem
         from humanization import HumanizationEngine
+        from safety_system import SafetySystem
 
         logger.debug("[WRAPPER] Inicializando SafetySystem")
         try:
@@ -170,7 +170,7 @@ class SafetySubsystem:
     # Monitor loop (extracted from wrapper.py facade)
     # ------------------------------------------------------------------
 
-    def run_monitor_loop(self, wrapper: "PylaAIEnhanced", stop_event: threading.Event) -> None:
+    def run_monitor_loop(self, wrapper: PylaAIEnhanced, stop_event: threading.Event) -> None:
         """Main safety / anti-ban / recovery / health monitor loop."""
         logger.info("[WRAPPER] Monitor loop started")
         _health_check_counter = 0
@@ -257,6 +257,26 @@ class SafetySubsystem:
                     wrapper.observability.record_cycle_time(time.time() - cycle_start)
                     if wrapper.state_manager:
                         wrapper.observability.update_state(wrapper.state_manager.current_state)
+                    # --- SOVERANA FIX 2026-06-19: anti-stuck watchdog ---
+                    try:
+                        current_state = getattr(wrapper.state_manager, "current_state", None) if wrapper.state_manager else None
+                        if current_state != last_state:
+                            last_state = current_state
+                            last_state_change = time.time()
+                        elif current_state and time.time() - last_state_change > 90.0:
+                            # Stuck > 90s no mesmo estado
+                            logger.warning(f"[WRAPPER][WATCHDOG] Preso em {current_state} ha {time.time()-last_state_change:.0f}s")
+                            if hasattr(wrapper.state_manager, "_last_action_time"):
+                                if time.time() - getattr(wrapper.state_manager, "_last_action_time", 0) > 60.0:
+                                    logger.warning("[WRAPPER][WATCHDOG] Sem acao ha >60s, forcando recovery")
+                                    if hasattr(wrapper.state_manager, "current_state"):
+                                        wrapper.state_manager.current_state = "unknown"
+                                    last_state = "unknown"
+                                    last_state_change = time.time()
+                    except Exception as _wd_err:
+                        logger.debug(f"[WRAPPER][WATCHDOG] check failed: {_wd_err}")
+                    # --- end fix ---
+
                     if wrapper.state_recovery and wrapper.state_manager:
                         try:
                             confidence = 0.8
@@ -307,7 +327,7 @@ class SafetySubsystem:
                         pass
                 time.sleep(__import__("random").uniform(0.5, 1.0))
 
-    def _update_decision_modules(self, wrapper: "PylaAIEnhanced") -> None:
+    def _update_decision_modules(self, wrapper: PylaAIEnhanced) -> None:
         if not (wrapper.state_manager and wrapper.state_manager.current_state == "in_game"):
             return
         if wrapper.world_model and wrapper.play_logic and hasattr(wrapper.play_logic, "last_combat_snapshot"):
@@ -335,7 +355,7 @@ class SafetySubsystem:
             except Exception as e:
                 logger.warning(f"[WRAPPER] BehavioralProfile.record_state failed: {e}")
 
-    def _run_watchdog(self, wrapper: "PylaAIEnhanced") -> None:
+    def _run_watchdog(self, wrapper: PylaAIEnhanced) -> None:
         sm = wrapper.state_manager
         if not sm or not hasattr(sm, "state_start_time") or not sm.state_start_time:
             return
@@ -369,7 +389,7 @@ class SafetySubsystem:
         except Exception as e:
             logger.debug(f"[WATCHDOG] Erro no recovery: {e}")
 
-    def _take_break(self, wrapper: "PylaAIEnhanced", duration: float) -> None:
+    def _take_break(self, wrapper: PylaAIEnhanced, duration: float) -> None:
         wrapper.stop()
         time.sleep(duration)
         logger.info("Retomando apos pausa...")

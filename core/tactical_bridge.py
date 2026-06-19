@@ -18,20 +18,19 @@ This bridge:
 Usage in wrapper.py:
     bridge = TacticalBridge()
     bridge.initialize(world_model, occupancy_grid, pressure_map)
-    
+
     # Each frame:
     tactical_input = bridge.build_tactical_context(detections, player_state)
     plan = bridge.get_tactical_plan(tactical_input)
-    
+
     # Use plan for high-level decisions
     if plan.should_retreat:
         ...
 """
 
 import logging
-import time
 import threading
-from typing import Dict, List, Optional, Tuple, Any
+import time
 from dataclasses import dataclass
 from enum import Enum
 
@@ -53,10 +52,10 @@ class TacticalPlan:
     should_push: bool = False
     should_farm: bool = False
     should_hold: bool = False
-    priority_target_id: Optional[int] = None
-    safe_zone: Optional[Tuple[float, float]] = None
-    danger_zone: Optional[Tuple[float, float]] = None
-    recommended_position: Optional[Tuple[float, float]] = None
+    priority_target_id: int | None = None
+    safe_zone: tuple[float, float] | None = None
+    danger_zone: tuple[float, float] | None = None
+    recommended_position: tuple[float, float] | None = None
     team_strategy: str = "default"  # "push_left", "push_right", "hold_center", "default"
     confidence: float = 0.0
     reasoning: str = ""
@@ -65,7 +64,7 @@ class TacticalPlan:
 class TacticalBridge:
     """
     Bridge between enterprise tactical agents and the real game pipeline.
-    
+
     Attempts to use enterprise agents if available, falls back to
     heuristic tactical planning if they fail or aren't importable.
     """
@@ -76,26 +75,26 @@ class TacticalBridge:
         self._supervisor_agent = None
         self._navigation_agent = None
         self._memory_system = None
-        
+
         # Fallback tactical state
         self._current_plan = TacticalPlan()
         self._match_start_time: float = 0.0
         self._last_plan_time: float = 0.0
         self._plan_interval: float = 1.0  # Re-plan every 1s
-        
+
         # References to core systems
         self._world_model = None
         self._occupancy_grid = None
         self._pressure_map = None
-        
+
         self._lock = threading.RLock()
-        
+
         # Try to import enterprise agents
         self._try_import_enterprise()
-        
+
         logger.info("[TACTICAL_BRIDGE] Initialized (enterprise=%s)",
                      self._enterprise_available)
-    
+
     def _try_import_enterprise(self):
         """Try to import enterprise agents. Graceful failure."""
         try:
@@ -106,14 +105,14 @@ class TacticalBridge:
         except (ImportError, Exception) as e:
             logger.info("[TACTICAL_BRIDGE] Enterprise not available: %s", e)
             self._enterprise_available = False
-    
+
     def initialize(self, world_model=None, occupancy_grid=None, pressure_map=None):
         """Set references to core systems."""
         self._world_model = world_model
         self._occupancy_grid = occupancy_grid
         self._pressure_map = pressure_map
         logger.info("[TACTICAL_BRIDGE] Core systems linked")
-    
+
     def start_match(self, game_mode: str = "showdown"):
         """Called when a new match starts."""
         self._match_start_time = time.time()
@@ -122,18 +121,18 @@ class TacticalBridge:
             should_farm=True,
             reasoning="match_start",
         )
-    
-    def build_tactical_context(self, detections: List[Dict],
-                                player_state: Dict) -> Dict:
+
+    def build_tactical_context(self, detections: list[dict],
+                                player_state: dict) -> dict:
         """
         Build tactical context from real game data.
-        
+
         Translates YOLO detections and player state into a format
         suitable for tactical planning.
         """
         now = time.time()
         match_time = now - self._match_start_time if self._match_start_time > 0 else 0
-        
+
         # Determine phase
         if match_time < 30:
             phase = TacticalPhase.EARLY
@@ -141,7 +140,7 @@ class TacticalBridge:
             phase = TacticalPhase.MID
         else:
             phase = TacticalPhase.LATE
-        
+
         context = {
             "match_time": match_time,
             "phase": phase.value,
@@ -156,7 +155,7 @@ class TacticalBridge:
             "pressure": 0.0,
             "danger": 0.0,
         }
-        
+
         # Process detections
         for det in detections:
             cls = det.get("class_name", "").lower()
@@ -166,31 +165,31 @@ class TacticalBridge:
                 context["allies"].append(det)
             elif cls in ("powerup", "power_cube"):
                 context["power_cubes"].append(det)
-        
+
         # Add pressure/danger from PressureMap
         if self._pressure_map:
             pos = context["position"]
             context["pressure"] = self._pressure_map.get_pressure_at(pos[0], pos[1])
             context["danger"] = self._pressure_map.get_influence_at(pos[0], pos[1])
-        
+
         return context
-    
-    def get_tactical_plan(self, context: Dict) -> TacticalPlan:
+
+    def get_tactical_plan(self, context: dict) -> TacticalPlan:
         """
         Get the current tactical plan.
-        
+
         Uses enterprise agent if available, otherwise heuristic planning.
         Re-plans at intervals (not every frame).
         """
         now = time.time()
-        
+
         with self._lock:
             # Check if we need to re-plan
             if now - self._last_plan_time < self._plan_interval:
                 return self._current_plan
-            
+
             self._last_plan_time = now
-            
+
             # Try enterprise first
             if self._enterprise_available and self._tactical_agent:
                 try:
@@ -200,27 +199,27 @@ class TacticalBridge:
                         return plan
                 except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                     logger.warning("[TACTICAL_BRIDGE] Enterprise planning failed: %s", e)
-            
+
             # Fallback: heuristic planning
             plan = self._plan_heuristic(context)
             self._current_plan = plan
             return plan
-    
+
     def get_current_plan(self) -> TacticalPlan:
         """Get current plan without re-evaluation."""
         with self._lock:
             return self._current_plan
-    
-    def _plan_enterprise(self, context: Dict) -> Optional[TacticalPlan]:
+
+    def _plan_enterprise(self, context: dict) -> TacticalPlan | None:
         """Use enterprise tactical agent for planning."""
         # This would call the enterprise agent's plan method
         # For now, return None to trigger fallback
         return None
-    
-    def _plan_heuristic(self, context: Dict) -> TacticalPlan:
+
+    def _plan_heuristic(self, context: dict) -> TacticalPlan:
         """
         Heuristic tactical planning when enterprise is unavailable.
-        
+
         Simple rules-based planning that considers:
         - Match phase (early=farm, mid=contest, late=survive)
         - Health and pressure
@@ -234,11 +233,11 @@ class TacticalBridge:
         enemies = context.get("enemies", [])
         game_mode = context.get("game_mode", "showdown")
         has_super = context.get("has_super", False)
-        cubes = len(context.get("power_cubes", []))
-        
+        len(context.get("power_cubes", []))
+
         plan = TacticalPlan(phase=phase)
         reasons = []
-        
+
         # Phase-based defaults
         if phase == TacticalPhase.EARLY:
             plan.should_farm = True
@@ -249,20 +248,20 @@ class TacticalBridge:
         else:
             plan.should_retreat = health < 0.5
             reasons.append("late_survive" if plan.should_retreat else "late_fight")
-        
+
         # Override based on health/pressure
         if health < 0.3 or pressure > 4.0:
             plan.should_retreat = True
             plan.should_push = False
             plan.should_farm = False
             reasons.append("critical_retreat")
-        
+
         # Super available + healthy = push opportunity
         if has_super and health > 0.6 and len(enemies) > 0:
             plan.should_push = True
             plan.should_retreat = False
             reasons.append("super_push")
-        
+
         # Game mode overrides
         if game_mode in ("gem_grab", "hot_zone"):
             plan.should_hold = True
@@ -273,7 +272,7 @@ class TacticalBridge:
         elif game_mode == "heist":
             plan.should_push = True
             plan.team_strategy = "push_right"
-        
+
         # Safe zone from pressure map
         if self._pressure_map and pressure > 2.0:
             pos = context.get("position", (640, 600))
@@ -283,18 +282,18 @@ class TacticalBridge:
                     pos[0] + safe_dir[0] * 200,
                     pos[1] + safe_dir[1] * 200,
                 )
-        
+
         # Priority target
         if enemies:
             # Target lowest-health enemy
             best = min(enemies, key=lambda e: e.get("health", 1.0))
             plan.priority_target_id = best.get("track_id")
-        
+
         plan.reasoning = " | ".join(reasons)
         plan.confidence = 0.6  # Heuristic confidence
-        
+
         return plan
-    
+
     def end_match(self, result: str = "unknown"):
         """Called when match ends."""
         logger.info("[TACTICAL_BRIDGE] Match ended: %s", result)

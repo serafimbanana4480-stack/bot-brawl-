@@ -11,11 +11,10 @@ Funcionalidades:
 - Integra com DataCollector para logging
 """
 
-import time
 import logging
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Dict, List
 
 import numpy as np
 
@@ -25,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # Lazy import para evitar circular imports
 try:
-    from training.real_reward_system import RealRewardCalculator, GameMetrics
+    from training.real_reward_system import GameMetrics, RealRewardCalculator
 except ImportError:
     RealRewardCalculator = None
     GameMetrics = None
@@ -52,7 +51,7 @@ class RewardShapingConfig:
 class RewardBridge:
     """Ponte entre gameplay e sistema de rewards com dense shaping."""
 
-    def __init__(self, data_collector=None, config: Optional[RewardShapingConfig] = None):
+    def __init__(self, data_collector=None, config: RewardShapingConfig | None = None):
         self.data_collector = data_collector
         self.calculator = None
         if RealRewardCalculator is not None:
@@ -76,16 +75,16 @@ class RewardBridge:
 
         # Metricas acumuladas por match
         self.reset_match_metrics()
-        self.match_start_time: Optional[float] = None
+        self.match_start_time: float | None = None
         self.frame_count = 0
         self.last_reward: float = 0.0
 
         # Running statistics for online normalisation
-        self._reward_history: List[float] = []
+        self._reward_history: list[float] = []
         self._max_history = 1000
 
         # Frame-level delta tracking (for dense rewards)
-        self._prev_metrics: Optional[Dict] = None
+        self._prev_metrics: dict | None = None
         self._last_survival_payout = 0.0
 
         logger.info("[REWARD_BRIDGE] Inicializado (dense shaping ativo)")
@@ -126,8 +125,8 @@ class RewardBridge:
         damage_dealt: float = 0.0,
         damage_taken: float = 0.0,
         power_cubes_collected: int = 0,
-        action_taken: Optional[str] = None,
-        action_was_good: Optional[bool] = None,
+        action_taken: str | None = None,
+        action_was_good: bool | None = None,
     ) -> None:
         """Loga metricas de um frame de combate."""
         self.frame_count += 1
@@ -149,11 +148,11 @@ class RewardBridge:
         match_active: bool = True,
         elapsed_seconds: float = 0.0,
         enemies_detected: int = 0,
-        action_taken: Optional[str] = None,
+        action_taken: str | None = None,
         win: bool = False,
         draw: bool = False,
         survival_time: float = 0.0,
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """Atualiza métricas a partir do gameplay em tempo real.
 
         Chamado pelo StateManager durante o jogo (match_active=True)
@@ -188,7 +187,7 @@ class RewardBridge:
         """Registra conclusao de objetivo."""
         self.current_metrics["objectives_completed"] += 1
 
-    def end_match(self, result: str, final_position: int = 0, survival_time: Optional[float] = None) -> Optional[Dict]:
+    def end_match(self, result: str, final_position: int = 0, survival_time: float | None = None) -> dict | None:
         """Calcula reward final quando match termina."""
         if self.calculator is None or GameMetrics is None:
             logger.warning("[REWARD_BRIDGE] RewardCalculator nao disponivel")
@@ -257,7 +256,7 @@ class RewardBridge:
             "metrics": self.current_metrics,
         }
 
-    def get_session_summary(self) -> Dict:
+    def get_session_summary(self) -> dict:
         """Retorna sumário acumulado da sessão atual (não match)."""
         return {
             "current_metrics": dict(self.current_metrics),
@@ -276,12 +275,12 @@ class RewardBridge:
     # Dense Reward Shaping (novo)
     # ------------------------------------------------------------------
 
-    def _load_shaping_config(self) -> Dict[str, float]:
+    def _load_shaping_config(self) -> dict[str, float]:
         """Carrega pesos de reward shaping do config.json (campo rl.reward_shaping)."""
         import json
         from pathlib import Path
         try:
-            with open(Path(__file__).parent.parent / "config.json", "r", encoding="utf-8") as f:
+            with open(Path(__file__).parent.parent / "config.json", encoding="utf-8") as f:
                 cfg = json.load(f)
             raw = cfg.get("rl", {}).get("reward_shaping", {})
             # Mapeia nomes alternativos do JSON para nomes internos
@@ -290,7 +289,7 @@ class RewardBridge:
                 "cube_collected": "power_cube_collected",
                 "survival_bonus": "survival_time",
             }
-            shaped: Dict[str, float] = {}
+            shaped: dict[str, float] = {}
             for k, v in raw.items():
                 key = mapping.get(k, k)
                 shaped[key] = float(v)
@@ -325,7 +324,7 @@ class RewardBridge:
     def reward_timestep(self) -> float:
         return self.shaping.get("timestep_penalty", -0.001)
 
-    def compute_total_reward(self, events: Dict) -> float:
+    def compute_total_reward(self, events: dict) -> float:
         """Soma rewards por evento e normaliza para [-1, 1]."""
         total = 0.0
         total += self.reward_damage_dealt(events.get("damage_dealt", 0.0))

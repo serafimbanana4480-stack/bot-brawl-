@@ -32,15 +32,14 @@ Migration:
     The old Action enum is deprecated; use UnifiedAction directly.
 """
 
-import math
 import logging
 import time
-from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
+
+from core.class_registry import UnifiedAction
 
 # Import unified action space
 from core.class_registry import UnifiedAction as Action
-from core.class_registry import UnifiedAction
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +52,8 @@ class ActionScore:
     """Scored action with reasoning."""
     action: Action
     score: float
-    target_position: Optional[Tuple[float, float]] = None
-    target_enemy_id: Optional[int] = None
+    target_position: tuple[float, float] | None = None
+    target_enemy_id: int | None = None
     reasoning: str = ""
     urgency: float = 0.0  # 0=can_wait, 1=must_act_now
 
@@ -107,14 +106,14 @@ class UtilityAI:
     }
 
     def __init__(self, profile: str = "balanced",
-                 weights: Optional[Dict] = None):
+                 weights: dict | None = None):
         self.profile = profile
         self.weights = weights or self.DEFAULT_WEIGHTS.copy()
-        self._last_action: Optional[Action] = None
+        self._last_action: Action | None = None
         self._last_action_time: float = 0.0
-        self._action_history: List[ActionScore] = []
+        self._action_history: list[ActionScore] = []
 
-    def evaluate(self, context: Dict) -> ActionScore:
+    def evaluate(self, context: dict) -> ActionScore:
         """
         Evaluate all actions and return the best one.
 
@@ -153,9 +152,9 @@ class UtilityAI:
         pressure = context.get("pressure", 0.0)
         danger = context.get("danger", 0.0)
         has_cover = context.get("has_cover_nearby", False)
-        cover_pos = context.get("cover_position")
+        context.get("cover_position")
         cube_dist = context.get("nearest_cube_dist")
-        cube_pos = context.get("cube_position")
+        context.get("cube_position")
         phase = context.get("match_phase", "early")
         role = context.get("brawler_role", "damage")
         intent = context.get("intent", None)
@@ -267,10 +266,10 @@ class UtilityAI:
 
         return best
 
-    def _get_mode_bonus(self, game_mode: str) -> Dict[Action, float]:
+    def _get_mode_bonus(self, game_mode: str) -> dict[Action, float]:
         """Return lightweight action multipliers for the current game mode."""
         mode = (game_mode or "showdown").lower().replace(" ", "_")
-        bonuses: Dict[str, Dict[Action, float]] = {
+        bonuses: dict[str, dict[Action, float]] = {
             "showdown": {
                 Action.COLLECT_CUBE: 1.30,
                 Action.RETREAT: 1.15,
@@ -314,10 +313,10 @@ class UtilityAI:
         }
         return bonuses.get(mode, {})
 
-    def get_last_action(self) -> Optional[Action]:
+    def get_last_action(self) -> Action | None:
         return self._last_action
 
-    def get_action_history(self, limit: int = 20) -> List[Dict]:
+    def get_action_history(self, limit: int = 20) -> list[dict]:
         return [
             {"action": s.action.value, "score": round(s.score, 2), "reasoning": s.reasoning}
             for s in self._action_history[-limit:]
@@ -460,7 +459,7 @@ class UtilityAI:
 
         return ActionScore(
             Action.COLLECT_CUBE, score,
-            target_position=cube_pos if 'cube_pos' in dir() else None,
+            target_position=None,
             reasoning=" | ".join(reasons) if reasons else "cube_available",
             urgency=0.3,
         )

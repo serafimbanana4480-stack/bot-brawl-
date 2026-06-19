@@ -11,10 +11,9 @@ Guards against repetitive actions and stuck loops:
 """
 
 import logging
-import time
 import threading
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -59,15 +58,15 @@ class RepetitionGuard:
     MAX_SEQUENCE_CHECK = 6
 
     def __init__(self):
-        self._action_history: List[ActionRecord] = []
-        self._cooldown_timers: Dict[str, float] = {}
+        self._action_history: list[ActionRecord] = []
+        self._cooldown_timers: dict[str, float] = {}
         self._loop_detected = False
         self._loop_count = 0
         self._lock = threading.RLock()
 
         logger.info("[REPETITION_GUARD] Initialized")
 
-    def can_execute(self, action: str, target: str = "") -> Tuple[bool, str]:
+    def can_execute(self, action: str, target: str = "") -> tuple[bool, str]:
         """
         Check if an action can be executed (not on cooldown, not in a loop).
 
@@ -139,7 +138,7 @@ class RepetitionGuard:
         with self._lock:
             return self._loop_detected
 
-    def get_loop_info(self) -> Dict:
+    def get_loop_info(self) -> dict:
         """Get information about detected loops."""
         with self._lock:
             return {
@@ -151,7 +150,7 @@ class RepetitionGuard:
                 ],
             }
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get guard statistics."""
         with self._lock:
             total = len(self._action_history)

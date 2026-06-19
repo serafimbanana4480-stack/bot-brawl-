@@ -6,16 +6,16 @@ Suporta: browser push (via dashboard), webhooks HTTP, desktop notifications.
 """
 
 import json
-import sys
-import time
 import logging
+import sys
 import threading
+import time
 import traceback
 import urllib.request
-from pathlib import Path
-from typing import Dict, List, Optional, Callable
-from dataclasses import dataclass, field
 from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class NotificationConfig:
     enabled: bool = True
     webhook_url: str = ""
-    webhook_headers: Dict = field(default_factory=dict)
+    webhook_headers: dict = field(default_factory=dict)
     desktop_enabled: bool = False
     browser_enabled: bool = True
     # Triggers
@@ -48,14 +48,14 @@ class NotificationEvent:
 class NotificationManager:
     """Gerencia notificacoes do bot para multiplos canais."""
 
-    def __init__(self, config_path: Optional[Path] = Path("data/notifications.json")):
+    def __init__(self, config_path: Path | None = Path("data/notifications.json")):
         self.config_path = Path(config_path) if config_path else None
         if self.config_path:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
         self.config = NotificationConfig()
         self._load_config()
         self._history: deque = deque(maxlen=100)
-        self._listeners: List[Callable] = []  # Browser push listeners
+        self._listeners: list[Callable] = []  # Browser push listeners
         self._lock = threading.RLock()
         self._last_losses = 0
         self._unknown_since = 0.0
@@ -64,12 +64,12 @@ class NotificationManager:
         if not self.config_path or not self.config_path.exists():
             return
         try:
-            with open(self.config_path, "r", encoding="utf-8") as f:
+            with open(self.config_path, encoding="utf-8") as f:
                 data = json.load(f)
             for k, v in data.items():
                 if hasattr(self.config, k):
                     setattr(self.config, k, v)
-        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.warning(f"[NOTIFY] Falha ao carregar config: {e}")
 
     def save_config(self):
@@ -78,7 +78,7 @@ class NotificationManager:
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
                 json.dump(self.config.__dict__, f, indent=2, ensure_ascii=False)
-        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.warning(f"[NOTIFY] Falha ao guardar config: {e}")
 
     def update_config(self, **kwargs):
@@ -87,7 +87,7 @@ class NotificationManager:
                 setattr(self.config, k, v)
         self.save_config()
 
-    def get_config(self) -> Dict:
+    def get_config(self) -> dict:
         return self.config.__dict__
 
     def add_browser_listener(self, callback: Callable):
@@ -135,7 +135,7 @@ class NotificationManager:
                 headers={"Content-Type": "application/json", **self.config.webhook_headers},
                 method="POST"
             )
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            with urllib.request.urlopen(req, timeout=5):
                 pass
         except (ConnectionError, TimeoutError, RuntimeError, OSError, ValueError) as e:
             logger.debug(f"[NOTIFY] Webhook failed: {e}")
@@ -155,7 +155,7 @@ class NotificationManager:
         except (ImportError, ModuleNotFoundError) as e:
             logger.debug(f"[NOTIFY] Desktop failed: {e}")
 
-    def check_and_notify(self, bot_status: Dict):
+    def check_and_notify(self, bot_status: dict):
         """Verifica triggers e envia notificacoes conforme necessario."""
         # Consecutive losses
         if self.config.on_consecutive_losses > 0:
@@ -171,7 +171,7 @@ class NotificationManager:
         if self.config.on_trophy_limit and bot_status.get("safety", {}).get("trophy_limit_reached"):
             self.send("Limite de Trofeus", "O bot atingiu o limite de trofeus configurado", "warning", "trophy_limit")
 
-    def notify_crash(self, error: Exception, component: str = "unknown", extra: Optional[Dict] = None):
+    def notify_crash(self, error: Exception, component: str = "unknown", extra: dict | None = None):
         """Send crash notification with stack trace via webhook and browser.
 
         Args:
@@ -215,12 +215,12 @@ class NotificationManager:
                     headers={"Content-Type": "application/json", **self.config.webhook_headers},
                     method="POST"
                 )
-                with urllib.request.urlopen(req, timeout=5) as resp:
+                with urllib.request.urlopen(req, timeout=5):
                     pass
             except (ConnectionError, TimeoutError, RuntimeError, OSError, ValueError) as e:
                 logger.debug(f"[NOTIFY] Crash webhook failed: {e}")
 
-    def get_history(self, limit: int = 50) -> List[Dict]:
+    def get_history(self, limit: int = 50) -> list[dict]:
         with self._lock:
             return [
                 {"title": e.title, "message": e.message, "level": e.level,
@@ -230,7 +230,7 @@ class NotificationManager:
 
 
 # Singleton
-_global_notification_manager: Optional[NotificationManager] = None
+_global_notification_manager: NotificationManager | None = None
 
 
 def get_notification_manager() -> NotificationManager:
@@ -240,7 +240,7 @@ def get_notification_manager() -> NotificationManager:
     return _global_notification_manager
 
 
-def install_crash_handler(manager: Optional[NotificationManager] = None):
+def install_crash_handler(manager: NotificationManager | None = None):
     """Install a sys.excepthook that sends crash notifications with stack traces.
 
     Chains to any previously installed excepthook so that other handlers

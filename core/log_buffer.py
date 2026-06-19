@@ -13,17 +13,15 @@ Features:
 import gzip
 import json
 import logging
-import os
 import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import List, Dict, Optional
 
 
 class RotatingLogWriter:
     """Thread-safe rotating file writer for log entries.
-    
+
     Writes log entries to a file, rotating when the file exceeds
     max_file_size_mb. Keeps up to max_backup_files compressed backups.
     """
@@ -83,12 +81,12 @@ class RotatingLogWriter:
                 with gzip.open(backup_path, "wb") as f_out:
                     f_out.writelines(f_in)
             filepath.unlink()
-        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError):
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
             pass  # If compression fails, just truncate
 
-    def write_entry(self, entry: Dict):
+    def write_entry(self, entry: dict):
         """Write a log entry to the file.
-        
+
         Args:
             entry: Dict with log entry data (timestamp, level, logger, message, etc.)
         """
@@ -101,7 +99,7 @@ class RotatingLogWriter:
                 self._current_file.write(line)
                 self._current_file.flush()
                 self._current_size += len(line.encode("utf-8"))
-            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError):
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass  # Never let file writing crash the bot
 
     def close(self):
@@ -114,9 +112,9 @@ class RotatingLogWriter:
                     pass
                 self._current_file = None
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Return writer statistics."""
-        filepath = self.log_dir / self.base_name
+        self.log_dir / self.base_name
         return {
             "log_dir": str(self.log_dir),
             "current_file_size_mb": round(self._current_size / (1024 * 1024), 2),
@@ -131,18 +129,18 @@ class LogBuffer:
     def __init__(
         self,
         max_lines: int = 500,
-        log_dir: Optional[Path] = None,
+        log_dir: Path | None = None,
         max_file_size_mb: float = 10.0,
         max_backup_files: int = 5,
         enable_file_writer: bool = False,
     ):
         self._lock = threading.RLock()
         self._buffer: deque = deque(maxlen=max_lines)
-        self._listeners: List[threading.Event] = []
+        self._listeners: list[threading.Event] = []
         self._listeners_lock = threading.Lock()
 
         # Rotating file writer (optional)
-        self._file_writer: Optional[RotatingLogWriter] = None
+        self._file_writer: RotatingLogWriter | None = None
         if enable_file_writer and log_dir:
             self._file_writer = RotatingLogWriter(
                 log_dir=log_dir,
@@ -175,8 +173,8 @@ class LogBuffer:
                 except (ValueError, TypeError, RuntimeError, AttributeError, OSError):
                     pass
 
-    def get_lines(self, limit: int = 100, level: Optional[str] = None,
-                  component: Optional[str] = None, search: Optional[str] = None) -> List[Dict]:
+    def get_lines(self, limit: int = 100, level: str | None = None,
+                  component: str | None = None, search: str | None = None) -> list[dict]:
         """Retorna linhas do buffer com filtros opcionais."""
         with self._lock:
             lines = list(self._buffer)
@@ -185,11 +183,11 @@ class LogBuffer:
         if level and level != "ALL":
             level_order = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 4}
             min_level = level_order.get(level, 0)
-            lines = [l for l in lines if level_order.get(l["level"], 0) >= min_level]
+            lines = [rec for rec in lines if level_order.get(rec["level"], 0) >= min_level]
         if component and component != "ALL":
-            lines = [l for l in lines if component.lower() in l["logger"].lower() or component.lower() in l["module"].lower()]
+            lines = [rec for rec in lines if component.lower() in rec["logger"].lower() or component.lower() in rec["module"].lower()]
         if search:
-            lines = [l for l in lines if search.lower() in l["message"].lower()]
+            lines = [rec for rec in lines if search.lower() in rec["message"].lower()]
 
         return lines[-limit:]
 
@@ -209,7 +207,7 @@ class LogBuffer:
             if event in self._listeners:
                 self._listeners.remove(event)
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Retorna estatisticas do buffer e do file writer."""
         with self._lock:
             total = len(self._buffer)
@@ -248,8 +246,8 @@ class DashboardLogHandler(logging.Handler):
 
 
 # Singleton global para o projeto
-_global_log_buffer: Optional[LogBuffer] = None
-_global_handler: Optional[DashboardLogHandler] = None
+_global_log_buffer: LogBuffer | None = None
+_global_handler: DashboardLogHandler | None = None
 
 
 def get_log_buffer(max_lines: int = 500) -> LogBuffer:
@@ -263,13 +261,13 @@ def get_log_buffer(max_lines: int = 500) -> LogBuffer:
 def install_log_buffer(
     root_logger_name: str = "",
     max_lines: int = 500,
-    log_dir: Optional[Path] = None,
+    log_dir: Path | None = None,
     max_file_size_mb: float = 10.0,
     max_backup_files: int = 5,
     enable_file_writer: bool = False,
 ) -> LogBuffer:
     """Instala o LogBuffer no root logger (ou logger especificado).
-    
+
     Args:
         root_logger_name: Logger name to attach to (empty = root logger)
         max_lines: Maximum lines in the in-memory buffer

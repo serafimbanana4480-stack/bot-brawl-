@@ -21,22 +21,23 @@ Also provides:
 
 Usage:
     cache = AdaptiveScreenshotCache()
-    
+
     # Each frame:
     screenshot = cache.get_screenshot(capture_fn, game_state="in_game")
-    
+
     # Or with priority:
     screenshot = cache.get_screenshot(capture_fn, game_state="in_game", priority="high")
 """
 
-import logging
-import time
-import threading
 import hashlib
-import numpy as np
-from typing import Callable, Dict, Optional, Tuple
+import logging
+import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ class CacheEntry:
 class AdaptiveScreenshotCache:
     """
     Adaptive screenshot cache that adjusts TTL based on game state.
-    
+
     Features:
     - Automatic mode detection from game state
     - Priority-based capture (important events get fresh data)
@@ -105,10 +106,10 @@ class AdaptiveScreenshotCache:
 
     def __init__(self, default_ttl_ms: float = 150.0):
         self._default_ttl = default_ttl_ms / 1000.0  # Convert to seconds
-        self._cache: Optional[CacheEntry] = None
+        self._cache: CacheEntry | None = None
         self._current_mode: CacheMode = CacheMode.LOBBY
         self._lock = threading.RLock()
-        
+
         # Stats
         self._hits = 0
         self._misses = 0
@@ -116,10 +117,10 @@ class AdaptiveScreenshotCache:
         self._total_captures = 0
         self._avg_capture_time_ms = 0.0
         self._capture_times: list = []
-        
+
         # Custom TTL overrides
-        self._custom_ttls: Dict[CacheMode, float] = {}
-        
+        self._custom_ttls: dict[CacheMode, float] = {}
+
         logger.info("[ADAPTIVE_SCREENSHOT] Initialized (default_ttl=%.0fms)",
                      default_ttl_ms)
 
@@ -133,47 +134,47 @@ class AdaptiveScreenshotCache:
                        enemies_visible: bool = False) -> np.ndarray:
         """
         Get a screenshot, using cache when appropriate.
-        
+
         Args:
             capture_fn: Function that captures a new screenshot
             game_state: Current game state string
             priority: "critical", "high", "normal", "low"
             enemies_visible: Whether enemies are currently visible
-        
+
         Returns:
             Screenshot as numpy array
         """
         # Determine cache mode
         mode = self.STATE_MODE_MAP.get(game_state, CacheMode.LOBBY)
-        
+
         # Upgrade to combat mode if enemies visible
         if mode == CacheMode.IN_GAME and enemies_visible:
             mode = CacheMode.COMBAT
-        
+
         self._current_mode = mode
-        
+
         # Check priority override
         priority_ttl = PRIORITY_TTL.get(priority)
         if priority_ttl is not None and priority_ttl == 0:
             # Critical priority — always fresh capture
             return self._capture_new(capture_fn, mode)
-        
+
         # Get TTL for current mode
         ttl = self._get_ttl(mode, priority)
-        
+
         with self._lock:
             # Check cache validity
             if self._cache is not None:
                 age = time.time() - self._cache.timestamp
-                
+
                 if age < ttl and self._cache.screenshot is not None:
                     # Cache hit
                     self._hits += 1
                     return self._cache.screenshot
-            
+
             # Cache miss — need new capture
             self._misses += 1
-        
+
         return self._capture_new(capture_fn, mode)
 
     def invalidate(self):
@@ -185,12 +186,12 @@ class AdaptiveScreenshotCache:
         """Get current cache mode."""
         return self._current_mode
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get cache statistics."""
         with self._lock:
             total = self._hits + self._misses
             hit_rate = self._hits / max(1, total) * 100
-            
+
             return {
                 "current_mode": self._current_mode.value,
                 "current_ttl_ms": round(self._get_ttl(self._current_mode) * 1000),
@@ -210,11 +211,11 @@ class AdaptiveScreenshotCache:
         priority_ttl = PRIORITY_TTL.get(priority)
         if priority_ttl is not None:
             return priority_ttl / 1000.0
-        
+
         # Custom TTL
         if mode in self._custom_ttls:
             return self._custom_ttls[mode]
-        
+
         # Mode default
         ttl_ms = MODE_TTL.get(mode, 150)
         return ttl_ms / 1000.0
@@ -222,7 +223,7 @@ class AdaptiveScreenshotCache:
     def _capture_new(self, capture_fn: Callable, mode: CacheMode) -> np.ndarray:
         """Capture a new screenshot and update cache."""
         start = time.time()
-        
+
         try:
             screenshot = capture_fn()
         except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
@@ -231,9 +232,9 @@ class AdaptiveScreenshotCache:
             if self._cache and self._cache.screenshot is not None:
                 return self._cache.screenshot
             raise
-        
+
         capture_time = (time.time() - start) * 1000
-        
+
         # Compute hash for deduplication
         hash_value = ""
         if screenshot is not None:
@@ -243,17 +244,17 @@ class AdaptiveScreenshotCache:
                 hash_value = hashlib.md5(small.tobytes()).hexdigest()[:16]
             except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass
-        
+
         with self._lock:
             # Check for deduplication
-            if (self._cache is not None and 
+            if (self._cache is not None and
                 self._cache.hash_value == hash_value and
                 hash_value != ""):
                 # Same frame — extend cache lifetime
                 self._dedup_skips += 1
                 self._cache.timestamp = time.time()  # Refresh timestamp
                 return self._cache.screenshot
-            
+
             # Update cache
             self._cache = CacheEntry(
                 screenshot=screenshot,
@@ -262,7 +263,7 @@ class AdaptiveScreenshotCache:
                 hash_value=hash_value,
                 capture_time_ms=capture_time,
             )
-            
+
             # Update stats
             self._total_captures += 1
             self._capture_times.append(capture_time)
@@ -271,5 +272,5 @@ class AdaptiveScreenshotCache:
             self._avg_capture_time_ms = (
                 sum(self._capture_times) / len(self._capture_times)
             )
-        
+
         return screenshot

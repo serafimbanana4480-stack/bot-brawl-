@@ -29,15 +29,13 @@ Breaking Change Notice:
 from __future__ import annotations
 
 from enum import Enum
-from typing import Dict, List, Optional, Set, Tuple, Union
-
 
 # ============================================================================
 # VISUAL CLASSES: id → nome canonical (YOLO detection classes)
 # ============================================================================
 
 # Core schema (4 classes) — minimum viable for gameplay
-CORE_CLASSES: Dict[int, str] = {
+CORE_CLASSES: dict[int, str] = {
     0: "player",
     1: "enemy",
     2: "cubebox",
@@ -45,7 +43,7 @@ CORE_CLASSES: Dict[int, str] = {
 }
 
 # Extended schema (8 classes) — adds environment objects
-EXTENDED_CLASSES: Dict[int, str] = {
+EXTENDED_CLASSES: dict[int, str] = {
     0: "player",
     1: "bush",
     2: "enemy",
@@ -57,7 +55,7 @@ EXTENDED_CLASSES: Dict[int, str] = {
 }
 
 # Full schema (35 classes) — tactical coverage for spatial reasoning, hazards and game-mode objectives
-FULL_CLASSES: Dict[int, str] = {
+FULL_CLASSES: dict[int, str] = {
     0: "player",
     1: "bush",
     2: "enemy",
@@ -96,14 +94,14 @@ FULL_CLASSES: Dict[int, str] = {
 }
 
 # Schema registry
-VISUAL_CLASSES: Dict[str, Dict[int, str]] = {
+VISUAL_CLASSES: dict[str, dict[int, str]] = {
     "core": CORE_CLASSES,
     "extended": EXTENDED_CLASSES,
     "full": FULL_CLASSES,
 }
 
 # Reverse lookup: name → id for each schema
-_CLASS_TO_ID: Dict[str, Dict[str, int]] = {
+_CLASS_TO_ID: dict[str, dict[str, int]] = {
     schema: {name: id for id, name in classes.items()}
     for schema, classes in VISUAL_CLASSES.items()
 }
@@ -114,7 +112,7 @@ _CLASS_TO_ID: Dict[str, Dict[str, int]] = {
 # Elimina as variantes encontradas em play.py, wrapper.py, etc.
 # ============================================================================
 
-ALIASES: Dict[str, str] = {
+ALIASES: dict[str, str] = {
     # Player variants (found in play.py, wrapper.py, async_pipeline.py, dataset_pipeline.py)
     "Player": "player",
     "player": "player",  # self-alias for consistency
@@ -265,25 +263,18 @@ ALIASES: Dict[str, str] = {
     "safe": "safe_zone",
     "shield": "safe_zone",
     "protection": "safe_zone",
-    "heal_zone": "heal_zone",
     "heal": "heal_zone",
     "health": "heal_zone",
     "regen": "heal_zone",
-    "dodge_zone": "dodge_zone",
     "danger": "dodge_zone",
     "warning": "dodge_zone",
     "avoid": "dodge_zone",
-    "objective_zone": "objective_zone",
     "objective": "objective_zone",
     "mission_zone": "objective_zone",
-    "respawn_zone": "respawn_zone",
     "respawn": "respawn_zone",
     "spawn": "spawn_point",
-    "spawn_point": "spawn_point",
-    "heist_safe": "heist_safe",
     "turret": "heist_safe",
     "safe_box": "heist_safe",
-    "siege_bolt": "siege_bolt",
     "bolt": "siege_bolt",
     "gear": "siege_bolt",
 }
@@ -293,7 +284,7 @@ ALIASES: Dict[str, str] = {
 # ROBOFLOW MAPPINGS: Roboflow dataset names → canonical
 # ============================================================================
 
-ROBOFLOW_TO_CANONICAL: Dict[str, Optional[str]] = {
+ROBOFLOW_TO_CANONICAL: dict[str, str | None] = {
     # Direct mappings
     "Enemy": "enemy",
     "Safe_Enemy": "enemy",
@@ -320,7 +311,7 @@ ROBOFLOW_TO_CANONICAL: Dict[str, Optional[str]] = {
 }
 
 # Keep classes filter for dataset pipeline
-ROBOFLOW_KEEP_CLASSES: Set[str] = {
+ROBOFLOW_KEEP_CLASSES: set[str] = {
     "Enemy", "Safe_Enemy",
     "Friendly", "Me", "Safe_Friendly",
     "Ball", "Gem", "Hot_Zone",
@@ -333,7 +324,7 @@ ROBOFLOW_KEEP_CLASSES: Set[str] = {
 # ============================================================================
 
 # Self-state features (11 features)
-SELF_STATE_FEATURES: List[str] = [
+SELF_STATE_FEATURES: list[str] = [
     "hp_ratio",              # 0.0 to 1.0
     "ammo_ratio",            # 0.0 to 1.0 (current/max)
     "super_charge",          # 0.0 to 1.0 (continuous, not just bool)
@@ -348,7 +339,7 @@ SELF_STATE_FEATURES: List[str] = [
 ]
 
 # Spatial features (17 features)
-SPATIAL_FEATURES: List[str] = [
+SPATIAL_FEATURES: list[str] = [
     "danger_score",          # 0.0 to 1.0
     "enemies_in_range",      # count (capped)
     "escape_routes",         # count (capped)
@@ -369,7 +360,7 @@ SPATIAL_FEATURES: List[str] = [
 ]
 
 # Temporal features (10 features)
-TEMPORAL_FEATURES: List[str] = [
+TEMPORAL_FEATURES: list[str] = [
     "time_since_enemy_seen", # seconds
     "previous_action",       # encoded as int
     "velocity_x",            # pixels/second
@@ -383,7 +374,7 @@ TEMPORAL_FEATURES: List[str] = [
 ]
 
 # Per-enemy features (6 features for nearest enemy)
-ENEMY_FEATURES: List[str] = [
+ENEMY_FEATURES: list[str] = [
     "nearest_enemy_hp_ratio",
     "nearest_enemy_has_super",
     "nearest_enemy_angle",
@@ -393,7 +384,7 @@ ENEMY_FEATURES: List[str] = [
 ]
 
 # All state features combined
-STATE_FEATURES: List[str] = (
+STATE_FEATURES: list[str] = (
     SELF_STATE_FEATURES +
     SPATIAL_FEATURES +
     TEMPORAL_FEATURES +
@@ -450,7 +441,7 @@ class UnifiedAction(Enum):
         return len(cls)
 
     @classmethod
-    def from_string(cls, name: str) -> Optional["UnifiedAction"]:
+    def from_string(cls, name: str) -> UnifiedAction | None:
         """Parse action from string name (case-insensitive)."""
         name_map = {
             "idle": cls.IDLE,
@@ -470,7 +461,7 @@ class UnifiedAction(Enum):
 
 
 # Legacy action mappings for backward compatibility during transition
-RL_ACTION_MAP: Dict[str, UnifiedAction] = {
+RL_ACTION_MAP: dict[str, UnifiedAction] = {
     "attack": UnifiedAction.ATTACK,
     "move_to_enemy": UnifiedAction.MOVE_TO_ENEMY,
     "retreat": UnifiedAction.RETREAT,
@@ -479,7 +470,7 @@ RL_ACTION_MAP: Dict[str, UnifiedAction] = {
     "idle": UnifiedAction.IDLE,
 }
 
-UTILITY_ACTION_MAP: Dict[str, UnifiedAction] = {
+UTILITY_ACTION_MAP: dict[str, UnifiedAction] = {
     "ATTACK": UnifiedAction.ATTACK,
     "RETREAT": UnifiedAction.RETREAT,
     "COLLECT_CUBE": UnifiedAction.COLLECT_CUBE,
@@ -518,7 +509,7 @@ def get_canonical(name: str) -> str:
     return ALIASES.get(name, name.lower())
 
 
-def get_class_id(name: str, schema: str = "full") -> Optional[int]:
+def get_class_id(name: str, schema: str = "full") -> int | None:
     """
     Get class ID for a canonical name in a given schema.
 
@@ -546,7 +537,7 @@ def get_class_id(name: str, schema: str = "full") -> Optional[int]:
     return _CLASS_TO_ID[schema_lower].get(canonical)
 
 
-def get_class_name(class_id: int, schema: str = "full") -> Optional[str]:
+def get_class_name(class_id: int, schema: str = "full") -> str | None:
     """
     Get canonical class name from ID.
 
@@ -566,7 +557,7 @@ def get_class_name(class_id: int, schema: str = "full") -> Optional[str]:
 
 
 # Legacy schema aliases (backward compatibility)
-_SCHEMA_ALIASES: Dict[str, str] = {
+_SCHEMA_ALIASES: dict[str, str] = {
     "4": "core",
     "4classes": "core",
     "8": "extended",
@@ -577,7 +568,7 @@ _SCHEMA_ALIASES: Dict[str, str] = {
 }
 
 
-def get_schema(schema: str = "full") -> Dict[int, str]:
+def get_schema(schema: str = "full") -> dict[int, str]:
     """
     Get full schema mapping (id → name).
 
@@ -599,7 +590,7 @@ def get_schema(schema: str = "full") -> Dict[int, str]:
     return VISUAL_CLASSES[schema_lower].copy()
 
 
-def get_schema_for_model(model_classes: Union[Dict, Set, List]) -> str:
+def get_schema_for_model(model_classes: dict | set | list) -> str:
     """
     Detect which schema best matches a model's classes.
 
@@ -643,7 +634,7 @@ def get_schema_for_model(model_classes: Union[Dict, Set, List]) -> str:
         return overlaps[0][1]
 
 
-def get_classes_for_yolo(schema: str = "full") -> Dict[int, str]:
+def get_classes_for_yolo(schema: str = "full") -> dict[int, str]:
     """
     Get class mapping formatted for YOLO/Ultralytics Detect wrapper.
 
@@ -657,9 +648,9 @@ def get_classes_for_yolo(schema: str = "full") -> Dict[int, str]:
 
 
 def normalize_detections(
-    detections: Dict[str, List],
+    detections: dict[str, list],
     target_schema: str = "full"
-) -> Dict[str, List]:
+) -> dict[str, list]:
     """
     Normalize detection dict keys to canonical names for target schema.
 
@@ -675,7 +666,7 @@ def normalize_detections(
         {'player': [[1,2,3,4]], 'enemy': [[5,6,7,8]]}
     """
     schema_classes = set(get_schema(target_schema).values())
-    result: Dict[str, List] = {}
+    result: dict[str, list] = {}
 
     for raw_name, boxes in detections.items():
         canonical = get_canonical(raw_name)
@@ -688,10 +679,10 @@ def normalize_detections(
 
 
 def get_by_type(
-    detections: Dict[str, List],
+    detections: dict[str, list],
     class_type: str,
     first_only: bool = False
-) -> Union[List, Optional[Tuple]]:
+) -> list | tuple | None:
     """
     Get detections of a specific type, handling aliases.
 
@@ -724,17 +715,17 @@ def get_by_type(
 # LEGACY COMPATIBILITY
 # ============================================================================
 
-def get_core_classes() -> Dict[int, str]:
+def get_core_classes() -> dict[int, str]:
     """Return core 4-class schema (for backward compatibility)."""
     return CORE_CLASSES.copy()
 
 
-def get_extended_classes() -> Dict[int, str]:
+def get_extended_classes() -> dict[int, str]:
     """Return extended 8-class schema (for backward compatibility)."""
     return EXTENDED_CLASSES.copy()
 
 
-def remap_label_id(label_id: int, target_schema: str = "core") -> Optional[int]:
+def remap_label_id(label_id: int, target_schema: str = "core") -> int | None:
     """
     Map a label ID from one schema to another.
 

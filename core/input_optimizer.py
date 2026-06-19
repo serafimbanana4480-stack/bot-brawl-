@@ -18,28 +18,27 @@ and falls back gracefully.
 Usage:
     optimizer = InputOptimizer(device_id="emulator-5554")
     optimizer.initialize()  # Auto-detects best method
-    
+
     # Tap (uses best available method)
     optimizer.tap(640, 360)
-    
+
     # Swipe (humanized with Bezier curves)
     optimizer.swipe(100, 500, 600, 500, duration_ms=300)
-    
+
     # Batch multiple inputs
     with optimizer.batch() as b:
         b.tap(640, 360)
         b.swipe(100, 500, 600, 500, duration_ms=200)
-    
+
     optimizer.cleanup()
 """
 
 import logging
-import os
+import math
 import shutil
 import subprocess
-import time
 import threading
-from typing import Dict, List, Optional, Tuple
+import time
 from dataclasses import dataclass
 from enum import Enum
 
@@ -67,7 +66,7 @@ class InputStats:
 class InputOptimizer:
     """
     Optimized input system with multiple backend options.
-    
+
     Automatically detects and uses the best available input method:
     1. Minitouch (fastest, requires rooted device or specific setup)
     2. Scrcpy (fast, requires scrcpy installed)
@@ -79,33 +78,33 @@ class InputOptimizer:
                  emulator_controller=None):
         self.device_id = device_id
         self.emulator_controller = emulator_controller
-        
+
         self._method = InputMethod.ADB
         self._minitouch_proc = None
         self._minitouch_socket = None
         self._scrcpy_proc = None
         self._adb_path = "adb"
-        
+
         # Stats
         self._stats = InputStats()
-        self._latency_samples: List[float] = []
-        
+        self._latency_samples: list[float] = []
+
         # Batch mode
         self._batch_active = False
-        self._batch_commands: List[str] = []
-        
+        self._batch_commands: list[str] = []
+
         # Humanization parameters
         self._jitter_pixels = 3
         self._tap_duration_ms = 50
-        
+
         self._lock = threading.RLock()
-        
+
         logger.info("[INPUT_OPTIMIZER] Initialized for device=%s", device_id)
 
     def initialize(self):
         """
         Detect and initialize the best available input method.
-        
+
         Tries minitouch → scrcpy → ADB optimized → ADB standard.
         """
         # Try minitouch first
@@ -113,19 +112,19 @@ class InputOptimizer:
             self._method = InputMethod.MINITOUCH
             logger.info("[INPUT_OPTIMIZER] Using minitouch (sub-5ms)")
             return
-        
+
         # Try scrcpy
         if self._try_scrcpy():
             self._method = InputMethod.SCRCPY
             logger.info("[INPUT_OPTIMIZER] Using scrcpy (sub-10ms)")
             return
-        
+
         # Try ADB optimized
         if self._try_adb_optimized():
             self._method = InputMethod.ADB_OPTIMIZED
             logger.info("[INPUT_OPTIMIZER] Using ADB optimized (30-80ms)")
             return
-        
+
         # Fallback to standard ADB
         self._method = InputMethod.ADB
         logger.info("[INPUT_OPTIMIZER] Using standard ADB (50-150ms)")
@@ -137,7 +136,7 @@ class InputOptimizer:
     def tap(self, x: int, y: int, jitter: bool = True):
         """
         Tap at coordinates using the best available method.
-        
+
         Args:
             x, y: Target coordinates
             jitter: Add humanization jitter
@@ -146,13 +145,13 @@ class InputOptimizer:
             import random
             x += random.randint(-self._jitter_pixels, self._jitter_pixels)
             y += random.randint(-self._jitter_pixels, self._jitter_pixels)
-        
+
         start = time.time()
-        
+
         if self._batch_active:
             self._batch_tap(x, y)
             return
-        
+
         if self._method == InputMethod.MINITOUCH:
             self._minitouch_tap(x, y)
         elif self._method == InputMethod.SCRCPY:
@@ -161,7 +160,7 @@ class InputOptimizer:
             self._adb_optimized_tap(x, y)
         else:
             self._adb_tap(x, y)
-        
+
         latency = (time.time() - start) * 1000
         self._record_latency(latency)
 
@@ -169,7 +168,7 @@ class InputOptimizer:
               duration_ms: int = 300, humanize: bool = True):
         """
         Swipe from (x1,y1) to (x2,y2) with optional humanization.
-        
+
         Args:
             x1, y1: Start coordinates
             x2, y2: End coordinates
@@ -177,16 +176,16 @@ class InputOptimizer:
             humanize: Add Bezier curve humanization
         """
         if humanize:
-            points = self._bezier_swipe_points(x1, y1, x2, y2, duration_ms)
+            self._bezier_swipe_points(x1, y1, x2, y2, duration_ms)
         else:
-            points = [(x2, y2)]
-        
+            pass
+
         start = time.time()
-        
+
         if self._batch_active:
             self._batch_swipe(x1, y1, x2, y2, duration_ms)
             return
-        
+
         if self._method == InputMethod.MINITOUCH:
             self._minitouch_swipe(x1, y1, x2, y2, duration_ms)
         elif self._method == InputMethod.SCRCPY:
@@ -195,7 +194,7 @@ class InputOptimizer:
             self._adb_optimized_swipe(x1, y1, x2, y2, duration_ms)
         else:
             self._adb_swipe(x1, y1, x2, y2, duration_ms)
-        
+
         latency = (time.time() - start) * 1000
         self._record_latency(latency)
 
@@ -203,7 +202,7 @@ class InputOptimizer:
         """Context manager for batching multiple inputs."""
         return _BatchContext(self)
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get input performance statistics."""
         with self._lock:
             return {
@@ -223,7 +222,7 @@ class InputOptimizer:
             except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass
             self._minitouch_proc = None
-        
+
         if self._scrcpy_proc:
             try:
                 self._scrcpy_proc.terminate()
@@ -231,7 +230,7 @@ class InputOptimizer:
             except (ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass
             self._scrcpy_proc = None
-        
+
         logger.info("[INPUT_OPTIMIZER] Cleaned up")
 
     # --- Backend implementations ---
@@ -318,24 +317,24 @@ class InputOptimizer:
         """Execute all queued batch commands at once."""
         if not self._batch_commands:
             return
-        
+
         start = time.time()
-        
+
         # Combine commands with && for single ADB shell call
         combined = " && ".join(self._batch_commands)
         cmd = [self._adb_path, "-s", self.device_id, "shell", combined]
-        
+
         try:
             subprocess.run(cmd, capture_output=True, timeout=3)
         except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.warning("[INPUT_OPTIMIZER] Batch execution failed: %s", e)
-        
+
         latency = (time.time() - start) * 1000
         self._stats.batch_count += 1
         self._stats.batch_savings_ms += (
             len(self._batch_commands) * self._stats.avg_latency_ms - latency
         )
-        
+
         self._batch_commands.clear()
 
     # --- Detection ---
@@ -351,7 +350,7 @@ class InputOptimizer:
             )
             if result.returncode != 0:
                 return False
-            
+
             # Start minitouch
             self._minitouch_proc = subprocess.Popen(
                 [self._adb_path, "-s", self.device_id, "shell",
@@ -361,7 +360,7 @@ class InputOptimizer:
                 stderr=subprocess.PIPE,
             )
             return True
-        except (FileNotFoundError, PermissionError, ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError):
+        except (FileNotFoundError, PermissionError, ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
             return False
 
     def _try_scrcpy(self) -> bool:
@@ -378,7 +377,7 @@ class InputOptimizer:
             )
             time.sleep(1)  # Wait for scrcpy to initialize
             return self._scrcpy_proc.poll() is None
-        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError):
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
             return False
 
     def _try_adb_optimized(self) -> bool:
@@ -398,28 +397,28 @@ class InputOptimizer:
         """Generate Bezier curve points for humanized swipe."""
         import random
         points = []
-        
+
         # Control point offset (perpendicular to swipe direction)
         dx = x2 - x1
         dy = y2 - y1
         length = max(1, math.sqrt(dx * dx + dy * dy))
-        
+
         # Perpendicular direction
         px = -dy / length
         py = dx / length
-        
+
         # Random control point offset
         offset = random.gauss(0, length * 0.1)
         cx = (x1 + x2) / 2 + px * offset
         cy = (y1 + y2) / 2 + py * offset
-        
+
         for i in range(num_points + 1):
             t = i / num_points
             # Quadratic Bezier
             bx = (1 - t) ** 2 * x1 + 2 * (1 - t) * t * cx + t ** 2 * x2
             by = (1 - t) ** 2 * y1 + 2 * (1 - t) * t * cy + t ** 2 * y2
             points.append((int(bx), int(by)))
-        
+
         return points
 
     def _record_latency(self, latency_ms: float):
@@ -437,18 +436,15 @@ class InputOptimizer:
 
 class _BatchContext:
     """Context manager for batch input execution."""
-    
+
     def __init__(self, optimizer: InputOptimizer):
         self._optimizer = optimizer
-    
+
     def __enter__(self):
         self._optimizer._batch_active = True
         self._optimizer._batch_commands = []
         return self
-    
+
     def __exit__(self, *args):
         self._optimizer._batch_active = False
         self._optimizer._flush_batch()
-
-
-import math  # Needed for bezier calculations

@@ -23,8 +23,6 @@ Uso:
 
 import logging
 import time
-from typing import Dict, List, Optional, Tuple
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +39,12 @@ class DetectEnsembleAdapter:
 
     def __init__(
         self,
-        model_configs: List[Tuple[str, str, float]],
+        model_configs: list[tuple[str, str, float]],
         iou_threshold: float = 0.5,
         min_votes: int = 2,
         device: str = "cpu",
-        classes: Optional[Dict[int, str]] = None,
-        ignore_classes: Optional[List[int]] = None,
+        classes: dict[int, str] | None = None,
+        ignore_classes: list[int] | None = None,
     ):
         """
         Args:
@@ -79,14 +77,14 @@ class DetectEnsembleAdapter:
         self._fallback_detector = None
 
         # Cache de último resultado para async
-        self._last_result: Optional[Dict[str, List[List[int]]]] = None
+        self._last_result: dict[str, list[list[int]]] | None = None
         self._last_time = 0.0
 
     @classmethod
     def from_detect(
         cls,
         detect_instance,
-        extra_models: List[Tuple[str, str, float]] = None,
+        extra_models: list[tuple[str, str, float]] = None,
         iou_threshold: float = 0.5,
         min_votes: int = 2,
     ) -> "DetectEnsembleAdapter":
@@ -114,7 +112,7 @@ class DetectEnsembleAdapter:
         )
         return adapter
 
-    def detect_objects(self, img) -> Dict[str, List[List[int]]]:
+    def detect_objects(self, img) -> dict[str, list[list[int]]]:
         """
         API compatível com Detect.detect_objects().
         Retorna {class_name: [[x1, y1, x2, y2], ...]}.
@@ -167,18 +165,19 @@ class DetectEnsembleAdapter:
         """
         self._last_result = self.detect_objects(img)
 
-    def get_async_result(self) -> Optional[Dict[str, List[List[int]]]]:
+    def get_async_result(self) -> dict[str, list[list[int]]] | None:
         """
         API compatível com Detect.get_async_result().
         """
         return self._last_result
 
-    def _fallback_detect(self, img) -> Dict[str, List[List[int]]]:
+    def _fallback_detect(self, img) -> dict[str, list[list[int]]]:
         """Fallback para detector simples se ensemble falhar."""
         logger.warning("[ENSEMBLE_ADAPTER] Usando fallback detection")
         if self._fallback_detector is None and self._fallback_model_path:
             try:
                 from ultralytics import YOLO
+
                 from pylaai_real.detect import Detect
                 model = YOLO(self._fallback_model_path)
                 self._fallback_detector = Detect(
@@ -195,7 +194,7 @@ class DetectEnsembleAdapter:
             return self._fallback_detector.detect_objects(img)
         return {}
 
-    def get_stats(self) -> Dict[str, any]:
+    def get_stats(self) -> dict[str, any]:
         """Retorna estatísticas do ensemble."""
         if self._ensemble:
             return {
@@ -204,7 +203,7 @@ class DetectEnsembleAdapter:
             }
         return {"error": "ensemble not initialized"}
 
-    def switch_to_single_mode(self, model_name: Optional[str] = None):
+    def switch_to_single_mode(self, model_name: str | None = None):
         """
         Muda para modo single-model (útil em degradação).
         """

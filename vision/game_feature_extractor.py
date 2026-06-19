@@ -11,8 +11,8 @@ These complement YOLO detections with deterministic pixel-level analysis.
 """
 
 import logging
+
 import numpy as np
-from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +44,10 @@ class GameFeatureExtractor:
     BUSH_COLOR_LOW = np.array([30, 100, 30])
     BUSH_COLOR_HIGH = np.array([80, 180, 70])
 
-    def __init__(self, resolution: Tuple[int, int] = (1920, 1080)):
+    def __init__(self, resolution: tuple[int, int] = (1920, 1080)):
         self.w, self.h = resolution
 
-    def _create_wall_mask(self, screenshot: np.ndarray) -> Tuple[np.ndarray, float]:
+    def _create_wall_mask(self, screenshot: np.ndarray) -> tuple[np.ndarray, float]:
         """
         Create combined wall mask from multiple color ranges.
         Returns (mask, confidence) where confidence is 0.0-1.0 based on
@@ -72,7 +72,7 @@ class GameFeatureExtractor:
 
         return combined_mask, confidence
 
-    def detect_walls(self, screenshot: np.ndarray) -> List[Dict]:
+    def detect_walls(self, screenshot: np.ndarray) -> list[dict]:
         """
         Detect walls/obstacles using color analysis + edge detection.
 
@@ -129,7 +129,7 @@ class GameFeatureExtractor:
             logger.debug(f"[WALLS] Detection error: {e}")
             return []
 
-    def extract_player_hp(self, screenshot: np.ndarray, player_bbox: Optional[List[int]] = None) -> float:
+    def extract_player_hp(self, screenshot: np.ndarray, player_bbox: list[int] | None = None) -> float:
         """
         Extract player HP from the health bar above the player character.
 
@@ -210,7 +210,7 @@ class GameFeatureExtractor:
             logger.debug(f"[HP] Extraction error: {e}")
             return 1.0
 
-    def detect_bushes(self, screenshot: np.ndarray) -> List[Dict]:
+    def detect_bushes(self, screenshot: np.ndarray) -> list[dict]:
         """Detect bushes using color analysis."""
         if not HAS_CV2 or screenshot is None or screenshot.size == 0:
             return []
@@ -247,7 +247,7 @@ class GameFeatureExtractor:
             logger.debug(f"[BUSHES] Detection error: {e}")
             return []
 
-    def extract_match_timer(self, screenshot: np.ndarray) -> Optional[float]:
+    def extract_match_timer(self, screenshot: np.ndarray) -> float | None:
         """Extract match timer from top of screen. Returns -1.0 if timer detected but value unknown."""
         if screenshot is None or screenshot.size == 0:
             return None
@@ -272,7 +272,7 @@ class GameFeatureExtractor:
             logger.debug(f"[TIMER] Extraction error: {e}")
             return None
 
-    def extract_features(self, screenshot: np.ndarray, player_bbox: Optional[List[int]] = None) -> Dict:
+    def extract_features(self, screenshot: np.ndarray, player_bbox: list[int] | None = None) -> dict:
         """Extract all game features from a screenshot."""
         return {
             "walls": self.detect_walls(screenshot),

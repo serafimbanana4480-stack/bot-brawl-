@@ -29,15 +29,15 @@ Usage (via factory):
 
 from __future__ import annotations
 
-import abc
 import logging
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
-from core.opentelemetry_tracing import span, record_error
+from core.opentelemetry_tracing import span
 from core.ports import (
     DecisionContext,
     DecisionPort,
@@ -78,7 +78,7 @@ class BotStatus:
     safety_ok: bool = True
     episode_count: int = 0
     last_error: str = ""
-    metrics: Dict[str, Any] = field(default_factory=dict)
+    metrics: dict[str, Any] = field(default_factory=dict)
 
 
 class BotOrchestrator:
@@ -102,7 +102,7 @@ class BotOrchestrator:
         safety: SafetyPort,
         telemetry: TelemetryPort,
         persistence: PersistencePort,
-        config: Optional[Dict[str, Any]] = None,
+        config: dict[str, Any] | None = None,
     ):
         self.vision = vision
         self.input_ = input_
@@ -118,7 +118,7 @@ class BotOrchestrator:
         self._paused = False
         self._shutdown_requested = False
         self._lock = threading.Lock()
-        self._worker_thread: Optional[threading.Thread] = None
+        self._worker_thread: threading.Thread | None = None
 
         # Metrics
         self._episode_count = 0
@@ -132,7 +132,7 @@ class BotOrchestrator:
         self._repetition_guard = RepetitionGuard()
 
         # Hooks
-        self._shutdown_hooks: List[Callable] = []
+        self._shutdown_hooks: list[Callable] = []
 
         logger.info("[ORCHESTRATOR] Created")
 
@@ -295,7 +295,7 @@ class BotOrchestrator:
         """Actual tick logic (wrapped by _tick for error handling)."""
         with span("orchestrator.tick", {"frame": self._frame_count}) as tick_span:
             # 1. PERCEIVE
-            with span("vision.capture") as vision_span:
+            with span("vision.capture"):
                 snapshot = self.vision.capture_and_perceive()
             if snapshot is None:
                 self.telemetry.record_metric(MetricEvent("vision_failure", 1.0))

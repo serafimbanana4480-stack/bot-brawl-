@@ -182,7 +182,7 @@ class V2IntegratorPlugin(IPlugin):
 
     def is_available(self) -> bool:
         try:
-            from core.v2_integration import V2Integrator, V2IntegrationConfig
+            from core.v2_integration import V2IntegrationConfig, V2Integrator
 
             self._integrator_cls = V2Integrator
             self._config_cls = V2IntegrationConfig

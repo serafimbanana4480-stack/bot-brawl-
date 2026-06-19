@@ -15,9 +15,8 @@ import logging
 import random
 import time
 from collections import Counter, deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
 
 __all__ = [
     "AntiBanSystem",
@@ -56,7 +55,7 @@ class PatternDetector:
         self.threshold = threshold
         self.actions: deque = deque(maxlen=window_size * 2)
 
-    def record_action(self, action_type: str, coordinates: Optional[tuple] = None):
+    def record_action(self, action_type: str, coordinates: tuple | None = None):
         """Registra uma ação para análise de padrão."""
         self.actions.append((action_type, coordinates, time.time()))
 
@@ -195,7 +194,7 @@ class FingerprintRandomizer:
         self.last_change = time.time()
         self.fingerprint = self._generate_fingerprint()
 
-    def _generate_fingerprint(self) -> Dict:
+    def _generate_fingerprint(self) -> dict:
         """Gera um fingerprint comportamental de 12 dimensões."""
         return {
             "delay_multiplier": random.uniform(0.8, 1.2),
@@ -212,7 +211,7 @@ class FingerprintRandomizer:
             "fatigue_recovery_rate": random.uniform(0.3, 0.7),
         }
 
-    def get_fingerprint(self) -> Dict:
+    def get_fingerprint(self) -> dict:
         """Retorna fingerprint atual, regenerando se necessário."""
         elapsed_hours = (time.time() - self.last_change) / 3600.0
         if elapsed_hours >= self.change_interval_hours:
@@ -225,7 +224,7 @@ class FingerprintRandomizer:
 class AntiBanSystem:
     """Sistema unificado anti-ban."""
 
-    def __init__(self, config: Optional[AntiBanConfig] = None):
+    def __init__(self, config: AntiBanConfig | None = None):
         self.config = config or AntiBanConfig()
         self.pattern_detector = PatternDetector(
             window_size=self.config.pattern_window_size,
@@ -245,18 +244,18 @@ class AntiBanSystem:
         self.fingerprint_randomizer = FingerprintRandomizer(
             change_interval_hours=self.config.session_fingerprint_change_interval_hours,
         )
-        self.last_match_time: Optional[float] = None
+        self.last_match_time: float | None = None
         self.matches_this_hour = 0
         self.hour_start = time.time()
-        
+
         # Session fatigue tracking
         self.session_start = time.time()
         self.session_actions = 0
         self._fatigue_level = 0.0
-        
+
         # Session schedule with realistic breaks
         self.session_schedule = SessionSchedule()
-        
+
         # Click heatmap for anti-fingerprinting
         self.click_heatmap = ClickHeatmap(grid_size=50)
 
@@ -273,7 +272,7 @@ class AntiBanSystem:
         """Retorna fator de fadiga para ajustar delays e precisão."""
         return self._update_fatigue()
 
-    def record_action(self, action_type: str, coordinates: Optional[tuple] = None):
+    def record_action(self, action_type: str, coordinates: tuple | None = None):
         if not self.config.enabled:
             return
         self.pattern_detector.record_action(action_type, coordinates)
@@ -336,21 +335,21 @@ class AntiBanSystem:
             return False
         return True
 
-    def get_fingerprint(self) -> Dict:
+    def get_fingerprint(self) -> dict:
         return self.fingerprint_randomizer.get_fingerprint()
 
-    def get_click_heatmap_stats(self) -> Dict:
+    def get_click_heatmap_stats(self) -> dict:
         """Get click heatmap statistics for anti-fingerprinting analysis."""
         return self.click_heatmap.get_stats()
 
     def get_jittered_coordinates(self, x: float, y: float) -> tuple:
         """Apply heatmap-aware jitter to coordinates to avoid click fingerprinting.
-        
+
         If too many clicks are in the same grid cell, adds extra jitter.
         """
         fp = self.get_fingerprint()
         base_jitter = 3  # Default jitter range
-        
+
         # Check if this grid cell has too many clicks
         cell_count = self.click_heatmap.get_cell_count(x, y)
         if cell_count > 10:
@@ -358,7 +357,7 @@ class AntiBanSystem:
             extra_jitter = min(cell_count - 10, 15)
             base_jitter += extra_jitter
             logger.debug(f"[ANTI-BAN] Extra jitter ({extra_jitter}px) for over-clicked area at ({x:.0f}, {y:.0f})")
-        
+
         # Apply fingerprint-based jitter direction bias
         quadrant = fp.get("preferred_quadrant", "top-left")
         bias_x, bias_y = 0, 0
@@ -370,12 +369,12 @@ class AntiBanSystem:
             bias_x = -1
         else:
             bias_x = 1
-        
+
         jx = x + random.randint(-base_jitter, base_jitter) + bias_x * random.randint(0, 2)
         jy = y + random.randint(-base_jitter, base_jitter) + bias_y * random.randint(0, 2)
         return (jx, jy)
 
-    def get_status(self) -> Dict:
+    def get_status(self) -> dict:
         """Retorna status atual do sistema anti-ban."""
         return {
             "enabled": self.config.enabled,
@@ -397,9 +396,9 @@ class SessionSchedule:
 
     def __init__(self):
         self.session_start = time.time()
-        self._break_until: Optional[float] = None
+        self._break_until: float | None = None
         self._total_play_time = 0.0
-        
+
         # Realistic break schedule (hours in day, duration in minutes)
         self._break_schedule = [
             {"name": "lunch", "around_hour": 12, "variance_min": 60, "duration_min": (30, 60)},
@@ -409,7 +408,7 @@ class SessionSchedule:
         # Pre-generate today's break times
         self._today_breaks = self._generate_break_times()
 
-    def _generate_break_times(self) -> List[Dict]:
+    def _generate_break_times(self) -> list[dict]:
         """Generate break times for today with randomization."""
         from datetime import datetime, timedelta
         now = datetime.now()
@@ -430,22 +429,22 @@ class SessionSchedule:
     def should_play_now(self) -> bool:
         """Check if currently in a break period."""
         now = time.time()
-        
+
         # Check explicit break
         if self._break_until and now < self._break_until:
             return False
-        
+
         # Check scheduled breaks
         for brk in self._today_breaks:
             if brk["start"] <= now <= brk["end"]:
                 logger.info(f"[ANTI-BAN] Scheduled break: {brk['name']}")
                 return False
-        
+
         # Regenerate breaks if day changed
         from datetime import datetime
         if datetime.now().hour < 6:  # New day
             self._today_breaks = self._generate_break_times()
-        
+
         return True
 
     def take_break(self, duration_seconds: float):
@@ -453,7 +452,7 @@ class SessionSchedule:
         self._break_until = time.time() + duration_seconds
         logger.info(f"[ANTI-BAN] Taking break for {duration_seconds:.0f}s")
 
-    def get_status(self) -> Dict:
+    def get_status(self) -> dict:
         now = time.time()
         current_break = None
         for brk in self._today_breaks:
@@ -473,7 +472,7 @@ class ClickHeatmap:
 
     def __init__(self, grid_size: int = 50):
         self.grid_size = grid_size
-        self._clicks: Dict[tuple, int] = {}  # (grid_x, grid_y) -> count
+        self._clicks: dict[tuple, int] = {}  # (grid_x, grid_y) -> count
         self._total_clicks = 0
 
     def record_click(self, x: float, y: float):
@@ -490,7 +489,7 @@ class ClickHeatmap:
         gy = int(y / self.grid_size)
         return self._clicks.get((gx, gy), 0)
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get heatmap statistics."""
         if not self._clicks:
             return {"total_clicks": 0, "unique_cells": 0, "max_cell_clicks": 0, "concentration": 0.0}

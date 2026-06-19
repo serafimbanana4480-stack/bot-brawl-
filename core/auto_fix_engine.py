@@ -13,16 +13,16 @@ Principais funcionalidades:
 - Performance metrics: regista tempos de resposta e taxas de sucesso
 """
 
-import time
 import logging
-from typing import Optional, Dict, Callable, Any
-from dataclasses import dataclass, field
-from pathlib import Path
+import time
 from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 
-from core.screenshot_analyzer import ScreenshotAnalyzer, ScreenshotAnalysis
+from core.screenshot_analyzer import ScreenshotAnalysis, ScreenshotAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +36,9 @@ class HealthSnapshot:
     detector_working: bool
     lobby_detected: bool
     in_game_detected: bool
-    action_taken: Optional[str] = None
+    action_taken: str | None = None
     recovery_level: int = 0  # 0=normal, 1=soft, 2=medium, 3=hard
-    details: Dict = field(default_factory=dict)
+    details: dict = field(default_factory=dict)
 
 
 class AutoFixEngine:
@@ -54,11 +54,11 @@ class AutoFixEngine:
 
     def __init__(
         self,
-        screenshot_func: Optional[Callable[[], Optional[np.ndarray]]] = None,
-        click_func: Optional[Callable[[int, int], None]] = None,
-        key_func: Optional[Callable[[str], None]] = None,
-        state_detector: Optional[Any] = None,
-        emulator_controller: Optional[Any] = None,
+        screenshot_func: Callable[[], np.ndarray | None] | None = None,
+        click_func: Callable[[int, int], None] | None = None,
+        key_func: Callable[[str], None] | None = None,
+        state_detector: Any | None = None,
+        emulator_controller: Any | None = None,
     ):
         self.screenshot_func = screenshot_func
         self.click_func = click_func
@@ -77,8 +77,8 @@ class AutoFixEngine:
         self.in_game_min_time = 5.0    # Min tempo em in_game (anti-oscilação)
 
         # Contadores de estado
-        self.state_durations: Dict[str, float] = {}
-        self.last_known_good_state: Optional[str] = None
+        self.state_durations: dict[str, float] = {}
+        self.last_known_good_state: str | None = None
         self.last_known_good_time: float = time.time()
 
         # Estatísticas
@@ -87,7 +87,7 @@ class AutoFixEngine:
         self.recoveries_applied = 0
         self.successful_recoveries = 0
 
-    def tick(self, current_state: str) -> Optional[str]:
+    def tick(self, current_state: str) -> str | None:
         """
         Executa um ciclo de diagnóstico.
 
@@ -198,7 +198,7 @@ class AutoFixEngine:
 
         return None
 
-    def _check_detector_working(self, screenshot: Optional[np.ndarray], current_state: str) -> bool:
+    def _check_detector_working(self, screenshot: np.ndarray | None, current_state: str) -> bool:
         """
         Verifica se o detector de estado está a produzir resultados plausíveis.
         """
@@ -219,7 +219,7 @@ class AutoFixEngine:
             logger.warning(f"[AUTOFIX] Erro ao verificar detector: {e}")
             return False
 
-    def _get_recovery_level(self, action: Optional[str]) -> int:
+    def _get_recovery_level(self, action: str | None) -> int:
         levels = {
             "screenshot_black": 2,
             "screenshot_frozen": 2,
@@ -241,7 +241,7 @@ class AutoFixEngine:
         transitions = sum(1 for i in range(1, len(states)) if states[i] != states[i-1])
         return transitions > 6
 
-    def _handle_black_screenshot(self) -> Optional[str]:
+    def _handle_black_screenshot(self) -> str | None:
         """Screenshot preto: tentar re-capturar ou reiniciar captura."""
         logger.warning("[AUTOFIX] Screenshot preto detectado. Tentando recovery...")
         # Esperar um pouco e tentar novamente
@@ -250,7 +250,7 @@ class AutoFixEngine:
             self.key_func("esc")
         return None  # Não forçar estado, apenas tentar novamente
 
-    def _handle_frozen_screenshot(self) -> Optional[str]:
+    def _handle_frozen_screenshot(self) -> str | None:
         """Screenshot congelado: o emulador pode estar travado."""
         logger.warning("[AUTOFIX] Screenshot congelado. Enviando pequeno input para desbloquear...")
         if self.click_func:
@@ -258,7 +258,7 @@ class AutoFixEngine:
             self.click_func(100, 100)
         return None
 
-    def _handle_lobby_timeout(self, screenshot: Optional[np.ndarray], analysis: Optional[ScreenshotAnalysis]) -> Optional[str]:
+    def _handle_lobby_timeout(self, screenshot: np.ndarray | None, analysis: ScreenshotAnalysis | None) -> str | None:
         """Preso no lobby: forçar clique no play com múltiplas estratégias."""
         logger.warning("[AUTOFIX] Timeout no lobby. Aplicando recovery inteligente...")
 
@@ -294,12 +294,12 @@ class AutoFixEngine:
         logger.info("[AUTOFIX] Lobby não detectado visualmente. Forçando reset...")
         return "unknown"
 
-    def _handle_loading_timeout(self) -> Optional[str]:
+    def _handle_loading_timeout(self) -> str | None:
         """Preso em loading: forçar in_game."""
         logger.warning("[AUTOFIX] Timeout em loading. Forçando in_game...")
         return "in_game"
 
-    def _handle_unknown_timeout(self, screenshot: Optional[np.ndarray]) -> Optional[str]:
+    def _handle_unknown_timeout(self, screenshot: np.ndarray | None) -> str | None:
         """Preso em unknown: tentar detetar visualmente ou resetar."""
         logger.warning("[AUTOFIX] Timeout em unknown. Aplicando recovery...")
 
@@ -318,7 +318,7 @@ class AutoFixEngine:
         time.sleep(0.5)
         return "lobby"
 
-    def _handle_detector_broken(self, screenshot: Optional[np.ndarray], analysis: Optional[ScreenshotAnalysis]) -> Optional[str]:
+    def _handle_detector_broken(self, screenshot: np.ndarray | None, analysis: ScreenshotAnalysis | None) -> str | None:
         """
         O detector de estado está a falhar (ex: RGB vs BGR).
         Aplicar correções conhecidas.
@@ -350,7 +350,7 @@ class AutoFixEngine:
 
         return "lobby"  # Fallback mais seguro
 
-    def _handle_detector_blind(self, screenshot: Optional[np.ndarray], analysis: Optional[ScreenshotAnalysis]) -> Optional[str]:
+    def _handle_detector_blind(self, screenshot: np.ndarray | None, analysis: ScreenshotAnalysis | None) -> str | None:
         """
         O detector retorna 'unknown' mas o screenshot parece valido.
         Tentar usar heuristicas avancadas para determinar o estado.
@@ -404,7 +404,7 @@ class AutoFixEngine:
 
         return "lobby"  # Fallback seguro
 
-    def _handle_oscillation(self, current_state: str) -> Optional[str]:
+    def _handle_oscillation(self, current_state: str) -> str | None:
         """Anti-oscilação: manter o estado mais provável."""
         logger.warning("[AUTOFIX] Anti-oscilação ativada. Mantendo estado estável.")
         # Manter o último estado conhecido bom
@@ -412,7 +412,7 @@ class AutoFixEngine:
             return self.last_known_good_state
         return current_state
 
-    def get_status(self) -> Dict:
+    def get_status(self) -> dict:
         """Retorna status atual do motor de auto-fix."""
         return {
             "total_cycles": self.total_cycles,

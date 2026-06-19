@@ -25,9 +25,8 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
-from core.orchestrator import BotOrchestrator
 from core.adapters import (
     DecisionAdapter,
     InputAdapter,
@@ -36,13 +35,14 @@ from core.adapters import (
     TelemetryAdapter,
     VisionAdapter,
 )
+from core.orchestrator import BotOrchestrator
 
 logger = logging.getLogger(__name__)
 
 
 def create_orchestrator(
-    install_path: Optional[Path] = None,
-    config: Optional[Dict[str, Any]] = None,
+    install_path: Path | None = None,
+    config: dict[str, Any] | None = None,
     safety_config=None,
     humanization_config=None,
 ) -> BotOrchestrator:
@@ -90,11 +90,11 @@ def create_orchestrator(
     adv_human_cfg = config.get("adversarial_humanization", {})
     if adv_human_cfg.get("enabled", False):
         try:
+            from core.adapters.adversarial_input_adapter import AdversarialInputAdapter
             from core.adversarial_humanization import (
                 AdversarialHumanizationConfig,
                 AdversarialHumanizer,
             )
-            from core.adapters.adversarial_input_adapter import AdversarialInputAdapter
 
             ahc = AdversarialHumanizationConfig(
                 enabled=True,
@@ -137,8 +137,8 @@ def create_orchestrator(
     vlm_cfg = config.get("vlm_fallback", {})
     if vlm_cfg.get("enabled", False):
         try:
-            from core.vlm_fallback import VLMFallback, VLMConfig
             from core.adapters.vlm_vision_adapter import VLMVisionAdapter
+            from core.vlm_fallback import VLMConfig, VLMFallback
 
             vlm_config = VLMConfig(
                 enabled=True,
@@ -181,8 +181,8 @@ def create_orchestrator(
     otel_cfg = config.get("opentelemetry", {})
     if otel_cfg.get("enabled", False):
         try:
-            from core.opentelemetry_tracing import initialize_tracing
             from core.opentelemetry_metrics import OTelMetrics
+            from core.opentelemetry_tracing import initialize_tracing
 
             tracing_ok = initialize_tracing(
                 service_name=otel_cfg.get("service_name", "soberana-omega-bot"),
@@ -234,10 +234,10 @@ def create_orchestrator(
 # Internal helpers
 # ------------------------------------------------------------------
 
-def _try_create_emulator_controller(config: Dict[str, Any]) -> Optional[Any]:
+def _try_create_emulator_controller(config: dict[str, Any]) -> Any | None:
     """Attempt to create and connect EmulatorController."""
     try:
-        from emulator_controller import EmulatorController, EmulatorConfig
+        from emulator_controller import EmulatorConfig, EmulatorController
         from emulator_detector import get_emulator_detector
 
         emu_cfg = config.get("emulator", {})
@@ -267,7 +267,7 @@ def _try_create_emulator_controller(config: Dict[str, Any]) -> Optional[Any]:
     return None
 
 
-def _try_create_screenshot_taker(config: Dict[str, Any], emulator_controller) -> Optional[Any]:
+def _try_create_screenshot_taker(config: dict[str, Any], emulator_controller) -> Any | None:
     """Attempt to create ScreenshotTaker."""
     try:
         from pylaai_real.screenshot_taker import ScreenshotTaker
@@ -290,7 +290,7 @@ def _try_create_screenshot_taker(config: Dict[str, Any], emulator_controller) ->
     return None
 
 
-def _try_create_detector(models_path: Path) -> Optional[Any]:
+def _try_create_detector(models_path: Path) -> Any | None:
     """Attempt to load YOLO detector."""
     try:
         from pylaai_real.detect import Detect
@@ -305,6 +305,6 @@ def _try_create_detector(models_path: Path) -> Optional[Any]:
             return det
         else:
             logger.warning("[FACTORY] No YOLO model found")
-    except (ImportError, ModuleNotFoundError, FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, OSError, IOError) as e:
+    except (ImportError, ModuleNotFoundError, FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, OSError) as e:
         logger.warning(f"[FACTORY] Detector unavailable: {e}")
     return None

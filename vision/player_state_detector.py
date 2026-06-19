@@ -28,7 +28,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -105,7 +105,7 @@ class PlayerState:
     frame_id: int = 0
     confidence: float = 0.0  # confiança global do estado
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "life": self.life.name,
             "super": self.super_state.name,
@@ -180,7 +180,7 @@ class PlayerStateDetector:
 
     def __init__(
         self,
-        weights: Optional[Dict[str, float]] = None,
+        weights: dict[str, float] | None = None,
         danger_distance: int = 250,
         critical_distance: int = 120,
         smoothing_frames: int = 3,
@@ -193,12 +193,12 @@ class PlayerStateDetector:
         self.enable_ocr = enable_ocr
 
         # Estado anterior (para suavização e eventos)
-        self._prev_state: Optional[PlayerState] = None
-        self._state_history: List[PlayerState] = []
-        self._transition_callbacks: List[Any] = []
+        self._prev_state: PlayerState | None = None
+        self._state_history: list[PlayerState] = []
+        self._transition_callbacks: list[Any] = []
 
         # Lazy imports — preenchidos na primeira chamada
-        self._ocr_extractor: Optional[Any] = None
+        self._ocr_extractor: Any | None = None
         self._has_ocr = False
 
         logger.info(
@@ -229,15 +229,15 @@ class PlayerStateDetector:
     # Fonte: YOLO detections
     # ------------------------------------------------------------------
     def _source_yolo(
-        self, detections: List[Dict], player_class_id: int = 0
-    ) -> Tuple[Dict[str, Any], float]:
+        self, detections: list[dict], player_class_id: int = 0
+    ) -> tuple[dict[str, Any], float]:
         """
         Analisa detecções YOLO e infere estado.
 
         Returns:
             (state_dict, confidence)
         """
-        state: Dict[str, Any] = {
+        state: dict[str, Any] = {
             "life": LifeState.UNKNOWN,
             "enemy_count_nearby": 0,
             "enemy_distance_closest": float("inf"),
@@ -278,9 +278,9 @@ class PlayerStateDetector:
     # ------------------------------------------------------------------
     # Fonte: OCR (HUD)
     # ------------------------------------------------------------------
-    def _source_ocr(self, screenshot: np.ndarray) -> Tuple[Dict[str, Any], float]:
+    def _source_ocr(self, screenshot: np.ndarray) -> tuple[dict[str, Any], float]:
         """Extrai estado via OCR do HUD."""
-        state: Dict[str, Any] = {
+        state: dict[str, Any] = {
             "hp": -1.0,
             "ammo": -1,
             "super_charge": -1.0,
@@ -326,10 +326,10 @@ class PlayerStateDetector:
     # Fonte: Pixel heurísticas
     # ------------------------------------------------------------------
     def _source_pixel(
-        self, screenshot: np.ndarray, detections: List[Dict]
-    ) -> Tuple[Dict[str, Any], float]:
+        self, screenshot: np.ndarray, detections: list[dict]
+    ) -> tuple[dict[str, Any], float]:
         """Heurísticas de pixel para estado."""
-        state: Dict[str, Any] = {"visibility": VisibilityState.UNKNOWN}
+        state: dict[str, Any] = {"visibility": VisibilityState.UNKNOWN}
 
         if screenshot is None or screenshot.size == 0:
             return state, 0.0
@@ -367,11 +367,11 @@ class PlayerStateDetector:
     # ------------------------------------------------------------------
     def _fuse(
         self,
-        yolo_state: Dict[str, Any],
+        yolo_state: dict[str, Any],
         yolo_conf: float,
-        ocr_state: Dict[str, Any],
+        ocr_state: dict[str, Any],
         ocr_conf: float,
-        pixel_state: Dict[str, Any],
+        pixel_state: dict[str, Any],
         pixel_conf: float,
     ) -> PlayerState:
         """Fusa os estados das 3 fontes num PlayerState final."""
@@ -389,7 +389,7 @@ class PlayerStateDetector:
         w_sum = w_y + w_o + w_p
 
         # --- Life state ---
-        life_votes: Dict[LifeState, float] = {}
+        life_votes: dict[LifeState, float] = {}
         if "life" in yolo_state:
             life_votes[yolo_state["life"]] = life_votes.get(yolo_state["life"], 0) + w_y
         # OCR não vota em life (a não ser via HP = 0)
@@ -414,7 +414,7 @@ class PlayerStateDetector:
             state.ammo = ocr_state["ammo"]
 
         # --- Super ---
-        super_votes: Dict[SuperState, float] = {}
+        super_votes: dict[SuperState, float] = {}
         if "super_state" in ocr_state and ocr_state["super_state"] != SuperState.UNKNOWN:
             super_votes[ocr_state["super_state"]] = super_votes.get(ocr_state["super_state"], 0) + w_o
         if "super_charge" in ocr_state and ocr_state["super_charge"] >= 0:
@@ -432,7 +432,7 @@ class PlayerStateDetector:
         state.super_charge = ocr_state.get("super_charge", -1.0)
 
         # --- Visibility ---
-        vis_votes: Dict[VisibilityState, float] = {}
+        vis_votes: dict[VisibilityState, float] = {}
         if "visibility" in pixel_state:
             vis_votes[pixel_state["visibility"]] = vis_votes.get(pixel_state["visibility"], 0) + w_p
         if vis_votes:
@@ -519,8 +519,8 @@ class PlayerStateDetector:
     # Transições
     # ------------------------------------------------------------------
     def _detect_transitions(
-        self, prev: Optional[PlayerState], curr: PlayerState
-    ) -> List[StateTransition]:
+        self, prev: PlayerState | None, curr: PlayerState
+    ) -> list[StateTransition]:
         """Compara estado anterior com atual e retorna transições."""
         if prev is None:
             return []
@@ -551,7 +551,7 @@ class PlayerStateDetector:
         """Regista callback para ser chamado quando há transições."""
         self._transition_callbacks.append(callback)
 
-    def _emit_transitions(self, transitions: List[StateTransition]) -> None:
+    def _emit_transitions(self, transitions: list[StateTransition]) -> None:
         for cb in self._transition_callbacks:
             try:
                 cb(transitions)
@@ -564,10 +564,10 @@ class PlayerStateDetector:
     def detect(
         self,
         screenshot: np.ndarray,
-        detections: List[Dict],
+        detections: list[dict],
         frame_id: int = 0,
         return_transitions: bool = False,
-    ) -> Tuple[PlayerState, Optional[List[StateTransition]]]:
+    ) -> tuple[PlayerState, list[StateTransition] | None]:
         """
         Detecta estado do jogador a partir de screenshot + detecções YOLO.
 

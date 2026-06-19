@@ -21,11 +21,11 @@ conflict resolver that sits above the individual subsystems.
 """
 
 import logging
-import time
 import threading
-from typing import Dict, List, Optional, Tuple, Any
+import time
 from dataclasses import dataclass
 from enum import Enum, auto
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ class Recommendation:
     priority: Priority              # How important
     confidence: float               # 0-1, how confident the subsystem is
     reason: str = ""                # Why this recommendation
-    context: Dict = None            # Additional context
+    context: dict = None            # Additional context
 
     def __post_init__(self):
         if self.context is None:
@@ -69,7 +69,7 @@ class CoordinatedDecision:
     decision_type: DecisionType
     action: Any
     source: str                     # Which recommendation won
-    overridden: List[str]           # Which sources were overridden
+    overridden: list[str]           # Which sources were overridden
     reason: str = ""
     timestamp: float = 0.0
 
@@ -98,13 +98,13 @@ class CentralCoordinator:
     OVERRIDE_CONFIDENCE_MARGIN = 0.3
 
     def __init__(self):
-        self._recommendations: List[Recommendation] = []
-        self._last_decisions: Dict[DecisionType, CoordinatedDecision] = {}
-        self._decision_history: List[CoordinatedDecision] = []
+        self._recommendations: list[Recommendation] = []
+        self._last_decisions: dict[DecisionType, CoordinatedDecision] = {}
+        self._decision_history: list[CoordinatedDecision] = []
         self._lock = threading.RLock()
 
         # Current intent (set externally by IntentSystem)
-        self._current_intent: Optional[str] = None
+        self._current_intent: str | None = None
 
         logger.info("[COORDINATOR] Initialized")
 
@@ -121,12 +121,12 @@ class CentralCoordinator:
         with self._lock:
             self._recommendations.append(rec)
 
-    def submit_batch(self, recommendations: List[Recommendation]):
+    def submit_batch(self, recommendations: list[Recommendation]):
         """Submit multiple recommendations at once."""
         with self._lock:
             self._recommendations.extend(recommendations)
 
-    def resolve(self) -> Dict[DecisionType, CoordinatedDecision]:
+    def resolve(self) -> dict[DecisionType, CoordinatedDecision]:
         """
         Resolve all submitted recommendations into final decisions.
 
@@ -140,7 +140,7 @@ class CentralCoordinator:
             decisions = {}
 
             # Group recommendations by decision type
-            by_type: Dict[DecisionType, List[Recommendation]] = {}
+            by_type: dict[DecisionType, list[Recommendation]] = {}
             for rec in self._recommendations:
                 dt = rec.decision_type
                 if dt not in by_type:
@@ -165,12 +165,12 @@ class CentralCoordinator:
 
             return decisions
 
-    def get_last_decision(self, decision_type: DecisionType) -> Optional[CoordinatedDecision]:
+    def get_last_decision(self, decision_type: DecisionType) -> CoordinatedDecision | None:
         """Get the last decision for a given type."""
         with self._lock:
             return self._last_decisions.get(decision_type)
 
-    def get_decision_history(self, limit: int = 20) -> List[Dict]:
+    def get_decision_history(self, limit: int = 20) -> list[dict]:
         """Get recent decision history."""
         with self._lock:
             return [
@@ -184,7 +184,7 @@ class CentralCoordinator:
                 for d in self._decision_history[-limit:]
             ]
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get coordinator statistics."""
         with self._lock:
             override_counts = {}
@@ -201,7 +201,7 @@ class CentralCoordinator:
     # --- Internal ---
 
     def _resolve_decision_type(self, dt: DecisionType,
-                                recs: List[Recommendation]) -> CoordinatedDecision:
+                                recs: list[Recommendation]) -> CoordinatedDecision:
         """Resolve recommendations for a single decision type."""
         if not recs:
             return CoordinatedDecision(
@@ -236,8 +236,8 @@ class CentralCoordinator:
 
         # No critical — use weighted voting
         # Group by action value
-        action_scores: Dict[Any, float] = {}
-        action_sources: Dict[Any, List[str]] = {}
+        action_scores: dict[Any, float] = {}
+        action_sources: dict[Any, list[str]] = {}
 
         for rec in recs_sorted:
             action_key = str(rec.action)  # Normalize for grouping

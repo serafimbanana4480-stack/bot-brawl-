@@ -7,8 +7,7 @@ Adapter: ObservabilityCollector -> TelemetryPort
 from __future__ import annotations
 
 import logging
-import time
-from typing import Any, Dict
+from typing import Any
 
 from core.ports.telemetry_port import MetricEvent, TelemetryPort
 
@@ -60,7 +59,7 @@ class TelemetryAdapter(TelemetryPort):
             except (ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass
 
-    def record_event(self, event_name: str, details: Dict[str, Any]) -> None:
+    def record_event(self, event_name: str, details: dict[str, Any]) -> None:
         if self._obs is not None and hasattr(self._obs, "record_event"):
             try:
                 self._obs.record_event(event_name, details)
@@ -74,7 +73,7 @@ class TelemetryAdapter(TelemetryPort):
             except (ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 pass
 
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         return {
             "observability_available": self._obs is not None,
             "otel_metrics_available": self._otel is not None and getattr(self._otel, "enabled", False),

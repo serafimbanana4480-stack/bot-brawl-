@@ -27,12 +27,12 @@ Example:
 
 from __future__ import annotations
 
-from .vision_port import VisionPort, GameStateSnapshot, DetectedObject, HUDState
-from .input_port import InputPort, InputAction
-from .decision_port import DecisionPort, Decision, DecisionContext
-from .safety_port import SafetyPort, SafetyStatus
-from .telemetry_port import TelemetryPort, MetricEvent
+from .decision_port import Decision, DecisionContext, DecisionPort
+from .input_port import InputAction, InputPort
 from .persistence_port import PersistencePort
+from .safety_port import SafetyPort, SafetyStatus
+from .telemetry_port import MetricEvent, TelemetryPort
+from .vision_port import DetectedObject, GameStateSnapshot, HUDState, VisionPort
 
 __all__ = [
     # Vision

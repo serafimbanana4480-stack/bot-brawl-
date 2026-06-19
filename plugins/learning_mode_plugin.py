@@ -22,5 +22,6 @@ class LearningModePlugin(IPlugin):
         return LearningModeController
 
 
-from core.plugin_system import PluginRegistry
+from core.plugin_system import PluginRegistry  # noqa: E402
+
 PluginRegistry(LearningModePlugin)

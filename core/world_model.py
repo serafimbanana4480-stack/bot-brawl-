@@ -15,13 +15,11 @@ Features:
 - Pressure zones: areas under enemy influence
 """
 
-import time
-import math
 import logging
+import math
 import threading
-from typing import Dict, List, Optional, Tuple, Set
-from dataclasses import dataclass, field
-from collections import defaultdict
+import time
+from dataclasses import dataclass
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -38,16 +36,16 @@ class ZoneType(Enum):
 class EnemyMemory:
     """Persistent memory of a single enemy."""
     track_id: int
-    last_known_position: Tuple[float, float]
+    last_known_position: tuple[float, float]
     last_seen_time: float
-    estimated_velocity: Tuple[float, float] = (0.0, 0.0)
+    estimated_velocity: tuple[float, float] = (0.0, 0.0)
     health_estimate: float = 1.0
     brawler_name: str = "unknown"
     times_seen: int = 1
     last_damage_dealt_to_us: float = 0.0
     last_damage_time: float = 0.0
     suspected_in_bush: bool = False
-    bush_position: Optional[Tuple[float, float]] = None
+    bush_position: tuple[float, float] | None = None
 
     @property
     def is_active(self) -> bool:
@@ -67,7 +65,7 @@ class EnemyMemory:
             return 0.0
         return max(0.0, 1.0 - elapsed / 5.0)
 
-    def predict_position(self, current_time: Optional[float] = None) -> Tuple[float, float]:
+    def predict_position(self, current_time: float | None = None) -> tuple[float, float]:
         """Predict current position based on last known position + velocity."""
         now = current_time or time.time()
         dt = now - self.last_seen_time
@@ -81,11 +79,11 @@ class EnemyMemory:
 @dataclass
 class DangerZone:
     """An area where the bot recently took damage."""
-    position: Tuple[float, float]
+    position: tuple[float, float]
     radius: float
     damage_amount: float
     timestamp: float
-    source_enemy_id: Optional[int] = None
+    source_enemy_id: int | None = None
 
     @property
     def is_active(self) -> bool:
@@ -103,7 +101,7 @@ class DangerZone:
 @dataclass
 class PowerCubeMemory:
     """Memory of a power cube location."""
-    position: Tuple[float, float]
+    position: tuple[float, float]
     last_seen_time: float
     collected: bool = False
     confidence: float = 1.0
@@ -150,32 +148,32 @@ class WorldModel:
         self.grid_rows = max(1, map_height // self.CELL_SIZE)
 
         # Enemy memory: track_id → EnemyMemory
-        self.enemies: Dict[int, EnemyMemory] = {}
+        self.enemies: dict[int, EnemyMemory] = {}
 
         # Danger zones: list of recent damage events
-        self.danger_zones: List[DangerZone] = []
+        self.danger_zones: list[DangerZone] = []
 
         # Power cube memory
-        self.power_cubes: Dict[str, PowerCubeMemory] = {}
+        self.power_cubes: dict[str, PowerCubeMemory] = {}
 
         # Map control grid
-        self.map_grid: Dict[Tuple[int, int], MapZone] = {}
+        self.map_grid: dict[tuple[int, int], MapZone] = {}
 
         # Safe routes: validated retreat paths
-        self.safe_routes: List[List[Tuple[float, float]]] = []
+        self.safe_routes: list[list[tuple[float, float]]] = []
 
         # Bush memory: positions of detected bushes
-        self.known_bushes: List[Tuple[float, float, float, float]] = []  # (x, y, w, h)
+        self.known_bushes: list[tuple[float, float, float, float]] = []  # (x, y, w, h)
 
         # Player state tracking
-        self.player_position: Optional[Tuple[float, float]] = None
+        self.player_position: tuple[float, float] | None = None
         self.player_health: float = 1.0
         self.player_brawler: str = "unknown"
         self.player_ammo: int = 3
         self.player_super_charged: bool = False
 
         # Match phase tracking
-        self.match_start_time: Optional[float] = None
+        self.match_start_time: float | None = None
         self.match_phase: str = "early"  # early, mid, late
 
         # Stats
@@ -187,8 +185,8 @@ class WorldModel:
         logger.info("[WORLD_MODEL] Initialized %dx%d grid (%dx%d cells)",
                      map_width, map_height, self.grid_cols, self.grid_rows)
 
-    def update_enemy(self, track_id: int, position: Tuple[float, float],
-                     velocity: Tuple[float, float] = (0.0, 0.0),
+    def update_enemy(self, track_id: int, position: tuple[float, float],
+                     velocity: tuple[float, float] = (0.0, 0.0),
                      health: float = 1.0, brawler_name: str = "unknown"):
         """Update or create enemy memory entry."""
         with self._lock:
@@ -231,15 +229,15 @@ class WorldModel:
                     enemy_presence_count=1,
                 )
 
-    def mark_enemy_in_bush(self, track_id: int, bush_position: Tuple[float, float]):
+    def mark_enemy_in_bush(self, track_id: int, bush_position: tuple[float, float]):
         """Mark enemy as suspected in a bush (disappeared near bush)."""
         with self._lock:
             if track_id in self.enemies:
                 self.enemies[track_id].suspected_in_bush = True
                 self.enemies[track_id].bush_position = bush_position
 
-    def record_damage_taken(self, position: Tuple[float, float],
-                            damage: float, source_enemy_id: Optional[int] = None):
+    def record_damage_taken(self, position: tuple[float, float],
+                            damage: float, source_enemy_id: int | None = None):
         """Record that the bot took damage at a position — creates danger zone."""
         with self._lock:
             self.danger_zones.append(DangerZone(
@@ -263,7 +261,7 @@ class WorldModel:
         with self._lock:
             self.total_damage_dealt += damage
 
-    def update_power_cube(self, cube_id: str, position: Tuple[float, float],
+    def update_power_cube(self, cube_id: str, position: tuple[float, float],
                           collected: bool = False):
         """Update power cube memory."""
         with self._lock:
@@ -278,7 +276,7 @@ class WorldModel:
                     collected=collected,
                 )
 
-    def update_player(self, position: Tuple[float, float], health: float = 1.0,
+    def update_player(self, position: tuple[float, float], health: float = 1.0,
                       brawler: str = "unknown", ammo: int = 3,
                       super_charged: bool = False):
         """Update player state."""
@@ -289,7 +287,7 @@ class WorldModel:
             self.player_ammo = ammo
             self.player_super_charged = super_charged
 
-    def update_bushes(self, bushes: List[Tuple[float, float, float, float]]):
+    def update_bushes(self, bushes: list[tuple[float, float, float, float]]):
         """Update known bush positions from detection."""
         with self._lock:
             self.known_bushes = bushes
@@ -326,7 +324,7 @@ class WorldModel:
             else:
                 self.match_phase = "late"
 
-    def get_active_enemies(self) -> List[EnemyMemory]:
+    def get_active_enemies(self) -> list[EnemyMemory]:
         """Get all enemies with active memory (seen within TTL)."""
         with self._lock:
             now = time.time()
@@ -335,8 +333,8 @@ class WorldModel:
                 if (now - e.last_seen_time) < self.ENEMY_MEMORY_TTL
             ]
 
-    def get_nearby_enemies(self, position: Tuple[float, float],
-                           max_distance: float = 400.0) -> List[EnemyMemory]:
+    def get_nearby_enemies(self, position: tuple[float, float],
+                           max_distance: float = 400.0) -> list[EnemyMemory]:
         """Get enemies near a position, including predicted positions for unseen enemies."""
         with self._lock:
             result = []
@@ -350,7 +348,7 @@ class WorldModel:
                     result.append(enemy)
             return result
 
-    def get_danger_at(self, position: Tuple[float, float]) -> float:
+    def get_danger_at(self, position: tuple[float, float]) -> float:
         """Calculate cumulative danger level at a position from all active danger zones."""
         with self._lock:
             danger = 0.0
@@ -364,7 +362,7 @@ class WorldModel:
                     danger += dz.threat_level * falloff
             return danger
 
-    def get_pressure_at(self, position: Tuple[float, float]) -> float:
+    def get_pressure_at(self, position: tuple[float, float]) -> float:
         """Calculate enemy pressure at a position (influence field from all enemies)."""
         with self._lock:
             pressure = 0.0
@@ -381,8 +379,8 @@ class WorldModel:
                 pressure += influence
             return pressure
 
-    def get_safest_direction(self, current_pos: Tuple[float, float],
-                             num_directions: int = 16) -> Tuple[float, float]:
+    def get_safest_direction(self, current_pos: tuple[float, float],
+                             num_directions: int = 16) -> tuple[float, float]:
         """Find the direction with lowest pressure from current position.
 
         Returns a unit vector pointing toward the safest direction.
@@ -411,7 +409,7 @@ class WorldModel:
 
         return (math.cos(best_angle), math.sin(best_angle))
 
-    def get_nearest_power_cube(self, position: Tuple[float, float]) -> Optional[PowerCubeMemory]:
+    def get_nearest_power_cube(self, position: tuple[float, float]) -> PowerCubeMemory | None:
         """Find the nearest available power cube."""
         with self._lock:
             best = None
@@ -425,8 +423,8 @@ class WorldModel:
                     best = cube
             return best
 
-    def get_nearest_bush(self, position: Tuple[float, float],
-                         away_from: Optional[Tuple[float, float]] = None) -> Optional[Tuple[float, float]]:
+    def get_nearest_bush(self, position: tuple[float, float],
+                         away_from: tuple[float, float] | None = None) -> tuple[float, float] | None:
         """Find the nearest bush, optionally preferring direction away from a threat."""
         with self._lock:
             best = None
@@ -474,7 +472,7 @@ class WorldModel:
 
             return False
 
-    def get_match_phase_recommendation(self) -> Dict:
+    def get_match_phase_recommendation(self) -> dict:
         """Get strategic recommendations based on current match phase."""
         with self._lock:
             self.update_match_phase()
@@ -532,7 +530,7 @@ class WorldModel:
                 del self.power_cubes[cid]
 
             # Decay map grid
-            for key, zone in list(self.map_grid.items()):
+            for _key, zone in list(self.map_grid.items()):
                 if (now - zone.last_updated) > 15.0:
                     # Revert dangerous zones to contested, contested to safe
                     if zone.zone_type == ZoneType.DEADLY:
@@ -543,7 +541,7 @@ class WorldModel:
                         zone.zone_type = ZoneType.SAFE
                     zone.last_updated = now
 
-    def get_summary(self) -> Dict:
+    def get_summary(self) -> dict:
         """Get a summary of the world model state for debugging."""
         with self._lock:
             return {
@@ -560,23 +558,23 @@ class WorldModel:
 
     # --- Internal helpers ---
 
-    def _pos_to_grid(self, position: Tuple[float, float]) -> Tuple[int, int]:
+    def _pos_to_grid(self, position: tuple[float, float]) -> tuple[int, int]:
         gx = int(position[0] // self.CELL_SIZE)
         gy = int(position[1] // self.CELL_SIZE)
         return (max(0, min(self.grid_cols - 1, gx)),
                 max(0, min(self.grid_rows - 1, gy)))
 
     @staticmethod
-    def _distance(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
+    def _distance(p1: tuple[float, float], p2: tuple[float, float]) -> float:
         return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
 
     @staticmethod
-    def _normalize(v: Tuple[float, float]) -> Tuple[float, float]:
+    def _normalize(v: tuple[float, float]) -> tuple[float, float]:
         length = math.sqrt(v[0] ** 2 + v[1] ** 2)
         if length < 0.001:
             return (0.0, 0.0)
         return (v[0] / length, v[1] / length)
 
     @staticmethod
-    def _dot_product(v1: Tuple[float, float], v2: Tuple[float, float]) -> float:
+    def _dot_product(v1: tuple[float, float], v2: tuple[float, float]) -> float:
         return v1[0] * v2[0] + v1[1] * v2[1]

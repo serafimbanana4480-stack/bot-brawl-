@@ -43,8 +43,8 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -74,14 +74,14 @@ class ResolutionProfile:
     timestamp: float = field(default_factory=time.time)
     source: str = "unknown"  # "win32", "adb", "config", "fallback"
     change_detected: bool = False
-    previous_actual: Optional[Tuple[int, int]] = None
+    previous_actual: tuple[int, int] | None = None
 
     @property
-    def actual_resolution(self) -> Tuple[int, int]:
+    def actual_resolution(self) -> tuple[int, int]:
         return (self.actual_width, self.actual_height)
 
     @property
-    def canonical_resolution(self) -> Tuple[int, int]:
+    def canonical_resolution(self) -> tuple[int, int]:
         return (self.canonical_width, self.canonical_height)
 
     @property
@@ -122,10 +122,10 @@ class ResolutionManager:
     def __init__(
         self,
         window_title: str = "auto",
-        canonical_resolution: Tuple[int, int] = (CANONICAL_W, CANONICAL_H),
+        canonical_resolution: tuple[int, int] = (CANONICAL_W, CANONICAL_H),
         enable_change_detection: bool = True,
         change_check_interval_sec: float = 5.0,
-        on_resolution_change: Optional[Callable[[ResolutionProfile], None]] = None,
+        on_resolution_change: Callable[[ResolutionProfile], None] | None = None,
     ):
         self.window_title = window_title
         self.canonical_resolution = canonical_resolution
@@ -133,12 +133,12 @@ class ResolutionManager:
         self.change_check_interval_sec = change_check_interval_sec
         self.on_resolution_change = on_resolution_change
 
-        self._profile: Optional[ResolutionProfile] = None
+        self._profile: ResolutionProfile | None = None
         self._last_check_time: float = 0.0
-        self._window_handle: Optional[int] = None
+        self._window_handle: int | None = None
 
         # Cache de janelas já encontradas para performance
-        self._window_cache: Dict[str, int] = {}
+        self._window_cache: dict[str, int] = {}
 
     # ------------------------------------------------------------------
     # Propriedades de conveniência
@@ -155,7 +155,7 @@ class ResolutionManager:
         return self._profile
 
     @property
-    def actual_resolution(self) -> Tuple[int, int]:
+    def actual_resolution(self) -> tuple[int, int]:
         return self.profile.actual_resolution
 
     @property
@@ -207,7 +207,7 @@ class ResolutionManager:
         self._set_profile(self._fallback_profile())
         return self._profile  # type: ignore[return-value]
 
-    def _detect_win32(self) -> Optional[ResolutionProfile]:
+    def _detect_win32(self) -> ResolutionProfile | None:
         """Deteta resolução via Win32 API."""
         try:
             import win32gui
@@ -246,7 +246,7 @@ class ResolutionManager:
             logger.debug(f"[RES] Win32 detection failed: {e}")
             return None
 
-    def _detect_adb(self) -> Optional[ResolutionProfile]:
+    def _detect_adb(self) -> ResolutionProfile | None:
         """Deteta resolução via ADB wm size."""
         try:
             import subprocess
@@ -316,7 +316,7 @@ class ResolutionManager:
     # ------------------------------------------------------------------
     # Helpers Win32
     # ------------------------------------------------------------------
-    def _find_window_handle(self) -> Optional[int]:
+    def _find_window_handle(self) -> int | None:
         """Encontra handle da janela do emulador."""
         try:
             import win32gui
@@ -353,7 +353,7 @@ class ResolutionManager:
                             result.append((hwnd, t, (r[2] - r[0]) * (r[3] - r[1])))
             return True
 
-        matches: List = []
+        matches: list = []
         win32gui.EnumWindows(_enum_cb, matches)
         if matches:
             matches.sort(key=lambda x: x[2], reverse=True)
@@ -362,7 +362,7 @@ class ResolutionManager:
 
         return None
 
-    def _find_render_child(self, parent_hwnd: int) -> Optional[int]:
+    def _find_render_child(self, parent_hwnd: int) -> int | None:
         """Procura janela filha que parece ser a área de renderização."""
         try:
             import win32gui
@@ -390,7 +390,7 @@ class ResolutionManager:
     # ------------------------------------------------------------------
     def to_canonical(
         self, x: int, y: int
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         """Converte coordenadas reais (actual) para canónicas (1920x1080)."""
         p = self.profile
         cx = round(x * p.canonical_width / max(p.actual_width, 1))
@@ -399,7 +399,7 @@ class ResolutionManager:
 
     def from_canonical(
         self, x: int, y: int
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         """Converte coordenadas canónicas (1920x1080) para reais (actual)."""
         p = self.profile
         ax = round(x * p.actual_width / max(p.canonical_width, 1))
@@ -408,7 +408,7 @@ class ResolutionManager:
 
     def scale_relative_to_actual(
         self, rx: float, ry: float
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         """
         Converte coordenadas relativas (0.0–1.0) para pixels reais.
         Usado pelos módulos que já trabalham com coordenadas normalizadas.
@@ -420,7 +420,7 @@ class ResolutionManager:
 
     def scale_relative_to_canonical(
         self, rx: float, ry: float
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         """
         Converte coordenadas relativas (0.0–1.0) para pixels canónicos.
         """
@@ -429,8 +429,8 @@ class ResolutionManager:
         return (cx, cy)
 
     def scale_roi_to_actual(
-        self, roi: Tuple[float, float, float, float]
-    ) -> Tuple[int, int, int, int]:
+        self, roi: tuple[float, float, float, float]
+    ) -> tuple[int, int, int, int]:
         """
         Converte ROI normalizada (x1, y1, x2, y2 em 0-1) para pixels reais.
         """
@@ -442,8 +442,8 @@ class ResolutionManager:
         return (x1, y1, x2, y2)
 
     def scale_roi_to_canonical(
-        self, roi: Tuple[float, float, float, float]
-    ) -> Tuple[int, int, int, int]:
+        self, roi: tuple[float, float, float, float]
+    ) -> tuple[int, int, int, int]:
         """Converte ROI normalizada para pixels canónicos."""
         x1 = round(roi[0] * self.canonical_w)
         y1 = round(roi[1] * self.canonical_h)

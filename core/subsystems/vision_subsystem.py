@@ -10,9 +10,8 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections import deque
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from wrapper import PylaAIEnhanced
@@ -31,7 +30,7 @@ class VisionSubsystem:
 
     def __init__(
         self,
-        wrapper: "PylaAIEnhanced",
+        wrapper: PylaAIEnhanced,
         models_path: Path,
         images_path: Path,
         diagnostic_mode: bool,
@@ -42,13 +41,13 @@ class VisionSubsystem:
         self.images_path = images_path
         self.diagnostic_mode = diagnostic_mode
         self.central_config = central_config
-        self.detect_main: Optional[Any] = None
-        self.detect_enemies: Optional[Any] = None
-        self.unified_detector: Optional[Any] = None
-        self.ocr_detector: Optional[Any] = None
-        self.auto_calibrator: Optional[Any] = None
-        self.debug_visualizer: Optional[Any] = None
-        self.debug_integration: Optional[Any] = None
+        self.detect_main: Any | None = None
+        self.detect_enemies: Any | None = None
+        self.unified_detector: Any | None = None
+        self.ocr_detector: Any | None = None
+        self.auto_calibrator: Any | None = None
+        self.debug_visualizer: Any | None = None
+        self.debug_integration: Any | None = None
         self._debug_mode_enabled = bool(
             central_config.get("debug_visualizer", False)
             or __import__("os").getenv("PYLAAI_DEBUG_VISUAL", "0") == "1"
@@ -56,8 +55,8 @@ class VisionSubsystem:
 
         # Threading: inference worker
         self._inference_stop = threading.Event()
-        self._inference_thread: Optional[threading.Thread] = None
-        self._latest_snapshot: Optional[Any] = None
+        self._inference_thread: threading.Thread | None = None
+        self._latest_snapshot: Any | None = None
         self._snapshot_lock = threading.Lock()
         self._inference_errors_in_a_row = 0
 
@@ -92,7 +91,7 @@ class VisionSubsystem:
         # Phase 9: Debug Visualizer
         if self._debug_mode_enabled:
             try:
-                from pylaai_real.debug_visualizer import DebugVisualizer, DebugMode
+                from pylaai_real.debug_visualizer import DebugMode, DebugVisualizer
 
                 self.debug_visualizer = DebugVisualizer(mode=DebugMode.DETAILED)
                 logger.info("[WRAPPER] Debug Visualizer inicializado")
@@ -175,7 +174,7 @@ class VisionSubsystem:
             if yolo_runs:
                 trained_models["latest_trained"] = yolo_runs[0]
                 logger.debug(f"[MODEL] Discovered latest trained model: {yolo_runs[0]}")
-        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError):
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
             pass
 
         generic_models = {
@@ -241,7 +240,7 @@ class VisionSubsystem:
                                 logger.info(f"[MODEL] Model moved to GPU: {torch.cuda.get_device_name(0)}")
                         except ImportError:
                             logger.debug("[MODEL] PyTorch/CUDA not available - using CPU")
-                        from core.class_registry import get_schema, get_canonical
+                        from core.class_registry import get_canonical, get_schema
 
                         schema = "extended" if "8class" in brawlstars_path.name else "core"
                         expected_classes_raw = get_schema(schema).values()
@@ -295,7 +294,7 @@ class VisionSubsystem:
 
         # Fallback generic models
         if not model_loaded:
-            for name, path in generic_models.items():
+            for _name, path in generic_models.items():
                 if path.exists():
                     try:
                         real_model = YOLO(str(path))
@@ -337,7 +336,7 @@ class VisionSubsystem:
                     self.detect_enemies = self.detect_main
                     logger.warning("Using downloaded YOLOv8n with confidence threshold 0.1")
                     model_loaded = True
-            except (ImportError, ModuleNotFoundError, FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, OSError, IOError) as e:
+            except (ImportError, ModuleNotFoundError, FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, OSError) as e:
                 logger.error(f"Model download fallback failed: {e}")
 
         if not model_loaded:
@@ -355,7 +354,6 @@ class VisionSubsystem:
 
     def _inference_loop(self) -> None:
         """Consume frames from the emulator buffer and run YOLO + state detection."""
-        from core.ports.vision_port import GameStateSnapshot, HUDState, DetectedObject
 
         target_interval = 1.0 / 30.0
         while not self._inference_stop.is_set():
@@ -379,10 +377,10 @@ class VisionSubsystem:
             sleep_time = max(0.0, target_interval - elapsed)
             self._inference_stop.wait(timeout=sleep_time)
 
-    def _run_inference(self, frame) -> Optional[Any]:
+    def _run_inference(self, frame) -> Any | None:
         """Run detection and state classification on a single frame."""
-        from core.ports.vision_port import GameStateSnapshot, HUDState, DetectedObject
-        import numpy as np
+
+        from core.ports.vision_port import GameStateSnapshot
 
         if frame is None:
             return None

@@ -17,13 +17,11 @@ Features:
 - Team coordination patterns
 """
 
+import json
 import logging
-from pathlib import Path
-from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 from enum import Enum
-import json
-import numpy as np
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -100,50 +98,50 @@ class MapStrategy:
     """Strategy for a specific map."""
     map_name: str
     map_type: MapType
-    
+
     # Initial positioning
-    initial_position: Tuple[float, float]  # Normalized (0-1)
+    initial_position: tuple[float, float]  # Normalized (0-1)
     initial_action: str  # "aggressive", "defensive", "mid_control"
-    
+
     # Movement patterns
-    patrol_route: List[Tuple[float, float]]  # Waypoints
+    patrol_route: list[tuple[float, float]]  # Waypoints
     rotation_pattern: str  # "clockwise", "counter_clockwise", "adaptive"
-    
+
     # Power cube strategy
-    cube_route: List[Tuple[float, float]]
+    cube_route: list[tuple[float, float]]
     cube_timing: str  # "early", "mid", "late", "continuous"
-    
+
     # Team positioning (for 3v3)
     team_spread: float  # 0.0 (tight) to 1.0 (spread)
-    support_positions: List[Tuple[float, float]]
-    
+    support_positions: list[tuple[float, float]]
+
     # Late game
-    late_game_position: Tuple[float, float]
+    late_game_position: tuple[float, float]
     late_game_action: str
-    
+
     # Map-specific tactics
-    special_tactics: List[str]
+    special_tactics: list[str]
 
 
 class MapStrategyGenerator:
     """
     Generates strategies based on map analysis.
-    
+
     Creates adaptive strategies tailored to map layout and game mode.
     """
-    
-    def __init__(self, strategies_file: Optional[Path] = None):
+
+    def __init__(self, strategies_file: Path | None = None):
         self.strategies_file = strategies_file or Path(__file__).parent.parent / "data" / "map_strategies.json"
-        self.strategies: Dict[str, MapStrategy] = {}
+        self.strategies: dict[str, MapStrategy] = {}
         self._load_strategies()
-    
+
     def _load_strategies(self):
         """Load predefined strategies from file."""
         if self.strategies_file.exists():
             try:
-                with open(self.strategies_file, 'r') as f:
+                with open(self.strategies_file) as f:
                     data = json.load(f)
-                
+
                 for name, strategy_data in data.items():
                     self.strategies[name] = MapStrategy(
                         map_name=name,
@@ -160,20 +158,20 @@ class MapStrategyGenerator:
                         late_game_action=strategy_data.get('late_game_action', 'defensive'),
                         special_tactics=strategy_data.get('special_tactics', []),
                     )
-                
+
                 logger.info(f"Loaded {len(self.strategies)} predefined strategies")
             except Exception as e:
                 logger.error(f"Failed to load strategies: {e}")
-    
+
     def classify_map(self, openness: float, symmetry: float, complexity: float) -> MapType:
         """
         Classify map type based on metrics.
-        
+
         Args:
             openness: 0.0 (closed) to 1.0 (open)
             symmetry: 0.0 (asymmetric) to 1.0 (symmetric)
             complexity: 0.0 (simple) to 1.0 (complex)
-            
+
         Returns:
             MapType classification
         """
@@ -189,7 +187,7 @@ class MapStrategyGenerator:
             return MapType.MID_FOCUSED
         else:
             return MapType.SPAWN_FOCUSED
-    
+
     def generate_strategy(
         self,
         map_name: str,
@@ -198,12 +196,12 @@ class MapStrategyGenerator:
     ) -> MapStrategy:
         """
         Generate strategy for a map.
-        
+
         Args:
             map_name: Name of the map
             map_type: Type of map
             game_mode: Game mode (showdown, gem_grab, etc.)
-            
+
         Returns:
             MapStrategy object
         """
@@ -211,19 +209,19 @@ class MapStrategyGenerator:
         if map_name in self.strategies:
             logger.info(f"Using predefined strategy for {map_name}")
             return self.strategies[map_name]
-        
+
         # Generate strategy based on map type
         strategy = self._generate_from_type(map_name, map_type, game_mode)
-        
+
         # Save to database
         self.strategies[map_name] = strategy
         self._save_strategies()
-        
+
         return strategy
-    
+
     def _generate_from_type(self, map_name: str, map_type: MapType, game_mode: str) -> MapStrategy:
         """Generate strategy based on map type."""
-        
+
         if map_type == MapType.OPEN:
             return self._generate_open_strategy(map_name, game_mode)
         elif map_type == MapType.CLOSED:
@@ -236,7 +234,7 @@ class MapStrategyGenerator:
             return self._generate_mid_focused_strategy(map_name, game_mode)
         else:  # SPAWN_FOCUSED
             return self._generate_spawn_focused_strategy(map_name, game_mode)
-    
+
     def _generate_open_strategy(self, map_name: str, game_mode: str) -> MapStrategy:
         """Generate strategy for open maps."""
         return MapStrategy(
@@ -256,7 +254,7 @@ class MapStrategyGenerator:
             late_game_action="aggressive",
             special_tactics=["long_range_engagement", "flanking_routes"],
         )
-    
+
     def _generate_closed_strategy(self, map_name: str, game_mode: str) -> MapStrategy:
         """Generate strategy for closed maps."""
         return MapStrategy(
@@ -276,7 +274,7 @@ class MapStrategyGenerator:
             late_game_action="defensive",
             special_tactics=["corner_control", "ambush_points"],
         )
-    
+
     def _generate_symmetrical_strategy(self, map_name: str, game_mode: str) -> MapStrategy:
         """Generate strategy for symmetrical maps."""
         return MapStrategy(
@@ -296,7 +294,7 @@ class MapStrategyGenerator:
             late_game_action="aggressive",
             special_tactics=["mirror_positions", "flank_symmetrically"],
         )
-    
+
     def _generate_asymmetrical_strategy(self, map_name: str, game_mode: str) -> MapStrategy:
         """Generate strategy for asymmetrical maps."""
         return MapStrategy(
@@ -316,7 +314,7 @@ class MapStrategyGenerator:
             late_game_action="aggressive",
             special_tactics=["exploit_asymmetry", "control_advantage_side"],
         )
-    
+
     def _generate_mid_focused_strategy(self, map_name: str, game_mode: str) -> MapStrategy:
         """Generate strategy for mid-focused maps."""
         return MapStrategy(
@@ -336,7 +334,7 @@ class MapStrategyGenerator:
             late_game_action="aggressive",
             special_tactics=["mid_domination", "deny_mid"],
         )
-    
+
     def _generate_spawn_focused_strategy(self, map_name: str, game_mode: str) -> MapStrategy:
         """Generate strategy for spawn-focused maps."""
         return MapStrategy(
@@ -356,11 +354,11 @@ class MapStrategyGenerator:
             late_game_action="aggressive",
             special_tactics=["spawn_control", "rotate_to_mid"],
         )
-    
+
     def _save_strategies(self):
         """Save strategies to file."""
         self.strategies_file.parent.mkdir(parents=True, exist_ok=True)
-        
+
         data = {}
         for name, strategy in self.strategies.items():
             data[name] = {
@@ -377,41 +375,41 @@ class MapStrategyGenerator:
                 'late_game_action': strategy.late_game_action,
                 'special_tactics': strategy.special_tactics,
             }
-        
+
         with open(self.strategies_file, 'w') as f:
             json.dump(data, f, indent=2)
-        
+
         logger.info(f"Saved {len(self.strategies)} strategies")
-    
+
     def get_strategy(self, map_name: str, map_type: MapType, game_mode: str = "showdown") -> MapStrategy:
         """
         Get strategy for a map, adjusted for game mode.
-        
+
         Args:
             map_name: Name of the map
             map_type: Type of map
             game_mode: Game mode
-            
+
         Returns:
             MapStrategy object (adjusted for game mode if recognized)
         """
         strategy = self.generate_strategy(map_name, map_type, game_mode)
-        
+
         # Apply game mode modifiers
         try:
             mode = GameMode(game_mode)
             strategy = self.adjust_strategy_for_mode(strategy, mode)
         except ValueError:
             logger.debug(f"Unknown game mode '{game_mode}', using base strategy")
-        
+
         return strategy
 
-    def get_mode_modifier(self, game_mode: GameMode) -> Dict:
+    def get_mode_modifier(self, game_mode: GameMode) -> dict:
         """Get strategy modifier parameters for a game mode.
-        
+
         Args:
             game_mode: GameMode enum value
-            
+
         Returns:
             Dict of modifier values (aggression, cube_priority, etc.)
             Returns empty dict if mode has no specific modifiers.
@@ -420,15 +418,15 @@ class MapStrategyGenerator:
 
     def adjust_strategy_for_mode(self, strategy: MapStrategy, game_mode: GameMode) -> MapStrategy:
         """Adjust an existing strategy based on game mode modifiers.
-        
+
         Applies mode-specific parameters like aggression level,
         retreat threshold, and special priorities (gems, ball, etc.)
         to an existing base strategy.
-        
+
         Args:
             strategy: Base MapStrategy to adjust
             game_mode: GameMode enum value
-            
+
         Returns:
             Adjusted MapStrategy (same object, modified in-place)
         """
@@ -497,9 +495,9 @@ class MapStrategyGenerator:
 def main():
     """Test map strategy generator."""
     logging.basicConfig(level=logging.INFO)
-    
+
     generator = MapStrategyGenerator()
-    
+
     # Test strategy generation
     strategy = generator.generate_strategy("test_map", MapType.OPEN, "showdown")
     print(f"Generated strategy: {strategy}")

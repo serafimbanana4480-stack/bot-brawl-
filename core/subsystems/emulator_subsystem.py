@@ -13,7 +13,7 @@ import queue
 import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from wrapper import PylaAIEnhanced
@@ -26,7 +26,7 @@ class EmulatorSubsystem:
 
     def __init__(
         self,
-        wrapper: "PylaAIEnhanced",
+        wrapper: PylaAIEnhanced,
         central_config: dict,
         images_path: Path,
         models_path: Path,
@@ -35,9 +35,9 @@ class EmulatorSubsystem:
         self.central_config = central_config
         self.images_path = images_path
         self.models_path = models_path
-        self.controller: Optional[Any] = None
-        self.screenshot: Optional[Any] = None
-        self.resolution_manager: Optional[Any] = None
+        self.controller: Any | None = None
+        self.screenshot: Any | None = None
+        self.resolution_manager: Any | None = None
         self._last_window_w: int = 0
         self._last_window_h: int = 0
 
@@ -45,11 +45,11 @@ class EmulatorSubsystem:
         self._frame_buffer = collections.deque(maxlen=3)
         self._frame_lock = threading.Lock()
         self._screenshot_stop = threading.Event()
-        self._screenshot_thread: Optional[threading.Thread] = None
+        self._screenshot_thread: threading.Thread | None = None
 
         self._input_queue: queue.Queue = queue.Queue(maxsize=20)
         self._input_stop = threading.Event()
-        self._input_thread: Optional[threading.Thread] = None
+        self._input_thread: threading.Thread | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -220,15 +220,16 @@ class EmulatorSubsystem:
                         img = self.win32_taker.take()
                         if img is not None:
                             return img
+                    import io
+
                     import numpy as np
                     from PIL import Image
-                    import io
 
                     try:
                         data = self.controller.get_screenshot()
                         if data:
                             return np.array(Image.open(io.BytesIO(data)).convert("RGB"))
-                    except (FileNotFoundError, PermissionError, ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+                    except (FileNotFoundError, PermissionError, ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                         logger.debug(f"[WRAPPER] ADB screenshot fallback failed: {e}")
                     return None
 
@@ -239,7 +240,7 @@ class EmulatorSubsystem:
             return EmulatorWrapper(self.controller, self.screenshot)
         return self.screenshot
 
-    def get_safe_resolution(self) -> Tuple[int, int]:
+    def get_safe_resolution(self) -> tuple[int, int]:
         """Return current resolution safely."""
         if self.resolution_manager is not None:
             try:
@@ -284,7 +285,7 @@ class EmulatorSubsystem:
             sleep_time = max(0.0, target_interval - elapsed)
             self._screenshot_stop.wait(timeout=sleep_time)
 
-    def _take_screenshot(self) -> Optional[Any]:
+    def _take_screenshot(self) -> Any | None:
         """Try screenshot_taker first, then ADB fallback."""
         if self.screenshot is not None:
             try:
@@ -293,9 +294,10 @@ class EmulatorSubsystem:
                 logger.debug(f"[EMULATOR] ScreenshotTaker failed: {e}")
         if self.controller is not None:
             try:
+                import io
+
                 import numpy as np
                 from PIL import Image
-                import io
 
                 data = self.controller.get_screenshot()
                 if data:
@@ -304,7 +306,7 @@ class EmulatorSubsystem:
                 logger.debug(f"[EMULATOR] ADB screenshot failed: {e}")
         return None
 
-    def get_latest_frame(self) -> Optional[Any]:
+    def get_latest_frame(self) -> Any | None:
         """Return the most recent frame (non-blocking)."""
         with self._frame_lock:
             return self._frame_buffer[-1] if self._frame_buffer else None
@@ -362,7 +364,7 @@ class EmulatorSubsystem:
     def _try_init_emulator_controller(self) -> bool:
         logger.debug("[WRAPPER] Tentando inicializar EmulatorController")
         try:
-            from emulator_controller import EmulatorController, EmulatorConfig
+            from emulator_controller import EmulatorConfig, EmulatorController
             from emulator_detector import get_emulator_detector
 
             detector = get_emulator_detector()
@@ -425,8 +427,6 @@ class EmulatorSubsystem:
                 config.window_title = emu_cfg["window_title"]
 
             logger.debug(f"[WRAPPER] Criando EmulatorController com config: type={config.name}, port={config.adb_port}")
-            from safety_system import SafetySystem
-            from humanization import HumanizationEngine
 
             self.controller = EmulatorController(
                 config,
@@ -446,7 +446,7 @@ class EmulatorSubsystem:
         except ImportError as e:
             logger.warning(f"[WRAPPER] EmulatorController não disponível (missing win32gui?): {e}")
             return False
-        except (ImportError, ModuleNotFoundError, ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, OSError) as e:
+        except (ModuleNotFoundError, ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, OSError) as e:
             self.controller = None
             logger.error(f"[WRAPPER] EmulatorController init falhou (fatal): {e}", exc_info=True)
             raise RuntimeError(

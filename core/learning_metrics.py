@@ -6,13 +6,13 @@ Não interfere no histórico oficial de partidas (match_history.json).
 """
 
 import json
-import time
 import logging
+import time
 from collections import deque
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +36,9 @@ class LearningMatchResult:
     actions_super: int = 0
     survival_time: float = 0.0
     result: str = "unknown"  # completed, died, timeout
-    notes: List[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -48,13 +48,13 @@ class LearningMetricsCollector:
     e persiste num ficheiro JSON separado do histórico oficial.
     """
 
-    def __init__(self, output_dir: Optional[Path] = None):
+    def __init__(self, output_dir: Path | None = None):
         self.output_dir = output_dir or Path(__file__).parent.parent / "pylaai_workspace"
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.session_file = self.output_dir / "learning_sessions.json"
 
-        self.matches: List[LearningMatchResult] = []
-        self.current_match: Optional[LearningMatchResult] = None
+        self.matches: list[LearningMatchResult] = []
+        self.current_match: LearningMatchResult | None = None
         self._frame_counter = 0
         self._session_start = time.time()
         # Histórico de frames para gráficos live (últimos 300 frames ~ 30s a 10fps)
@@ -77,7 +77,7 @@ class LearningMetricsCollector:
         logger.info("[LEARNING_METRICS] Match iniciado: %s | Brawler: %s",
                     self.current_match.match_id, brawler)
 
-    def end_match(self, result: str = "completed", duration: Optional[float] = None) -> LearningMatchResult:
+    def end_match(self, result: str = "completed", duration: float | None = None) -> LearningMatchResult:
         """Finaliza o match atual, calcula duração e guarda na lista."""
         if self.current_match is None:
             logger.warning("[LEARNING_METRICS] end_match chamado sem start_match")
@@ -107,7 +107,7 @@ class LearningMetricsCollector:
         self,
         enemies_detected: int = 0,
         player_detected: bool = False,
-        action_taken: Optional[str] = None,
+        action_taken: str | None = None,
         damage_dealt: float = 0.0,
         damage_taken: float = 0.0,
     ) -> None:
@@ -177,10 +177,10 @@ class LearningMetricsCollector:
             with open(self.session_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             logger.debug("[LEARNING_METRICS] Sessão persistida: %s matches", len(self.matches))
-        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.warning("[LEARNING_METRICS] Falha ao persistir: %s", e)
 
-    def get_summary(self) -> Dict[str, Any]:
+    def get_summary(self) -> dict[str, Any]:
         """Calcula estatísticas agregadas de todos os matches da sessão."""
         if not self.matches:
             return {"total_matches": 0, "message": "Nenhum match jogado na sessão de aprendizagem."}
@@ -209,18 +209,18 @@ class LearningMetricsCollector:
             "completed": sum(1 for m in self.matches if m.result == "completed"),
         }
 
-    def get_frame_history(self, limit: int = 300) -> List[Dict[str, Any]]:
+    def get_frame_history(self, limit: int = 300) -> list[dict[str, Any]]:
         """Retorna os últimos N frames de histórico para gráficos live."""
         return list(self.frames_history)[-limit:]
 
-    def get_session_history(self) -> List[Dict[str, Any]]:
+    def get_session_history(self) -> list[dict[str, Any]]:
         """Retorna o histórico completo de sessões anteriores do ficheiro JSON."""
         try:
             if self.session_file.exists():
-                with open(self.session_file, "r", encoding="utf-8") as f:
+                with open(self.session_file, encoding="utf-8") as f:
                     data = json.load(f)
                 return data.get("matches", [])
-        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.debug("[LEARNING_METRICS] Falha ao ler histórico: %s", e)
         return []
 

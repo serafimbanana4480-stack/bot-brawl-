@@ -15,11 +15,11 @@ Impacto estimado: +8-12% win rate com especialização por brawler.
 
 import json
 import logging
-import time
+import random
 import threading
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, Optional, Any, List
-from dataclasses import dataclass, field, asdict
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -70,12 +70,12 @@ class BrawlerAdaptiveController:
         self.profiles_dir = Path(profiles_dir)
         self.profiles_dir.mkdir(parents=True, exist_ok=True)
 
-        self._profiles: Dict[str, BrawlerProfile] = {}
-        self._current_brawler: Optional[str] = None
-        self._current_profile: Optional[BrawlerProfile] = None
+        self._profiles: dict[str, BrawlerProfile] = {}
+        self._current_brawler: str | None = None
+        self._current_profile: BrawlerProfile | None = None
 
         # Modelos especializados (transfer learning)
-        self._brawler_model_paths: Dict[str, Path] = {}
+        self._brawler_model_paths: dict[str, Path] = {}
 
         self._lock = threading.RLock()
 
@@ -176,7 +176,7 @@ class BrawlerAdaptiveController:
         """Carrega perfis customizados do disco."""
         for path in self.profiles_dir.glob("*.json"):
             try:
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     data = json.load(f)
                 name = data.get("name", path.stem)
                 # Filtrar campos válidos
@@ -219,13 +219,13 @@ class BrawlerAdaptiveController:
             logger.info("[BRAWLER_ADAPTIVE] Adaptado a %s (playstyle=%s, range=%d)",
                         normalized, profile.preferred_playstyle, profile.optimal_range)
 
-    def get_profile(self, brawler_name: Optional[str] = None) -> Optional[BrawlerProfile]:
+    def get_profile(self, brawler_name: str | None = None) -> BrawlerProfile | None:
         """Retorna perfil do brawler (atual ou especificado)."""
         if brawler_name:
             return self._profiles.get(self._normalize_name(brawler_name))
         return self._current_profile
 
-    def get_epsilon(self, base_epsilon: Optional[float] = None) -> float:
+    def get_epsilon(self, base_epsilon: float | None = None) -> float:
         """Retorna epsilon adaptado ao brawler atual."""
         if not self._current_profile:
             return base_epsilon or 0.25
@@ -239,7 +239,7 @@ class BrawlerAdaptiveController:
         """Retorna learning rate adaptado."""
         return self._current_profile.learning_rate if self._current_profile else 0.001
 
-    def get_combat_strategy(self) -> Dict[str, Any]:
+    def get_combat_strategy(self) -> dict[str, Any]:
         """Retorna estratégia de combate completa."""
         if not self._current_profile:
             return {"playstyle": "balanced"}
@@ -255,7 +255,7 @@ class BrawlerAdaptiveController:
             "gadget_priority": p.gadget_priority,
         }
 
-    def get_model_path(self, brawler_name: Optional[str] = None) -> Optional[Path]:
+    def get_model_path(self, brawler_name: str | None = None) -> Path | None:
         """Retorna caminho para modelo especializado do brawler."""
         name = self._normalize_name(brawler_name or self._current_brawler or "")
         if not name:
@@ -269,7 +269,7 @@ class BrawlerAdaptiveController:
             return current_hp_pct < 0.3
         return current_hp_pct < self._current_profile.retreat_threshold
 
-    def should_use_super(self, context: Dict[str, Any] = None) -> bool:
+    def should_use_super(self, context: dict[str, Any] = None) -> bool:
         """Decide se deve usar super baseado no perfil."""
         if not self._current_profile:
             return True
@@ -290,7 +290,7 @@ class BrawlerAdaptiveController:
     # Update por performance
     # ------------------------------------------------------------------
 
-    def update_from_match_result(self, brawler: str, result: str, metrics: Dict[str, Any] = None):
+    def update_from_match_result(self, brawler: str, result: str, metrics: dict[str, Any] = None):
         """Atualiza perfil baseado no resultado (meta-learning online)."""
         with self._lock:
             name = self._normalize_name(brawler)
@@ -336,11 +336,11 @@ class BrawlerAdaptiveController:
             epsilon_base=0.25,
         )
 
-    def list_profiles(self) -> List[str]:
+    def list_profiles(self) -> list[str]:
         """Lista todos os brawlers com perfil."""
         return sorted(self._profiles.keys())
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Status atual para dashboard."""
         return {
             "current_brawler": self._current_brawler,

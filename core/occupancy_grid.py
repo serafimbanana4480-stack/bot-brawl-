@@ -21,13 +21,13 @@ Features:
 - Integration with WorldModel for danger zones
 """
 
-import math
 import heapq
 import logging
+import math
 import threading
 import time
-from typing import Dict, List, Optional, Tuple, Set
 from enum import IntEnum
+
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -76,8 +76,8 @@ class OccupancyGrid:
         logger.info("[OCCUPANCY] Grid initialized: %dx%d cells (%dx%d px)",
                      self.cols, self.rows, map_width, map_height)
 
-    def update_from_detections(self, detections: List[Dict],
-                               screenshot_shape: Optional[Tuple[int, int]] = None):
+    def update_from_detections(self, detections: list[dict],
+                               screenshot_shape: tuple[int, int] | None = None):
         """Update grid from YOLO detection results.
 
         Args:
@@ -108,14 +108,14 @@ class OccupancyGrid:
                     # Power cubes are on walkable cells
                     pass
 
-    def update_danger_zones(self, danger_zones: List[Tuple[float, float, float]]):
+    def update_danger_zones(self, danger_zones: list[tuple[float, float, float]]):
         """Update danger cells from WorldModel danger zones.
 
         Args:
             danger_zones: List of (x, y, threat_level) tuples
         """
         with self._lock:
-            for x, y, threat in danger_zones:
+            for x, y, _threat in danger_zones:
                 gx, gy = self._pixel_to_grid(x, y)
                 radius_cells = max(1, int(150 / self.CELL_SIZE))  # 150px danger radius
 
@@ -145,9 +145,9 @@ class OccupancyGrid:
             return CellType.WALL
         return CellType(self.grid[gy, gx])
 
-    def a_star(self, start_px: Tuple[float, float],
-               goal_px: Tuple[float, float],
-               avoid_danger: bool = True) -> Optional[List[Tuple[float, float]]]:
+    def a_star(self, start_px: tuple[float, float],
+               goal_px: tuple[float, float],
+               avoid_danger: bool = True) -> list[tuple[float, float]] | None:
         """
         Real A* pathfinding from start to goal in pixel coordinates.
 
@@ -177,10 +177,10 @@ class OccupancyGrid:
             # A* implementation
             open_set = []
             heapq.heappush(open_set, (0.0, start))
-            came_from: Dict[Tuple[int, int], Tuple[int, int]] = {}
-            g_score: Dict[Tuple[int, int], float] = {start: 0.0}
-            f_score: Dict[Tuple[int, int], float] = {start: self._heuristic(start, goal)}
-            closed_set: Set[Tuple[int, int]] = set()
+            came_from: dict[tuple[int, int], tuple[int, int]] = {}
+            g_score: dict[tuple[int, int], float] = {start: 0.0}
+            f_score: dict[tuple[int, int], float] = {start: self._heuristic(start, goal)}
+            closed_set: set[tuple[int, int]] = set()
 
             # 8-directional movement: (dx, dy, cost)
             neighbors = [
@@ -239,8 +239,8 @@ class OccupancyGrid:
             logger.debug("[OCCUPANCY] A* no path found from %s to %s", start, goal)
             return None
 
-    def has_line_of_sight(self, start_px: Tuple[float, float],
-                         end_px: Tuple[float, float]) -> bool:
+    def has_line_of_sight(self, start_px: tuple[float, float],
+                         end_px: tuple[float, float]) -> bool:
         """
         Check if there is a clear line of sight between two points.
 
@@ -278,9 +278,9 @@ class OccupancyGrid:
 
             return True
 
-    def find_cover_position(self, player_px: Tuple[float, float],
-                            threat_px: Tuple[float, float],
-                            max_distance: float = 300.0) -> Optional[Tuple[float, float]]:
+    def find_cover_position(self, player_px: tuple[float, float],
+                            threat_px: tuple[float, float],
+                            max_distance: float = 300.0) -> tuple[float, float] | None:
         """
         Find the nearest position that has cover (wall or bush) between it
         and the threat, blocking line of sight.
@@ -328,7 +328,7 @@ class OccupancyGrid:
 
             return None
 
-    def get_flow_field(self, goal_px: Tuple[float, float]) -> Optional[np.ndarray]:
+    def get_flow_field(self, goal_px: tuple[float, float]) -> np.ndarray | None:
         """
         Generate a flow field toward the goal.
 
@@ -399,7 +399,7 @@ class OccupancyGrid:
 
             return flow
 
-    def get_grid_stats(self) -> Dict:
+    def get_grid_stats(self) -> dict:
         """Return grid statistics."""
         with self._lock:
             total = self.rows * self.cols
@@ -433,26 +433,26 @@ class OccupancyGrid:
                         self.confidence[gy, gx] = confidence
                         self.last_updated[gy, gx] = timestamp
 
-    def _pixel_to_grid(self, px: float, py: float) -> Tuple[int, int]:
+    def _pixel_to_grid(self, px: float, py: float) -> tuple[int, int]:
         gx = int(px / self.CELL_SIZE)
         gy = int(py / self.CELL_SIZE)
         return (max(0, min(self.cols - 1, gx)),
                 max(0, min(self.rows - 1, gy)))
 
-    def _grid_to_pixel(self, gx: int, gy: int) -> Tuple[float, float]:
+    def _grid_to_pixel(self, gx: int, gy: int) -> tuple[float, float]:
         """Convert grid coordinates to pixel coordinates (center of cell)."""
         px = (gx + 0.5) * self.CELL_SIZE
         py = (gy + 0.5) * self.CELL_SIZE
         return (px, py)
 
     @staticmethod
-    def _heuristic(a: Tuple[int, int], b: Tuple[int, int]) -> float:
+    def _heuristic(a: tuple[int, int], b: tuple[int, int]) -> float:
         """Octile distance heuristic for A* (allows diagonal movement)."""
         dx = abs(a[0] - b[0])
         dy = abs(a[1] - b[1])
         return max(dx, dy) + (1.414 - 1) * min(dx, dy)
 
-    def _reconstruct_path(self, came_from: Dict, current: Tuple[int, int]) -> List[Tuple[int, int]]:
+    def _reconstruct_path(self, came_from: dict, current: tuple[int, int]) -> list[tuple[int, int]]:
         """Reconstruct A* path from came_from map."""
         path = [current]
         while current in came_from:
@@ -461,8 +461,8 @@ class OccupancyGrid:
         path.reverse()
         return path
 
-    def _find_nearest_walkable(self, pos: Tuple[int, int],
-                                max_search: int = 20) -> Optional[Tuple[int, int]]:
+    def _find_nearest_walkable(self, pos: tuple[int, int],
+                                max_search: int = 20) -> tuple[int, int] | None:
         """Find the nearest walkable cell to a position."""
         for radius in range(1, max_search + 1):
             for dx in range(-radius, radius + 1):

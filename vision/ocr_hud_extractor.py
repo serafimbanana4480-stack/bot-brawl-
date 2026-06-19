@@ -27,8 +27,6 @@ import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -62,7 +60,7 @@ class HudValue:
 
     field: HudField
     raw_value: str
-    parsed_value: Optional[float]
+    parsed_value: float | None
     confidence: float  # 0.0–1.0
     source: str  # "ocr", "pixel_heuristic", "default"
     timestamp: float = field(default_factory=time.time)
@@ -86,7 +84,7 @@ class HudState:
     gems: HudValue
     timestamp: float = field(default_factory=time.time)
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Serializa para dict (útil para dataset/logs)."""
         return {
             "hp": {
@@ -148,7 +146,7 @@ class OCRHudExtractor:
     # ROIs normalizadas (0–1) — múltiplas candidatas por campo para
     # tolerância a mudanças sutis de layout / resolução.
     # ------------------------------------------------------------------
-    DEFAULT_ROIS: Dict[HudField, List[Tuple[float, float, float, float]]] = {
+    DEFAULT_ROIS: dict[HudField, list[tuple[float, float, float, float]]] = {
         HudField.HP_VALUE: [
             (0.020, 0.010, 0.180, 0.060),
             (0.015, 0.005, 0.200, 0.070),
@@ -184,7 +182,7 @@ class OCRHudExtractor:
 
     def __init__(
         self,
-        resolution: Tuple[int, int] = (1920, 1080),
+        resolution: tuple[int, int] = (1920, 1080),
         confidence_threshold: float = 0.6,
         ocr_scale_factor: float = 2.0,
         cache_ttl_sec: float = 0.5,
@@ -196,11 +194,11 @@ class OCRHudExtractor:
         self.cache_ttl_sec = cache_ttl_sec
         self.use_heuristic_fallback = use_heuristic_fallback
 
-        self._reader: Optional[object] = None
+        self._reader: object | None = None
         self._reader_ready: bool = False  # True apenas quando reader OK
 
         # Cache por campo: campo → (timestamp, HudValue)
-        self._cache: Dict[HudField, Tuple[float, HudValue]] = {}
+        self._cache: dict[HudField, tuple[float, HudValue]] = {}
 
         logger.info(
             "[OCR_HUD] Inicializado: resolution=%s, conf_thresh=%.2f, scale=%.1f",
@@ -240,8 +238,8 @@ class OCRHudExtractor:
     # Coordenadas
     # ------------------------------------------------------------------
     def _roi_to_pixels(
-        self, roi: Tuple[float, float, float, float]
-    ) -> Tuple[int, int, int, int]:
+        self, roi: tuple[float, float, float, float]
+    ) -> tuple[int, int, int, int]:
         """Converte ROI normalizada (0–1) para pixels absolutos."""
         x1, y1, x2, y2 = roi
         return (
@@ -254,7 +252,7 @@ class OCRHudExtractor:
     # ------------------------------------------------------------------
     # Cache
     # ------------------------------------------------------------------
-    def _cached(self, field: HudField) -> Optional[HudValue]:
+    def _cached(self, field: HudField) -> HudValue | None:
         """Retorna valor em cache se ainda válido."""
         entry = self._cache.get(field)
         if entry is None:
@@ -270,11 +268,11 @@ class OCRHudExtractor:
     # ------------------------------------------------------------------
     # Pré-processamento OCR
     # ------------------------------------------------------------------
-    def _preprocess_variants(self, crop: np.ndarray) -> List[np.ndarray]:
+    def _preprocess_variants(self, crop: np.ndarray) -> list[np.ndarray]:
         """Gera variantes pré-processadas para maximizar chance de OCR correto."""
         if crop is None or crop.size == 0:
             return []
-        variants: List[np.ndarray] = [crop]
+        variants: list[np.ndarray] = [crop]
         if not HAS_CV2:
             return variants
         try:
@@ -306,11 +304,11 @@ class OCRHudExtractor:
     # ------------------------------------------------------------------
     # OCR — executa em todas as variantes e devolve resultados combinados
     # ------------------------------------------------------------------
-    def _ocr_crop(self, crop: np.ndarray) -> List[Tuple[str, float]]:
+    def _ocr_crop(self, crop: np.ndarray) -> list[tuple[str, float]]:
         """Executa OCR num recorte e devolve lista de (texto, confiança)."""
         if not self._ensure_reader():
             return []
-        results: List[Tuple[str, float]] = []
+        results: list[tuple[str, float]] = []
         seen: set[str] = set()
         for variant in self._preprocess_variants(crop):
             try:
@@ -351,7 +349,7 @@ class OCRHudExtractor:
         return text.translate(trans)
 
     @staticmethod
-    def _extract_first_number(text: str) -> Optional[float]:
+    def _extract_first_number(text: str) -> float | None:
         """Extrai o primeiro número (inteiro ou decimal) do texto."""
         # Procura padrões como "12", "1:23", "100%", "3/3"
         # Primeiro tenta MM:SS (timer)
@@ -367,7 +365,7 @@ class OCRHudExtractor:
         return None
 
     @staticmethod
-    def _extract_fraction(text: str) -> Optional[Tuple[int, int]]:
+    def _extract_fraction(text: str) -> tuple[int, int] | None:
         """Extrai fração tipo '2/3' → (2, 3)."""
         match = re.search(r"(\d+)\s*/\s*(\d+)", text)
         if match:
@@ -377,7 +375,7 @@ class OCRHudExtractor:
     # ------------------------------------------------------------------
     # Heurísticas de pixel (fallback)
     # ------------------------------------------------------------------
-    def _heuristic_hp(self, screenshot: np.ndarray) -> Optional[float]:
+    def _heuristic_hp(self, screenshot: np.ndarray) -> float | None:
         """Estima HP pela razão de pixels verdes vs. vermelhos na barra de HP."""
         if not HAS_CV2 or screenshot is None or screenshot.size == 0:
             return None
@@ -405,12 +403,12 @@ class OCRHudExtractor:
             logger.debug("[OCR_HUD] heuristic_hp error: %s", exc)
             return None
 
-    def _heuristic_ammo(self, screenshot: np.ndarray) -> Optional[float]:
+    def _heuristic_ammo(self, screenshot: np.ndarray) -> float | None:
         """Estima ammo pela presença de ícones/cargas na região de habilidades."""
         # Simplificado: não implementamos sem análise visual real
         return None
 
-    def _heuristic_super(self, screenshot: np.ndarray) -> Optional[float]:
+    def _heuristic_super(self, screenshot: np.ndarray) -> float | None:
         """Estima super charge pela cor da barra de super (amarela/laranja vs cinza)."""
         if not HAS_CV2 or screenshot is None or screenshot.size == 0:
             return None
@@ -448,7 +446,7 @@ class OCRHudExtractor:
         self,
         field: HudField,
         screenshot: np.ndarray,
-        rois: Optional[List[Tuple[float, float, float, float]]] = None,
+        rois: list[tuple[float, float, float, float]] | None = None,
     ) -> HudValue:
         """Extrai um único campo do HUD com votação entre múltiplas ROIs."""
         # 1) Cache
@@ -456,7 +454,7 @@ class OCRHudExtractor:
         if cached is not None:
             return cached
 
-        candidates: List[Tuple[float, Optional[float], str]] = []
+        candidates: list[tuple[float, float | None, str]] = []
         rois = rois or self.DEFAULT_ROIS.get(field, [])
 
         if screenshot is None or screenshot.size == 0:
@@ -546,7 +544,7 @@ class OCRHudExtractor:
             return float(max(0, round(raw)))
         return raw
 
-    def _pixel_fallback(self, field: HudField, screenshot: np.ndarray) -> Optional[float]:
+    def _pixel_fallback(self, field: HudField, screenshot: np.ndarray) -> float | None:
         """Direciona para heurística correta."""
         if field == HudField.HP_VALUE:
             return self._heuristic_hp(screenshot)
@@ -557,7 +555,7 @@ class OCRHudExtractor:
         return None
 
     @staticmethod
-    def _default_value(field: HudField) -> Optional[float]:
+    def _default_value(field: HudField) -> float | None:
         """Valor default conservador."""
         defaults = {
             HudField.HP_VALUE: 1.0,
@@ -593,7 +591,7 @@ class OCRHudExtractor:
         self,
         field: HudField,
         screenshot: np.ndarray,
-        rois: Optional[List[Tuple[float, float, float, float]]] = None,
+        rois: list[tuple[float, float, float, float]] | None = None,
     ) -> HudValue:
         """Extrai um campo específico do HUD."""
         return self._extract_field(field, screenshot, rois)

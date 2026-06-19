@@ -5,15 +5,15 @@ Teste de integração para verificar se o fluxo lobby -> jogo funciona.
 Simula o ciclo do StateManager sem iniciar threads.
 """
 
-import sys
 
-import time
-import numpy as np
-from PIL import Image
 from pathlib import Path
 
+import numpy as np
+from PIL import Image
+
+from pylaai_real.lobby_automator import BrawlerConfig, BrawlerQueue, LobbyAutomator
 from pylaai_real.unified_state_detector import UnifiedStateDetector
-from pylaai_real.lobby_automator import LobbyAutomator, BrawlerQueue, BrawlerConfig
+
 
 # Mock emulator controller
 class MockEmulatorController:
@@ -30,13 +30,14 @@ class MockEmulatorController:
         print(f"[MOCK] Swipe ({x1},{y1}) -> ({x2},{y2})")
 
 # Load screenshot
-screenshot = np.array(Image.open('c:/Users/rodri/Desktop/bot brawl/screenshot_current.png'))
+_root = Path(__file__).parent
+screenshot = np.array(Image.open(str(_root / 'screenshot_current.png')))
 print(f"Screenshot: {screenshot.shape}")
 
 # Test unified detector
-det = UnifiedStateDetector(images_path=Path('c:/Users/rodri/Desktop/bot brawl/images'))
+det = UnifiedStateDetector(images_path=str(_root / 'images'))
 result = det.detect(screenshot)
-print(f"\n[UNIFIED DETECTOR]")
+print("\n[UNIFIED DETECTOR]")
 print(f"  State: {result.state}")
 print(f"  Confidence: {result.confidence:.2f}")
 print(f"  Button: {result.button_coords}")
@@ -49,7 +50,7 @@ ctrl = MockEmulatorController()
 lobby = LobbyAutomator(
     queue, ctrl,
     window_w=1920, window_h=1080,
-    images_path=str(Path('c:/Users/rodri/Desktop/bot brawl/images')),
+    images_path=str(_root / 'images'),
 )
 lobby.set_state_detector(det)
 lobby.set_screenshot_func(lambda: screenshot)

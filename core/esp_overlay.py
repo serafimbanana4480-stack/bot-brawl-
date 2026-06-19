@@ -13,13 +13,11 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
 
 try:
-    import win32gui
     import win32api
     import win32con
+    import win32gui
     import win32ui
     WIN32_AVAILABLE = True
 except ImportError:
@@ -68,7 +66,7 @@ class ESPDetection:
     height: int
     center_x: int
     center_y: int
-    track_id: Optional[int] = None
+    track_id: int | None = None
 
 
 class ESPOverlay:
@@ -85,17 +83,17 @@ class ESPOverlay:
         self.window_title = window_title
         self.target_fps = max(5.0, target_fps)
         self.enabled = False
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
-        self._hwnd: Optional[int] = None
-        self._overlay_hwnd: Optional[int] = None
-        self._window_rect: Tuple[int, int, int, int] = (0, 0, 0, 0)
+        self._hwnd: int | None = None
+        self._overlay_hwnd: int | None = None
+        self._window_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
         self._lock = threading.Lock()
-        self._detections: List[ESPDetection] = []
+        self._detections: list[ESPDetection] = []
         self._fps_history: deque = deque(maxlen=30)
         self._last_draw_time = 0.0
-        self._player_pos: Optional[Tuple[int, int]] = None
-        self._target_pos: Optional[Tuple[int, int]] = None
+        self._player_pos: tuple[int, int] | None = None
+        self._target_pos: tuple[int, int] | None = None
         self._show_labels = True
         self._show_lines = True
         self._show_hp = True
@@ -109,7 +107,7 @@ class ESPOverlay:
     # Detections input
     # ------------------------------------------------------------------
 
-    def update_detections(self, detections: List[Dict], player_pos: Optional[Tuple[int, int]] = None, target_pos: Optional[Tuple[int, int]] = None):
+    def update_detections(self, detections: list[dict], player_pos: tuple[int, int] | None = None, target_pos: tuple[int, int] | None = None):
         with self._lock:
             self._detections = [ESPDetection(**d) for d in detections]
             self._player_pos = player_pos
@@ -148,7 +146,7 @@ class ESPOverlay:
         self._overlay_hwnd = None
         logger.info("[ESP] Overlay parado")
 
-    def toggle(self, state: Optional[bool] = None) -> bool:
+    def toggle(self, state: bool | None = None) -> bool:
         if state is None:
             state = not self.enabled
         if state:
@@ -315,7 +313,6 @@ class ESPOverlay:
 
             # Blit to screen
             from ctypes import windll
-            point_src = ((0, 0), (w, h), mem_dc, (0, 0), (0, 0), (w, h), 0x00FF00, 0x000000, win32con.SRCOPY)
             windll.gdi32.TransparentBlt(hdc, 0, 0, w, h, mem_dc, 0, 0, w, h, 0x000000)
 
             # Cleanup
@@ -371,7 +368,7 @@ class ESPOverlay:
             win32gui.FillRect(hdc, (x, hp_y, x + int(hp_w * hp_pct), hp_y + hp_h), hp_fg)
             win32gui.DeleteObject(hp_fg)
 
-    def _draw_minimap(self, hdc, detections: List[ESPDetection], win_w: int, win_h: int):
+    def _draw_minimap(self, hdc, detections: list[ESPDetection], win_w: int, win_h: int):
         size = self._minimap_size
         pad = 8
         mx = win_w - size - pad
@@ -408,7 +405,7 @@ class ESPOverlay:
         win32gui.FillRect(hdc, (cx - 3, cy - 3, cx + 4, cy + 4), center)
         win32gui.DeleteObject(center)
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         avg_fps = sum(self._fps_history) / max(1, len(self._fps_history)) if self._fps_history else 0
         return {
             "enabled": self.enabled,

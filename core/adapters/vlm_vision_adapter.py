@@ -14,14 +14,14 @@ This is the anti-UI-change resilience layer:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from core.ports.vision_port import (
     DetectedObject,
     GameStateSnapshot,
     VisionPort,
 )
-from core.vlm_fallback import VLMFallback, VLMConfig
+from core.vlm_fallback import VLMFallback
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ class VLMVisionAdapter(VisionPort):
         logger.info("[VLM_VISION] Initialized (primary_ok=%s, vlm_enabled=%s)", ok, self._vlm.cfg.enabled)
         return ok
 
-    def capture_and_perceive(self) -> Optional[GameStateSnapshot]:
+    def capture_and_perceive(self) -> GameStateSnapshot | None:
         snapshot = self._primary.capture_and_perceive()
         if snapshot is None:
             self._frames_without_detection += 1
@@ -77,10 +77,10 @@ class VLMVisionAdapter(VisionPort):
 
         return snapshot
 
-    def get_detected_objects(self, class_filter: Optional[List[str]] = None) -> List[DetectedObject]:
+    def get_detected_objects(self, class_filter: list[str] | None = None) -> list[DetectedObject]:
         return self._primary.get_detected_objects(class_filter)
 
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         primary = self._primary.health_check()
         return {
             **primary,
@@ -97,7 +97,7 @@ class VLMVisionAdapter(VisionPort):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _try_vlm_fallback(self, snapshot: Optional[GameStateSnapshot]) -> Optional[GameStateSnapshot]:
+    def _try_vlm_fallback(self, snapshot: GameStateSnapshot | None) -> GameStateSnapshot | None:
         """Run VLM on the snapshot screenshot and merge results."""
         if snapshot is None or snapshot.screenshot is None:
             logger.debug("[VLM_VISION] No screenshot available for VLM fallback")

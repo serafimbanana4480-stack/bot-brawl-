@@ -5,7 +5,7 @@ Replaces the fragile HAS_XXX lazy import pattern with a proper plugin architectu
 
 import abc
 import logging
-from typing import Any, Dict, List, Optional, Type
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -28,17 +28,18 @@ class IPlugin(abc.ABC):
 
     def shutdown(self) -> None:
         """Clean up resources. Called during shutdown."""
+        return None
 
 
 class PluginManager:
     """Manages registration, loading, and querying of plugins."""
 
     def __init__(self):
-        self._registry: List[Type[IPlugin]] = []
-        self._plugins: Dict[str, IPlugin] = {}
-        self._instances: Dict[str, Any] = {}
+        self._registry: list[type[IPlugin]] = []
+        self._plugins: dict[str, IPlugin] = {}
+        self._instances: dict[str, Any] = {}
 
-    def register(self, plugin_class: Type[IPlugin]) -> Type[IPlugin]:
+    def register(self, plugin_class: type[IPlugin]) -> type[IPlugin]:
         """Register a plugin class."""
         if not issubclass(plugin_class, IPlugin):
             raise TypeError(f"{plugin_class.__name__} must inherit from IPlugin")
@@ -53,9 +54,9 @@ class PluginManager:
             if plugin_class not in self._registry:
                 self._registry.append(plugin_class)
 
-    def load_all(self, **kwargs) -> Dict[str, Any]:
+    def load_all(self, **kwargs) -> dict[str, Any]:
         """Initialize all registered plugins that are available."""
-        results: Dict[str, Any] = {}
+        results: dict[str, Any] = {}
         sorted_plugins = sorted(
             self._registry,
             key=lambda p: getattr(p, "priority", 50),
@@ -82,7 +83,7 @@ class PluginManager:
                 logger.debug(f"[PLUGIN] '{name}' not available")
         return results
 
-    def get(self, name: str) -> Optional[Any]:
+    def get(self, name: str) -> Any | None:
         """Get initialized plugin instance/class by name."""
         return self._instances.get(name)
 
@@ -101,10 +102,10 @@ class PluginManager:
         self._instances.clear()
 
 
-_GLOBAL_REGISTRY: List[Type[IPlugin]] = []
+_GLOBAL_REGISTRY: list[type[IPlugin]] = []
 
 
-def PluginRegistry(cls: Type[IPlugin]) -> Type[IPlugin]:
+def PluginRegistry(cls: type[IPlugin]) -> type[IPlugin]:  # noqa: N802
     """Class decorator for auto-discoverable plugins."""
     if not issubclass(cls, IPlugin):
         raise TypeError(f"{cls.__name__} must inherit from IPlugin")
@@ -112,7 +113,7 @@ def PluginRegistry(cls: Type[IPlugin]) -> Type[IPlugin]:
     return cls
 
 
-def get_global_registry() -> List[Type[IPlugin]]:
+def get_global_registry() -> list[type[IPlugin]]:
     """Return a copy of the global plugin registry."""
     return list(_GLOBAL_REGISTRY)
 

@@ -18,15 +18,17 @@ Uso:
             action = decide(screenshot)
 """
 
+import functools
 import json
-import time
 import logging
 import threading
+import time
 import uuid
-from typing import Dict, Optional, List, Any, Callable
-from dataclasses import dataclass, field, asdict
-from pathlib import Path
 from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -36,17 +38,17 @@ class Span:
     """Um span de tracing — representa uma operação."""
     trace_id: str
     span_id: str
-    parent_id: Optional[str]
+    parent_id: str | None
     name: str
     start_time: float
-    end_time: Optional[float] = None
-    duration_ms: Optional[float] = None
+    end_time: float | None = None
+    duration_ms: float | None = None
     status: str = "ok"  # ok | error | cancelled
-    tags: Dict[str, str] = field(default_factory=dict)
-    logs: List[Dict[str, Any]] = field(default_factory=list)
-    children: List["Span"] = field(default_factory=list)
+    tags: dict[str, str] = field(default_factory=dict)
+    logs: list[dict[str, Any]] = field(default_factory=list)
+    children: list["Span"] = field(default_factory=list)
 
-    def finish(self, status: str = "ok", tags: Dict[str, str] = None):
+    def finish(self, status: str = "ok", tags: dict[str, str] = None):
         """Finaliza o span."""
         self.end_time = time.time()
         self.duration_ms = (self.end_time - self.start_time) * 1000
@@ -62,7 +64,7 @@ class Span:
             "fields": fields,
         })
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "trace_id": self.trace_id,
             "span_id": self.span_id,
@@ -80,7 +82,7 @@ class Span:
 class SpanContext:
     """Contexto de tracing que propaga entre funções."""
 
-    def __init__(self, trace_id: Optional[str] = None, span_id: Optional[str] = None):
+    def __init__(self, trace_id: str | None = None, span_id: str | None = None):
         self.trace_id = trace_id or str(uuid.uuid4())
         self.span_id = span_id or str(uuid.uuid4())
 
@@ -100,7 +102,7 @@ class Tracer:
     def __init__(
         self,
         service_name: str = "soberana_omega",
-        export_dir: Optional[Path] = None,
+        export_dir: Path | None = None,
         max_spans_in_memory: int = 10000,
     ):
         self.service_name = service_name
@@ -108,7 +110,7 @@ class Tracer:
         self.export_dir.mkdir(parents=True, exist_ok=True)
         self.max_spans = max_spans_in_memory
 
-        self._active_spans: Dict[str, Span] = {}
+        self._active_spans: dict[str, Span] = {}
         self._finished_spans: deque = deque(maxlen=max_spans_in_memory)
         self._lock = threading.RLock()
 
@@ -122,8 +124,8 @@ class Tracer:
     def start_span(
         self,
         name: str,
-        parent: Optional[Span] = None,
-        tags: Dict[str, str] = None,
+        parent: Span | None = None,
+        tags: dict[str, str] = None,
     ) -> Span:
         """Inicia um novo span."""
         trace_id = parent.trace_id if parent else str(uuid.uuid4())
@@ -145,7 +147,7 @@ class Tracer:
 
         return span
 
-    def finish_span(self, span: Span, status: str = "ok", tags: Dict[str, str] = None):
+    def finish_span(self, span: Span, status: str = "ok", tags: dict[str, str] = None):
         """Finaliza um span e o arquiva."""
         span.finish(status, tags)
 
@@ -153,7 +155,7 @@ class Tracer:
             self._active_spans.pop(span.span_id, None)
             self._finished_spans.append(span)
 
-    def current_span(self) -> Optional[Span]:
+    def current_span(self) -> Span | None:
         """Retorna span ativo do contexto atual."""
         return getattr(self._local, "current_span", None)
 
@@ -161,7 +163,7 @@ class Tracer:
     # Context manager
     # ------------------------------------------------------------------
 
-    def start_as_current_span(self, name: str, tags: Dict[str, str] = None):
+    def start_as_current_span(self, name: str, tags: dict[str, str] = None):
         """Context manager para span com propagação automática."""
         return _SpanContextManager(self, name, tags)
 
@@ -216,10 +218,10 @@ class Tracer:
                     "tags": [{"key": k, "value": v} for k, v in s.tags.items()],
                     "logs": [
                         {
-                            "timestamp": int(l["timestamp"] * 1_000_000),
-                            "fields": [{"key": k, "value": str(v)} for k, v in l["fields"].items()] + [{"key": "message", "value": l["message"]}],
+                            "timestamp": int(log_entry["timestamp"] * 1_000_000),
+                            "fields": [{"key": k, "value": str(v)} for k, v in log_entry["fields"].items()] + [{"key": "message", "value": log_entry["message"]}],
                         }
-                        for l in s.logs
+                        for log_entry in s.logs
                     ],
                     "status": {"code": s.status},
                 }
@@ -237,7 +239,7 @@ class Tracer:
     # Análise
     # ------------------------------------------------------------------
 
-    def get_slow_spans(self, threshold_ms: float = 100.0, limit: int = 20) -> List[Dict]:
+    def get_slow_spans(self, threshold_ms: float = 100.0, limit: int = 20) -> list[dict]:
         """Retorna spans mais lentos que threshold."""
         with self._lock:
             slow = [s for s in self._finished_spans if s.duration_ms and s.duration_ms > threshold_ms]
@@ -253,7 +255,7 @@ class Tracer:
             for s in slow_sorted[:limit]
         ]
 
-    def get_error_spans(self, limit: int = 20) -> List[Dict]:
+    def get_error_spans(self, limit: int = 20) -> list[dict]:
         """Retorna spans com erro."""
         with self._lock:
             errors = [s for s in self._finished_spans if s.status == "error"]
@@ -269,7 +271,7 @@ class Tracer:
             for s in errors_sorted[:limit]
         ]
 
-    def get_latency_summary(self) -> Dict[str, Any]:
+    def get_latency_summary(self) -> dict[str, Any]:
         """Resumo de latência por tipo de operação."""
         with self._lock:
             spans = list(self._finished_spans)
@@ -299,7 +301,7 @@ class Tracer:
     # Decorator
     # ------------------------------------------------------------------
 
-    def trace(self, name: Optional[str] = None, tags: Dict[str, str] = None):
+    def trace(self, name: str | None = None, tags: dict[str, str] = None):
         """Decorator para tracing automático de funções."""
         def decorator(func: Callable) -> Callable:
             span_name = name or func.__name__
@@ -322,11 +324,11 @@ class Tracer:
 class _SpanContextManager:
     """Context manager para spans."""
 
-    def __init__(self, tracer: Tracer, name: str, tags: Dict[str, str] = None):
+    def __init__(self, tracer: Tracer, name: str, tags: dict[str, str] = None):
         self.tracer = tracer
         self.name = name
         self.tags = tags or {}
-        self.span: Optional[Span] = None
+        self.span: Span | None = None
 
     def __enter__(self) -> Span:
         parent = self.tracer.current_span()
@@ -351,6 +353,3 @@ class _SpanContextManager:
                 self.tracer._local.current_span = None
         else:
             self.tracer._local.current_span = None
-
-
-import functools

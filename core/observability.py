@@ -18,11 +18,11 @@ import time
 
 __all__ = ["ObservabilityCollector", "HealthChecker", "MatchEvent", "MetricSnapshot"]
 from collections import deque
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any
 from threading import Lock
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +31,13 @@ logger = logging.getLogger(__name__)
 class MatchEvent:
     event_type: str  # start, end, kill, death, state_change, error
     timestamp: float
-    state: Optional[str] = None
-    brawler: Optional[str] = None
-    map_name: Optional[str] = None
-    result: Optional[str] = None
-    details: Dict[str, Any] = field(default_factory=dict)
+    state: str | None = None
+    brawler: str | None = None
+    map_name: str | None = None
+    result: str | None = None
+    details: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return asdict(self)
 
 
@@ -49,17 +49,17 @@ class MetricSnapshot:
     wins: int
     losses: int
     current_state: str
-    brawler: Optional[str]
-    map_name: Optional[str]
+    brawler: str | None
+    map_name: str | None
     avg_reward: float
     data_collector_samples: int
-    last_error: Optional[str]
+    last_error: str | None
     fps: float = 0.0
     p50_latency_ms: float = 0.0
     p95_latency_ms: float = 0.0
     p99_latency_ms: float = 0.0
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return asdict(self)
 
 
@@ -75,7 +75,7 @@ class LatencyHistogram:
         with self._lock:
             self._samples.append(duration_ms)
 
-    def get_percentiles(self) -> Dict[str, float]:
+    def get_percentiles(self) -> dict[str, float]:
         """Calculate latency percentiles (p50, p95, p99)."""
         with self._lock:
             if not self._samples:
@@ -124,7 +124,7 @@ class FPSCounter:
 class ObservabilityCollector:
     """Coleta métricas e eventos do bot em tempo real."""
 
-    def __init__(self, max_events: int = 1000, metrics_dir: Optional[Path] = None):
+    def __init__(self, max_events: int = 1000, metrics_dir: Path | None = None):
         self._lock = Lock()
         self.events: deque = deque(maxlen=max_events)
         self.metrics_dir = Path(metrics_dir) if metrics_dir else None
@@ -136,10 +136,10 @@ class ObservabilityCollector:
         self.wins = 0
         self.losses = 0
         self.cycle_times: deque = deque(maxlen=100)
-        self.last_error: Optional[str] = None
+        self.last_error: str | None = None
         self.current_state = "unknown"
-        self.current_brawler: Optional[str] = None
-        self.current_map: Optional[str] = None
+        self.current_brawler: str | None = None
+        self.current_map: str | None = None
         self.total_reward = 0.0
         self.reward_count = 0
         self.data_collector_samples = 0
@@ -179,7 +179,7 @@ class ObservabilityCollector:
         """Registra duração de captura de screenshot."""
         self.screenshot_latency.record(duration_sec * 1000)
 
-    def record_match_result(self, result: str, brawler: Optional[str] = None, map_name: Optional[str] = None):
+    def record_match_result(self, result: str, brawler: str | None = None, map_name: str | None = None):
         """Registra resultado de uma partida."""
         with self._lock:
             self.matches_total += 1
@@ -241,12 +241,12 @@ class ObservabilityCollector:
                 p99_latency_ms=latency["p99"],
             )
 
-    def get_recent_events(self, n: int = 50) -> List[Dict]:
+    def get_recent_events(self, n: int = 50) -> list[dict]:
         """Retorna os N eventos mais recentes."""
         with self._lock:
             return [e.to_dict() for e in list(self.events)[-n:]]
 
-    def export(self) -> Dict:
+    def export(self) -> dict:
         """Exporta todas as métricas e eventos para dict."""
         snapshot = self.get_snapshot()
         return {
@@ -262,13 +262,13 @@ class ObservabilityCollector:
 
     def export_prometheus(self) -> str:
         """Export metrics in Prometheus text exposition format.
-        
+
         Returns:
             String in Prometheus format suitable for /metrics endpoint.
         """
         snapshot = self.get_snapshot()
         lines = []
-        
+
         # Helper to format Prometheus metric
         def metric(name, value, metric_type="gauge", labels=None):
             label_str = ""
@@ -276,47 +276,47 @@ class ObservabilityCollector:
                 label_str = "{" + ",".join(f'{k}="{v}"' for k, v in labels.items()) + "}"
             lines.append(f"# TYPE {name} {metric_type}")
             lines.append(f"{name}{label_str} {value}")
-        
+
         # Match metrics
         metric("brawl_bot_matches_total", snapshot.matches_total, "counter")
         metric("brawl_bot_wins_total", snapshot.wins, "counter")
         metric("brawl_bot_losses_total", snapshot.losses, "counter")
         win_rate = snapshot.wins / max(1, snapshot.matches_total)
         metric("brawl_bot_win_rate", f"{win_rate:.4f}")
-        
+
         # Performance metrics
         metric("brawl_bot_fps", f"{snapshot.fps:.2f}")
         metric("brawl_bot_cycle_time_ms", f"{snapshot.cycle_time_ms:.2f}")
         metric("brawl_bot_latency_p50_ms", f"{snapshot.p50_latency_ms:.2f}")
         metric("brawl_bot_latency_p95_ms", f"{snapshot.p95_latency_ms:.2f}")
         metric("brawl_bot_latency_p99_ms", f"{snapshot.p99_latency_ms:.2f}")
-        
+
         # Latency histograms
         cycle_lat = self.cycle_latency.get_percentiles()
         metric("brawl_bot_cycle_latency_avg_ms", f"{cycle_lat['avg']:.2f}")
         metric("brawl_bot_cycle_latency_min_ms", f"{cycle_lat['min']:.2f}")
         metric("brawl_bot_cycle_latency_max_ms", f"{cycle_lat['max']:.2f}")
-        
+
         inf_lat = self.inference_latency.get_percentiles()
         metric("brawl_bot_inference_latency_avg_ms", f"{inf_lat['avg']:.2f}")
         metric("brawl_bot_inference_latency_p95_ms", f"{inf_lat['p95']:.2f}")
-        
+
         ss_lat = self.screenshot_latency.get_percentiles()
         metric("brawl_bot_screenshot_latency_avg_ms", f"{ss_lat['avg']:.2f}")
-        
+
         # Reward metrics
         metric("brawl_bot_avg_reward", f"{snapshot.avg_reward:.4f}")
         metric("brawl_bot_data_collector_samples", snapshot.data_collector_samples, "counter")
-        
+
         # State info
         if snapshot.brawler:
             metric("brawl_bot_current_brawler", 1, "gauge", {"brawler": snapshot.brawler})
         if snapshot.map_name:
             metric("brawl_bot_current_map", 1, "gauge", {"map": snapshot.map_name})
-        
+
         return "\n".join(lines) + "\n"
 
-    def save_to_disk(self, filename: Optional[str] = None):
+    def save_to_disk(self, filename: str | None = None):
         """Persiste métricas em disco."""
         if not self.metrics_dir:
             return
@@ -331,13 +331,13 @@ class HealthChecker:
     """Verifica saúde dos componentes do bot."""
 
     def __init__(self):
-        self.checks: Dict[str, Any] = {}
+        self.checks: dict[str, Any] = {}
 
     def register(self, name: str, check_func):
         """Registra uma função de health check."""
         self.checks[name] = check_func
 
-    def run(self) -> Dict[str, Any]:
+    def run(self) -> dict[str, Any]:
         """Executa todos os health checks."""
         results = {}
         for name, func in self.checks.items():

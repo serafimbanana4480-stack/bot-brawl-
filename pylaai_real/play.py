@@ -1,12 +1,15 @@
 """
 play.py - Soberana Ultimate Combat Engine (orquestrador)
 
-Motor de combate avançado — orquestrador principal.
+DEPRECATED: Use core.combat.combat_engine.CombatEngineMixin instead.
+This module is kept for backward compatibility only.
+
 Combat logic moved to core.combat.combat_engine,
 movement logic to core.movement.movement_engine,
 ability logic to core.abilities.ability_manager.
 """
 
+import warnings
 import time
 import math
 import numpy as np
@@ -15,6 +18,12 @@ import random
 from collections import deque, defaultdict
 from typing import Optional, List, Dict, Tuple
 from pathlib import Path
+
+warnings.warn(
+    "Deprecated: use core.combat.combat_engine.CombatEngineMixin instead",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 # Utilitarios de humanizacao
 from .humanization_utils import human_delay, jitter_value, HumanPauseSimulator
@@ -769,12 +778,61 @@ class PlayLogic(CombatEngineMixin, MovementEngineMixin, AbilityManagerMixin):
 
             # 2. Movimento Tático: se combat não ditou movimento, calcular um default
             logger.debug("[COMBAT] Calculando movimento tático")
+            move_key = ""  # garantir inicializacao
             if move_target and self.movement:
                 self.movement.move_to_position(move_target[0], move_target[1])
                 moved = True
                 move_key = self.movement.get_tactical_movement(player, enemies, bushes, power_cubes)
                 logger.info(f"[COMBAT] Movimento combat -> ({move_target[0]:.0f}, {move_target[1]:.0f}), dir={move_key}")
             else:
+                # --- SOVERANA FIX 2026-06-19: anti-stuck + anti-idle ---
+                # Se nenhuma decisao foi tomada E estamos a ficar parados, forca movimento
+                idle_antistuck_used = False
+                try:
+                    anti_idle_cfg = getattr(self, 'central_config', {}).get("anti_idle", {}) if hasattr(self, 'central_config') else {}
+                    anti_idle_cfg = anti_idle_cfg or {"enabled": True, "idle_threshold_sec": 4.0, "stuck_threshold_sec": 8.0}
+                    if anti_idle_cfg.get("enabled", True) and self.movement:
+                        # Verificar ultima acao
+                        now = time.time()
+                        last_action = getattr(self.state_manager, "_last_action_time", None) if hasattr(self, 'state_manager') else None
+                        if not last_action:
+                            last_action = getattr(self, "_last_action_time", now)
+                        idle_for = now - last_action
+                        threshold = anti_idle_cfg.get("idle_threshold_sec", 4.0)
+                        stuck_threshold = anti_idle_cfg.get("stuck_threshold_sec", 8.0)
+
+                        if player is not None and idle_for > threshold:
+                            player_c = ((player[0] + player[2]) // 2 if len(player) >= 4
+                                        else (player[0] if player else 0),
+                                        (player[1] + player[3]) // 2 if len(player) >= 4
+                                        else (player[1] if player else 0))
+                            if idle_for > stuck_threshold and hasattr(self.movement, 'get_anti_stuck_movement'):
+                                # STUCK: usar escape vector
+                                target = self.movement.get_anti_stuck_movement(player_c, enemies)
+                                if target:
+                                    self.movement.move_to_position(target[0], target[1])
+                                    moved = True
+                                    idle_antistuck_used = True
+                                    logger.warning(f"[ANTISTUCK] Preso {idle_for:.1f}s -> escape para {target}")
+                            elif hasattr(self.movement, 'get_anti_stuck_movement'):
+                                # IDLE: wiggle/walk aleatorio
+                                if hasattr(self.movement, '_stuck_counter'):
+                                    self.movement._stuck_counter += 1
+                                if getattr(self.movement, '_stuck_counter', 0) > anti_idle_cfg.get("max_consecutive_idle_actions", 3):
+                                    target = self.movement.get_anti_stuck_movement(player_c, enemies)
+                                    if target:
+                                        self.movement.move_to_position(target[0], target[1])
+                                        moved = True
+                                        idle_antistuck_used = True
+                                        if hasattr(self.movement, '_stuck_counter'):
+                                            self.movement._stuck_counter = 0
+                                        logger.info(f"[ANTIIDLE] Idle {idle_for:.1f}s -> wiggle para {target}")
+                except Exception as _idle_err:
+                    logger.debug(f"[ANTIIDLE] check failed: {_idle_err}")
+                # --- end fix ---
+
+            # 2b. Movimento tatico / RL (se ainda nao moveu)
+            if not moved:
                 use_rl = rl_action is not None and rl_confidence > 0.6
                 if use_rl:
                     move_key = self._apply_rl_action(rl_action, player, enemies, power_cubes, "")

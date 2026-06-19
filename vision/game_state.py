@@ -21,9 +21,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
-
-import numpy as np
+from typing import Any
 
 
 @dataclass
@@ -32,11 +30,11 @@ class YoloDetection:
 
     class_id: int
     class_name: str
-    bbox: Tuple[float, float, float, float]  # x1, y1, x2, y2 normalizados 0-1
+    bbox: tuple[float, float, float, float]  # x1, y1, x2, y2 normalizados 0-1
     confidence: float
-    center: Tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
+    center: tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "class_id": self.class_id,
             "class_name": self.class_name,
@@ -50,22 +48,22 @@ class YoloDetection:
 class HudValues:
     """Valores extraídos do HUD via OCR."""
 
-    hp: Optional[float] = None  # 0.0–1.0
+    hp: float | None = None  # 0.0–1.0
     hp_confidence: float = 0.0
-    ammo: Optional[int] = None  # 0–3
+    ammo: int | None = None  # 0–3
     ammo_confidence: float = 0.0
-    super_charge: Optional[float] = None  # 0.0–1.0
+    super_charge: float | None = None  # 0.0–1.0
     super_confidence: float = 0.0
-    timer_seconds: Optional[float] = None
+    timer_seconds: float | None = None
     timer_confidence: float = 0.0
-    team_score: Optional[Tuple[int, int]] = None  # (nosso, inimigo)
+    team_score: tuple[int, int] | None = None  # (nosso, inimigo)
     score_confidence: float = 0.0
-    cube_count: Optional[int] = None
+    cube_count: int | None = None
     cube_confidence: float = 0.0
-    gem_count: Optional[int] = None
+    gem_count: int | None = None
     gem_confidence: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "hp": self.hp,
             "hp_confidence": self.hp_confidence,
@@ -98,7 +96,7 @@ class PlayerStatus:
     super_charge: float = -1.0
     confidence: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "life": self.life,
             "super_ready": self.super_ready,
@@ -129,14 +127,14 @@ class GameState:
     game_state_confidence: float = 0.0
 
     # Modo e mapa
-    game_mode: Optional[str] = None  # gem_grab, showdown, brawl_ball, etc.
-    map_name: Optional[str] = None
+    game_mode: str | None = None  # gem_grab, showdown, brawl_ball, etc.
+    map_name: str | None = None
 
     # Detecções YOLO
-    detections: List[YoloDetection] = field(default_factory=list)
-    player_detection: Optional[YoloDetection] = None
-    enemy_detections: List[YoloDetection] = field(default_factory=list)
-    powerup_detections: List[YoloDetection] = field(default_factory=list)
+    detections: list[YoloDetection] = field(default_factory=list)
+    player_detection: YoloDetection | None = None
+    enemy_detections: list[YoloDetection] = field(default_factory=list)
+    powerup_detections: list[YoloDetection] = field(default_factory=list)
 
     # HUD (OCR)
     hud: HudValues = field(default_factory=HudValues)
@@ -146,12 +144,12 @@ class GameState:
 
     # Metadados
     latency_ms: float = 0.0
-    resolution: Tuple[int, int] = (1920, 1080)
+    resolution: tuple[int, int] = (1920, 1080)
 
     # Raw data (opcional, para debug)
-    raw_screenshot_shape: Optional[Tuple[int, int, int]] = None
+    raw_screenshot_shape: tuple[int, int, int] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serializa para dict (JSON-friendly)."""
         return {
             "frame_id": self.frame_id,

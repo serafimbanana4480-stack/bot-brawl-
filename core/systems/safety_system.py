@@ -13,10 +13,10 @@ Interface: init(), start(), stop(), status(), health_check()
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
-from safety_system import SafetySystem, SafetyConfig
-from humanization import HumanizationEngine, HumanizationConfig
+from humanization import HumanizationConfig, HumanizationEngine
+from safety_system import SafetyConfig, SafetySystem
 
 logger = logging.getLogger(__name__)
 
@@ -26,24 +26,24 @@ class SafetySystemWrapper:
 
     def __init__(
         self,
-        safety_config: Optional[SafetyConfig] = None,
-        humanization_config: Optional[HumanizationConfig] = None,
-        central_config: Optional[Dict[str, Any]] = None,
+        safety_config: SafetyConfig | None = None,
+        humanization_config: HumanizationConfig | None = None,
+        central_config: dict[str, Any] | None = None,
         enable_error_recovery: bool = True,
     ):
         self.central_config = central_config or {}
         self.enable_error_recovery = enable_error_recovery
 
         # Required components (fatal if missing)
-        self.safety: Optional[SafetySystem] = None
-        self.humanization: Optional[HumanizationEngine] = None
+        self.safety: SafetySystem | None = None
+        self.humanization: HumanizationEngine | None = None
 
         # Optional components
-        self.anti_ban: Optional[Any] = None
-        self.error_recovery: Optional[Any] = None
-        self.recovery_integration: Optional[Any] = None
-        self.state_recovery: Optional[Any] = None
-        self.auto_fix: Optional[Any] = None
+        self.anti_ban: Any | None = None
+        self.error_recovery: Any | None = None
+        self.recovery_integration: Any | None = None
+        self.state_recovery: Any | None = None
+        self.auto_fix: Any | None = None
         self._running = False
 
         # Initialize required systems immediately
@@ -65,7 +65,7 @@ class SafetySystemWrapper:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def setup(self, emulator_controller: Optional[Any] = None) -> bool:
+    def setup(self, emulator_controller: Any | None = None) -> bool:
         """Initialize optional safety components."""
         # Anti-ban (canonical: core.anti_ban.AntiBanSystem)
         try:
@@ -78,7 +78,7 @@ class SafetySystemWrapper:
         # Error Recovery
         if self.enable_error_recovery:
             try:
-                from core.error_recovery import ErrorRecoverySystem, ErrorRecoveryIntegration
+                from core.error_recovery import ErrorRecoverySystem  # noqa: F401
                 self.error_recovery = ErrorRecoverySystem(
                     enable_auto_recovery=True,
                     max_recovery_attempts=3,
@@ -142,7 +142,7 @@ class SafetySystemWrapper:
     # Status / Health
     # ------------------------------------------------------------------
 
-    def status(self) -> Dict[str, Any]:
+    def status(self) -> dict[str, Any]:
         return {
             "safety_ok": self.safety is not None,
             "humanization_ok": self.humanization is not None,
@@ -152,7 +152,7 @@ class SafetySystemWrapper:
             "auto_fix_ok": self.auto_fix is not None,
         }
 
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         issues = []
         if self.safety is None:
             issues.append("no_safety")

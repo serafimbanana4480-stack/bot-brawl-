@@ -19,9 +19,8 @@ Uso:
 import json
 import logging
 import time
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 from collections import Counter, defaultdict
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +50,9 @@ class MetaPredictor:
 
         # Estatísticas
         self._brawler_frequency: Counter = Counter()
-        self._map_brawlers: Dict[str, Counter] = defaultdict(Counter)
+        self._map_brawlers: dict[str, Counter] = defaultdict(Counter)
         self._team_compositions: Counter = Counter()  # frozenset -> count
-        self._win_rates: Dict[str, Dict[str, int]] = defaultdict(lambda: {"wins": 0, "losses": 0})
+        self._win_rates: dict[str, dict[str, int]] = defaultdict(lambda: {"wins": 0, "losses": 0})
 
         self._load_history()
 
@@ -62,7 +61,7 @@ class MetaPredictor:
         if not self.history_path.exists():
             return
         try:
-            with open(self.history_path, "r", encoding="utf-8") as f:
+            with open(self.history_path, encoding="utf-8") as f:
                 for line in f:
                     try:
                         match = json.loads(line)
@@ -76,10 +75,10 @@ class MetaPredictor:
     def record_match(
         self,
         map_name: str,
-        game_mode: Optional[str] = None,
-        enemies: List[str] = None,
-        allies: List[str] = None,
-        result: Optional[str] = None,
+        game_mode: str | None = None,
+        enemies: list[str] = None,
+        allies: list[str] = None,
+        result: str | None = None,
     ):
         """Registra uma partida no histórico."""
         match = {
@@ -97,11 +96,11 @@ class MetaPredictor:
 
         self._update_stats(match)
 
-    def _update_stats(self, match: Dict, save: bool = True):
+    def _update_stats(self, match: dict, save: bool = True):
         """Atualiza estatísticas internas."""
         map_name = match.get("map", "unknown")
         enemies = match.get("enemies", [])
-        allies = match.get("allies", [])
+        match.get("allies", [])
         result = match.get("result")
 
         for brawler in enemies:
@@ -125,10 +124,10 @@ class MetaPredictor:
 
     def predict_enemy_brawlers(
         self,
-        map_name: Optional[str] = None,
-        game_mode: Optional[str] = None,
+        map_name: str | None = None,
+        game_mode: str | None = None,
         top_n: int = 5,
-    ) -> List[Tuple[str, float]]:
+    ) -> list[tuple[str, float]]:
         """
         Prediz brawlers inimigos mais prováveis.
         Retorna lista de (brawler, probabilidade).
@@ -148,9 +147,9 @@ class MetaPredictor:
 
     def predict_team_composition(
         self,
-        map_name: Optional[str] = None,
+        map_name: str | None = None,
         top_n: int = 3,
-    ) -> List[Tuple[frozenset, float]]:
+    ) -> list[tuple[frozenset, float]]:
         """Prediz composições de time mais comuns."""
         # Filtrar por mapa se possível (simplificado)
         total = sum(self._team_compositions.values())
@@ -162,10 +161,10 @@ class MetaPredictor:
 
     def suggest_counters(
         self,
-        enemies: List[str],
-        owned_brawlers: Optional[List[str]] = None,
+        enemies: list[str],
+        owned_brawlers: list[str] | None = None,
         top_n: int = 3,
-    ) -> List[Tuple[str, float]]:
+    ) -> list[tuple[str, float]]:
         """
         Sugere counter-picks para brawlers inimigos.
 
@@ -177,7 +176,7 @@ class MetaPredictor:
         counters = Counter()
 
         # Tabela de counters simplificada
-        COUNTER_TABLE = {
+        COUNTER_TABLE = {  # noqa: N806
             "Shelly": ["Brock", "Piper", "Bea"],
             "Bull": ["Shelly", "Brock", "Piper"],
             "El Primo": ["Shelly", "Colt", "Brock"],
@@ -203,7 +202,7 @@ class MetaPredictor:
         max_score = most_common[0][1] if most_common else 1
         return [(b, score / max_score) for b, score in most_common]
 
-    def get_brawler_win_rate(self, brawler: str) -> Optional[float]:
+    def get_brawler_win_rate(self, brawler: str) -> float | None:
         """Retorna win rate de um brawler."""
         stats = self._win_rates.get(brawler)
         if not stats:
@@ -211,7 +210,7 @@ class MetaPredictor:
         total = stats["wins"] + stats["losses"]
         return stats["wins"] / total if total > 0 else 0.0
 
-    def get_meta_trend(self, days: int = 7) -> Dict[str, List[Tuple[str, float]]]:
+    def get_meta_trend(self, days: int = 7) -> dict[str, list[tuple[str, float]]]:
         """
         Retorna tendência do meta nos últimos N dias.
         """
@@ -220,7 +219,7 @@ class MetaPredictor:
         recent_counter = Counter()
 
         if self.history_path.exists():
-            with open(self.history_path, "r", encoding="utf-8") as f:
+            with open(self.history_path, encoding="utf-8") as f:
                 for line in f:
                     try:
                         match = json.loads(line)
@@ -241,7 +240,7 @@ class MetaPredictor:
             "period_days": days,
         }
 
-    def get_status(self) -> Dict:
+    def get_status(self) -> dict:
         return {
             "total_matches": sum(self._brawler_frequency.values()),
             "unique_brawlers_seen": len(self._brawler_frequency),

@@ -17,7 +17,7 @@ Uso:
 
 import logging
 import random
-from typing import Dict, List, Optional, Any
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +33,8 @@ class CombatDecisionBridge:
     def __init__(self, play_logic_instance=None, epsilon: float = 0.1):
         self.play_logic = play_logic_instance
         self.epsilon = epsilon
-        self._moo: Optional[Any] = None
-        self._action_history: List[str] = []
+        self._moo: Any | None = None
+        self._action_history: list[str] = []
         self._max_history = 50
 
         try:
@@ -46,9 +46,9 @@ class CombatDecisionBridge:
 
     def decide_combat_action(
         self,
-        valid_actions: List[str],
-        game_context: Dict[str, Any],
-        play_logic_recommendation: Optional[str] = None,
+        valid_actions: list[str],
+        game_context: dict[str, Any],
+        play_logic_recommendation: str | None = None,
     ) -> str:
         """
         Decide ação de combate combinando PlayLogic + MultiObjective RL.
@@ -99,7 +99,7 @@ class CombatDecisionBridge:
         logger.debug("[COMBAT_BRIDGE] Fallback aleatório: %s", action)
         return action
 
-    def get_action_scores(self, action: str, game_context: Dict[str, Any]) -> Dict[str, float]:
+    def get_action_scores(self, action: str, game_context: dict[str, Any]) -> dict[str, float]:
         """Retorna scores individuais por objetivo para uma ação."""
         if self._moo:
             return self._moo.get_objective_scores(action, game_context)
@@ -116,7 +116,7 @@ class CombatDecisionBridge:
             except ValueError:
                 logger.warning("[COMBAT_BRIDGE] Objetivo desconhecido: %s", objective_name)
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Status do bridge para dashboard."""
         return {
             "moo_available": self._moo is not None,

@@ -12,13 +12,12 @@ dispatch to ADB/Win32.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
-from core.ports.input_port import InputAction, InputPort
 from core.adversarial_humanization import (
-    AdversarialHumanizationConfig,
     AdversarialHumanizer,
 )
+from core.ports.input_port import InputAction, InputPort
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +70,7 @@ class AdversarialInputAdapter(InputPort):
         )
         return self.execute(action)
 
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         primary = self._primary.health_check()
         return {
             **primary,

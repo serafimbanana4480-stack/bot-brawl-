@@ -6,19 +6,19 @@ Expõe funções assíncronas compatíveis com FastAPI e com os testes de integr
 """
 
 import json
-import subprocess
 import logging
+import subprocess
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Importações com fallback para ambientes sem todas as dependências
 try:
-    from emulator_detector import get_emulator_detector, EmulatorInfo
+    from emulator_detector import EmulatorInfo, get_emulator_detector
 except ImportError:
     try:
-        from brawl_bot.emulator_detector import get_emulator_detector, EmulatorInfo
+        from brawl_bot.emulator_detector import EmulatorInfo, get_emulator_detector
     except ImportError:
         def get_emulator_detector():
             return None
@@ -34,7 +34,7 @@ except ImportError:
             return "adb"
 
 
-def _emulator_to_dict(emulator) -> Dict[str, Any]:
+def _emulator_to_dict(emulator) -> dict[str, Any]:
     """Converte um EmulatorInfo (ou objeto duck-type) para dicionário serializável."""
     return {
         "name": getattr(emulator, "name", "unknown"),
@@ -45,7 +45,7 @@ def _emulator_to_dict(emulator) -> Dict[str, Any]:
     }
 
 
-def _get_diagnostics() -> Dict[str, Any]:
+def _get_diagnostics() -> dict[str, Any]:
     """Coleta informações de diagnóstico do ambiente."""
     adb_path = None
     try:
@@ -85,7 +85,7 @@ def _get_diagnostics() -> Dict[str, Any]:
     }
 
 
-async def list_emulators() -> Dict[str, Any]:
+async def list_emulators() -> dict[str, Any]:
     """Lista todos os emuladores detectados com diagnóstico do ambiente."""
     detector = get_emulator_detector()
     emulators = []
@@ -104,7 +104,7 @@ async def list_emulators() -> Dict[str, Any]:
     }
 
 
-async def connect_emulator(name: str) -> Dict[str, Any]:
+async def connect_emulator(name: str) -> dict[str, Any]:
     """Conecta ao emulador com o nome especificado via ADB."""
     detector = get_emulator_detector()
     emulator = None
@@ -188,7 +188,7 @@ def _get_bot():
     return _bot_instance
 
 
-async def setup_bot() -> Dict[str, Any]:
+async def setup_bot() -> dict[str, Any]:
     """Set up the bot (load models, detect emulator, etc.)."""
     bot = _get_bot()
     if bot is None:
@@ -201,7 +201,7 @@ async def setup_bot() -> Dict[str, Any]:
         return {"success": False, "error": str(exc)}
 
 
-async def start_bot() -> Dict[str, Any]:
+async def start_bot() -> dict[str, Any]:
     """Start the bot's main loop."""
     bot = _get_bot()
     if bot is None:
@@ -214,7 +214,7 @@ async def start_bot() -> Dict[str, Any]:
         return {"success": False, "error": str(exc)}
 
 
-async def stop_bot() -> Dict[str, Any]:
+async def stop_bot() -> dict[str, Any]:
     """Stop the bot's main loop."""
     bot = _get_bot()
     if bot is None:
@@ -227,7 +227,7 @@ async def stop_bot() -> Dict[str, Any]:
         return {"success": False, "error": str(exc)}
 
 
-async def get_status() -> Dict[str, Any]:
+async def get_status() -> dict[str, Any]:
     """Return the current bot status dict."""
     bot = _get_bot()
     if bot is None:
@@ -239,7 +239,7 @@ async def get_status() -> Dict[str, Any]:
         return {"running": False, "error": str(exc)}
 
 
-async def get_diagnostics() -> Dict[str, Any]:
+async def get_diagnostics() -> dict[str, Any]:
     """Return a consolidated diagnostics snapshot."""
     bot = _get_bot()
     if bot is None:

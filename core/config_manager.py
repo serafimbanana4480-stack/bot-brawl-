@@ -17,9 +17,9 @@ Features:
 import json
 import logging
 import os
-from pathlib import Path
-from typing import Any, Dict, Optional
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 try:
     import yaml
@@ -35,7 +35,7 @@ class EmulatorConfig:
     """Emulator configuration."""
     window_title: str = "BlueStacks App Player"
     resolution: tuple = (1920, 1080)
-    adb_path: Optional[str] = None
+    adb_path: str | None = None
     auto_detect: bool = True
 
 
@@ -82,37 +82,37 @@ class BotConfig:
     dashboard_port: int = 8765
     trophy_limit: int = 400
     warning_trophies: int = 380
-    
+
     # Sub-configurations
     emulator: EmulatorConfig = field(default_factory=EmulatorConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
-    
+
     # Brawler queue (loaded from config)
     brawler_queue: list = field(default_factory=list)
 
 
 class ConfigManager:
     """Unified configuration manager."""
-    
-    def __init__(self, config_path: Optional[Path] = None):
+
+    def __init__(self, config_path: Path | None = None):
         """
         Initialize configuration manager.
-        
+
         Args:
             config_path: Path to config file (yaml or json). If None, searches standard locations.
         """
         self.config_path = config_path or self._find_config_file()
         self.config = BotConfig()
-        self._raw_config: Dict[str, Any] = {}
-        
+        self._raw_config: dict[str, Any] = {}
+
         if self.config_path and self.config_path.exists():
             self.load()
         else:
             logger.warning(f"Config file not found at {self.config_path}, using defaults")
             self._create_default_config()
-    
-    def _find_config_file(self) -> Optional[Path]:
+
+    def _find_config_file(self) -> Path | None:
         """Search for config file in standard locations."""
         # Determine bot root
         try:
@@ -120,7 +120,7 @@ class ConfigManager:
             bot_root = _BOT_ROOT
         except ImportError:
             bot_root = Path(__file__).parent.parent
-        
+
         # Search in order of preference
         candidates = [
             bot_root / "config.yaml",
@@ -128,58 +128,58 @@ class ConfigManager:
             bot_root / "config.json",
             bot_root / "config.example.json",
         ]
-        
+
         for candidate in candidates:
             if candidate.exists():
                 logger.info(f"Found config file: {candidate}")
                 return candidate
-        
+
         # Return default path (will create if doesn't exist)
         return bot_root / "config.yaml"
-    
+
     def load(self) -> bool:
         """Load configuration from file."""
         if not self.config_path or not self.config_path.exists():
             logger.warning(f"Config file not found: {self.config_path}")
             return False
-        
+
         try:
-            with open(self.config_path, 'r', encoding='utf-8') as f:
+            with open(self.config_path, encoding='utf-8') as f:
                 if self.config_path.suffix in ['.yaml', '.yml'] and YAML_AVAILABLE:
                     self._raw_config = yaml.safe_load(f) or {}
                 else:
                     self._raw_config = json.load(f) or {}
-            
+
             # Apply environment variable overrides
             self._apply_env_overrides()
-            
+
             # Parse into config objects
             self._parse_config()
-            
+
             logger.info(f"Configuration loaded from {self.config_path}")
             return True
-            
-        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.error(f"Failed to load config from {self.config_path}: {e}")
             return False
-    
+
     def _apply_env_overrides(self):
         """Apply environment variable overrides to config."""
         env_prefix = "BRAWL_BOT_"
-        
+
         for key, value in os.environ.items():
             if key.startswith(env_prefix):
                 config_key = key[len(env_prefix):].lower()
                 # Convert nested keys (e.g., SAFETY_MAX_TROPHIES -> safety.max_trophies)
                 self._set_nested_config(config_key, value)
-    
+
     def _set_nested_config(self, key: str, value: str):
         """Set a nested config value from environment variable key."""
         parts = key.split('_')
         if len(parts) >= 2:
             section = parts[0]
             setting = '_'.join(parts[1:])
-            
+
             # Handle type conversion
             try:
                 if value.lower() in ('true', 'false'):
@@ -190,12 +190,12 @@ class ConfigManager:
                     value = int(value)
             except ValueError:
                 pass  # Keep as string
-            
+
             # Set in raw config
             if section not in self._raw_config:
                 self._raw_config[section] = {}
             self._raw_config[section][setting] = value
-    
+
     def _parse_config(self):
         """Parse raw config into typed config objects."""
         # Parse emulator config
@@ -207,7 +207,7 @@ class ConfigManager:
                 adb_path=emu_cfg.get('adb_path'),
                 auto_detect=emu_cfg.get('auto_detect', True)
             )
-        
+
         # Parse safety config
         if 'safety' in self._raw_config:
             safe_cfg = self._raw_config['safety']
@@ -219,52 +219,52 @@ class ConfigManager:
                 break_duration_max=safe_cfg.get('break_duration_max', self.config.safety.break_duration_max),
                 min_apm=safe_cfg.get('min_apm', self.config.safety.min_apm),
                 max_apm=safe_cfg.get('max_apm', self.config.safety.max_apm),
-                suspicious_pattern_threshold=safe_cfg.get('suspicious_pattern_threshold', 
+                suspicious_pattern_threshold=safe_cfg.get('suspicious_pattern_threshold',
                                                        self.config.safety.suspicious_pattern_threshold),
-                auto_stop_on_detection=safe_cfg.get('auto_stop_on_detection', 
+                auto_stop_on_detection=safe_cfg.get('auto_stop_on_detection',
                                                    self.config.safety.auto_stop_on_detection)
             )
-        
+
         # Parse training config
         if 'training' in self._raw_config:
             train_cfg = self._raw_config['training']
             self.config.training = TrainingConfig(
                 schema=train_cfg.get('schema', self.config.training.schema),
-                auto_retrain_enabled=train_cfg.get('auto_retrain_enabled', 
+                auto_retrain_enabled=train_cfg.get('auto_retrain_enabled',
                                                   self.config.training.auto_retrain_enabled),
-                min_dataset_size=train_cfg.get('min_dataset_size', 
+                min_dataset_size=train_cfg.get('min_dataset_size',
                                              self.config.training.min_dataset_size),
                 batch_size=train_cfg.get('batch_size', self.config.training.batch_size),
                 epochs=train_cfg.get('epochs', self.config.training.epochs),
                 learning_rate=train_cfg.get('learning_rate', self.config.training.learning_rate)
             )
-        
+
         # Parse main config
-        self.config.diagnostic_mode = self._raw_config.get('diagnostic_mode', 
+        self.config.diagnostic_mode = self._raw_config.get('diagnostic_mode',
                                                           self.config.diagnostic_mode)
-        self.config.enable_recording = self._raw_config.get('enable_recording', 
+        self.config.enable_recording = self._raw_config.get('enable_recording',
                                                            self.config.enable_recording)
-        self.config.auto_tuning_enabled = self._raw_config.get('auto_tuning_enabled', 
+        self.config.auto_tuning_enabled = self._raw_config.get('auto_tuning_enabled',
                                                               self.config.auto_tuning_enabled)
-        self.config.brawler_selection_enabled = self._raw_config.get('brawler_selection_enabled', 
+        self.config.brawler_selection_enabled = self._raw_config.get('brawler_selection_enabled',
                                                                      self.config.brawler_selection_enabled)
-        self.config.debug_visualizer = self._raw_config.get('debug_visualizer', 
+        self.config.debug_visualizer = self._raw_config.get('debug_visualizer',
                                                            self.config.debug_visualizer)
-        self.config.dashboard_port = self._raw_config.get('dashboard_port', 
+        self.config.dashboard_port = self._raw_config.get('dashboard_port',
                                                          self.config.dashboard_port)
-        self.config.trophy_limit = self._raw_config.get('trophy_limit', 
+        self.config.trophy_limit = self._raw_config.get('trophy_limit',
                                                        self.config.trophy_limit)
-        self.config.warning_trophies = self._raw_config.get('warning_trophies', 
+        self.config.warning_trophies = self._raw_config.get('warning_trophies',
                                                            self.config.warning_trophies)
-        
+
         # Parse brawler queue
         self.config.brawler_queue = self._raw_config.get('brawler_queue', [])
-    
+
     def _create_default_config(self):
         """Create default configuration file."""
         if not self.config_path:
             return
-        
+
         try:
             default_config = {
                 'diagnostic_mode': False,
@@ -303,7 +303,7 @@ class ConfigManager:
                 },
                 'brawler_queue': []
             }
-            
+
             # Use YAML if available, otherwise JSON
             if YAML_AVAILABLE and self.config_path.suffix in ['.yaml', '.yml']:
                 with open(self.config_path, 'w', encoding='utf-8') as f:
@@ -311,18 +311,18 @@ class ConfigManager:
             else:
                 with open(self.config_path, 'w', encoding='utf-8') as f:
                     json.dump(default_config, f, indent=2)
-            
+
             logger.info(f"Created default config at {self.config_path}")
-            
-        except (FileNotFoundError, PermissionError, ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+
+        except (FileNotFoundError, PermissionError, ConnectionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.error(f"Failed to create default config: {e}")
-    
+
     def save(self) -> bool:
         """Save current configuration to file."""
         if not self.config_path:
             logger.error("No config path set, cannot save")
             return False
-        
+
         try:
             # Convert config objects to dict
             config_dict = {
@@ -363,7 +363,7 @@ class ConfigManager:
                 },
                 'brawler_queue': self.config.brawler_queue
             }
-            
+
             # Save
             if YAML_AVAILABLE and self.config_path.suffix in ['.yaml', '.yml']:
                 with open(self.config_path, 'w', encoding='utf-8') as f:
@@ -371,19 +371,19 @@ class ConfigManager:
             else:
                 with open(self.config_path, 'w', encoding='utf-8') as f:
                     json.dump(config_dict, f, indent=2)
-            
+
             logger.info(f"Configuration saved to {self.config_path}")
             return True
-            
-        except (FileNotFoundError, PermissionError, ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+
+        except (FileNotFoundError, PermissionError, ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.error(f"Failed to save config: {e}")
             return False
-    
+
     def get(self, key: str, default: Any = None) -> Any:
         """Get a configuration value by key (supports dot notation)."""
         keys = key.split('.')
         value = self.config
-        
+
         for k in keys:
             if hasattr(value, k):
                 value = getattr(value, k)
@@ -391,14 +391,14 @@ class ConfigManager:
                 value = value[k]
             else:
                 return default
-        
+
         return value
-    
+
     def set(self, key: str, value: Any) -> bool:
         """Set a configuration value by key (supports dot notation)."""
         keys = key.split('.')
         obj = self.config
-        
+
         # Navigate to parent
         for k in keys[:-1]:
             if hasattr(obj, k):
@@ -406,11 +406,11 @@ class ConfigManager:
             else:
                 logger.error(f"Invalid config key: {key}")
                 return False
-        
+
         # Set value
         setattr(obj, keys[-1], value)
         return True
-    
+
     def migrate_legacy_config(self) -> bool:
         """Migrate from legacy config.json and lobby.toml to unified config."""
         try:
@@ -418,34 +418,34 @@ class ConfigManager:
             bot_root = _BOT_ROOT
         except ImportError:
             bot_root = Path(__file__).parent.parent
-        
+
         legacy_configs = [
             bot_root / "config.json",
             bot_root / "lobby.toml",
         ]
-        
+
         migrated = False
-        
+
         for legacy_path in legacy_configs:
             if legacy_path.exists():
                 try:
                     if legacy_path.suffix == '.json':
-                        with open(legacy_path, 'r', encoding='utf-8') as f:
+                        with open(legacy_path, encoding='utf-8') as f:
                             legacy_data = json.load(f)
-                        
+
                         # Merge into current config
                         self._raw_config.update(legacy_data)
                         self._parse_config()
                         migrated = True
                         logger.info(f"Migrated config from {legacy_path}")
-                    
+
                     elif legacy_path.suffix == '.toml':
                         # TOML migration requires toml library
                         try:
                             import toml
-                            with open(legacy_path, 'r', encoding='utf-8') as f:
+                            with open(legacy_path, encoding='utf-8') as f:
                                 legacy_data = toml.load(f)
-                            
+
                             # Merge into current config
                             self._raw_config.update(legacy_data)
                             self._parse_config()
@@ -453,18 +453,18 @@ class ConfigManager:
                             logger.info(f"Migrated config from {legacy_path}")
                         except ImportError:
                             logger.warning("toml library not installed, skipping lobby.toml migration")
-                
-                except (ImportError, ModuleNotFoundError, FileNotFoundError, PermissionError, ValueError, RuntimeError, OSError, IOError) as e:
+
+                except (ImportError, ModuleNotFoundError, FileNotFoundError, PermissionError, ValueError, RuntimeError, OSError) as e:
                     logger.error(f"Failed to migrate {legacy_path}: {e}")
-        
+
         if migrated:
             self.save()
-        
+
         return migrated
 
 
 # Global config instance
-_config_manager: Optional[ConfigManager] = None
+_config_manager: ConfigManager | None = None
 
 
 def get_config_manager() -> ConfigManager:

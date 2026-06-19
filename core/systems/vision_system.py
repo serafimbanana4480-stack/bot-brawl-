@@ -14,12 +14,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
-from pylaai_real.screenshot_taker import ScreenshotTaker
-from pylaai_real.detect import Detect
-from pylaai_real.unified_state_detector import UnifiedStateDetector
 from diagnostic_overlay import DiagnosticOverlay
+from pylaai_real.detect import Detect
+from pylaai_real.screenshot_taker import ScreenshotTaker
+from pylaai_real.unified_state_detector import UnifiedStateDetector
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class VisionSystem:
         self,
         images_path: Path,
         models_path: Path,
-        central_config: Dict[str, Any],
+        central_config: dict[str, Any],
         diagnostic_mode: bool = False,
     ):
         self.images_path = images_path
@@ -40,13 +40,13 @@ class VisionSystem:
         self.diagnostic_mode = diagnostic_mode
 
         # Components (populated during setup)
-        self.screenshot: Optional[ScreenshotTaker] = None
-        self.detect_main: Optional[Detect] = None
-        self.detect_enemies: Optional[Detect] = None
-        self.unified_detector: Optional[UnifiedStateDetector] = None
-        self.ocr_detector: Optional[Any] = None
-        self.diagnostic_overlay: Optional[DiagnosticOverlay] = None
-        self.esp_overlay: Optional[Any] = None
+        self.screenshot: ScreenshotTaker | None = None
+        self.detect_main: Detect | None = None
+        self.detect_enemies: Detect | None = None
+        self.unified_detector: UnifiedStateDetector | None = None
+        self.ocr_detector: Any | None = None
+        self.diagnostic_overlay: DiagnosticOverlay | None = None
+        self.esp_overlay: Any | None = None
 
         self._overlay_enabled = bool(
             diagnostic_mode or self.central_config.get("debug_visualizer", False)
@@ -61,7 +61,7 @@ class VisionSystem:
 
     def setup(
         self,
-        emulator_controller: Optional[Any] = None,
+        emulator_controller: Any | None = None,
         window_w: int = 1920,
         window_h: int = 1080,
     ) -> bool:
@@ -189,18 +189,18 @@ class VisionSystem:
             logger.error("[VISION] NO models loaded. Vision will not work.")
         return model_loaded
 
-    def _find_latest_trained(self) -> Optional[Path]:
+    def _find_latest_trained(self) -> Path | None:
         try:
             runs = sorted(self.models_path.glob("yolo/*/weights/best.pt"), key=lambda p: p.stat().st_mtime, reverse=True)
             return runs[0] if runs else None
-        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError):
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
             return None
 
     # ------------------------------------------------------------------
     # Status / Health
     # ------------------------------------------------------------------
 
-    def status(self) -> Dict[str, Any]:
+    def status(self) -> dict[str, Any]:
         return {
             "screenshot_ok": self.screenshot is not None,
             "detector_ok": self.detect_main is not None,
@@ -210,7 +210,7 @@ class VisionSystem:
             "esp_ok": self.esp_overlay is not None,
         }
 
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         issues = []
         if self.detect_main is None:
             issues.append("no_detector")
@@ -218,7 +218,7 @@ class VisionSystem:
             issues.append("no_screenshot")
         return {"healthy": len(issues) == 0, "issues": issues}
 
-    def get_detection_snapshot(self) -> Dict[str, Any]:
+    def get_detection_snapshot(self) -> dict[str, Any]:
         detections = []
         vision_stats = {}
         try:

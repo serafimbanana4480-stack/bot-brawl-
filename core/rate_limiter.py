@@ -16,15 +16,14 @@ Features:
 - Jitter em todos os parâmetros temporais
 """
 
-import random
-import time
-import logging
-import threading
-from datetime import datetime, timedelta
-from typing import Dict, Optional, List, Tuple
-from dataclasses import dataclass, field, asdict
-from pathlib import Path
 import json
+import logging
+import random
+import threading
+import time
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +35,10 @@ class AccountProfile:
     created_at: float = field(default_factory=time.time)
 
     # Horários de pico (personalizáveis por conta)
-    weekday_peaks: List[Tuple[int, int]] = field(
+    weekday_peaks: list[tuple[int, int]] = field(
         default_factory=lambda: [(19, 23), (12, 13)]
     )
-    weekend_peaks: List[Tuple[int, int]] = field(
+    weekend_peaks: list[tuple[int, int]] = field(
         default_factory=lambda: [(14, 23)]
     )
 
@@ -49,7 +48,7 @@ class AccountProfile:
 
     # Breaks
     break_probability_per_hour: float = 0.30
-    break_duration_range: Tuple[int, int] = (5, 15)  # minutos
+    break_duration_range: tuple[int, int] = (5, 15)  # minutos
 
     # Cooldowns
     min_gap_between_sessions_minutes: int = 60
@@ -60,16 +59,16 @@ class AccountProfile:
     jitter_factor: float = 0.20  # +/- 20% em todos os tempos
 
     # Estado runtime
-    play_history: List[Dict] = field(default_factory=list)
-    current_session_start: Optional[float] = None
+    play_history: list[dict] = field(default_factory=list)
+    current_session_start: float | None = None
     loss_streak: int = 0
     win_streak: int = 0
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict) -> "AccountProfile":
+    def from_dict(cls, data: dict) -> "AccountProfile":
         # Filtrar apenas campos existentes na dataclass
         valid_keys = {f.name for f in cls.__dataclass_fields__.values()}
         filtered = {k: v for k, v in data.items() if k in valid_keys}
@@ -96,7 +95,7 @@ class IntelligentRateLimiter:
         self.profiles_dir = Path(profiles_dir)
         self.profiles_dir.mkdir(parents=True, exist_ok=True)
 
-        self._profiles: Dict[str, AccountProfile] = {}
+        self._profiles: dict[str, AccountProfile] = {}
         self._lock = threading.RLock()
 
         # Carregar perfis existentes
@@ -129,7 +128,7 @@ class IntelligentRateLimiter:
                 logger.info("[RATE_LIMITER] Conta registrada: %s", account_id)
             return self._profiles[account_id]
 
-    def get_profile(self, account_id: str) -> Optional[AccountProfile]:
+    def get_profile(self, account_id: str) -> AccountProfile | None:
         """Retorna perfil de uma conta."""
         with self._lock:
             return self._profiles.get(account_id)
@@ -297,21 +296,21 @@ class IntelligentRateLimiter:
                 return True
         return False
 
-    def _get_last_session_end(self, profile: AccountProfile) -> Optional[float]:
+    def _get_last_session_end(self, profile: AccountProfile) -> float | None:
         """Retorna timestamp do fim da última sessão."""
         for entry in reversed(profile.play_history):
             if entry.get("type") == "session_end":
                 return entry["timestamp"]
         return None
 
-    def _get_last_match_time(self, profile: AccountProfile) -> Optional[float]:
+    def _get_last_match_time(self, profile: AccountProfile) -> float | None:
         """Retorna timestamp da última partida."""
         for entry in reversed(profile.play_history):
             if entry.get("type") in ("match_start", "match_end"):
                 return entry["timestamp"]
         return None
 
-    def _get_last_loss_time(self, profile: AccountProfile) -> Optional[float]:
+    def _get_last_loss_time(self, profile: AccountProfile) -> float | None:
         """Retorna timestamp da última derrota."""
         for entry in reversed(profile.play_history):
             if entry.get("type") == "match_end" and entry.get("result") in ("loss", "defeat"):
@@ -350,25 +349,25 @@ class IntelligentRateLimiter:
         try:
             with open(self._profile_path(account_id), "w", encoding="utf-8") as f:
                 json.dump(profile.to_dict(), f, indent=2, default=str)
-        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.warning("[RATE_LIMITER] Erro ao salvar perfil %s: %s", account_id, e)
 
     def _load_all_profiles(self):
         """Carrega todos os perfis do disco."""
         for path in self.profiles_dir.glob("*.json"):
             try:
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     data = json.load(f)
                 profile = AccountProfile.from_dict(data)
                 self._profiles[profile.account_id] = profile
-            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.warning("[RATE_LIMITER] Erro ao carregar %s: %s", path.name, e)
 
     # ------------------------------------------------------------------
     # Status
     # ------------------------------------------------------------------
 
-    def get_account_status(self, account_id: str) -> Dict:
+    def get_account_status(self, account_id: str) -> dict:
         """Retorna status legível para uma conta."""
         profile = self._profiles.get(account_id)
         if not profile:
@@ -391,6 +390,6 @@ class IntelligentRateLimiter:
             "peak_hour_now": self._is_peak_hour(profile, datetime.now()),
         }
 
-    def get_all_status(self) -> Dict[str, Dict]:
+    def get_all_status(self) -> dict[str, dict]:
         """Retorna status de todas as contas."""
         return {aid: self.get_account_status(aid) for aid in self._profiles}

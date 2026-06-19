@@ -25,10 +25,8 @@ Uso:
 """
 
 import logging
-import json
-from pathlib import Path
-from typing import Dict, List, Optional
 from collections import defaultdict
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +41,16 @@ class WinRatePredictor:
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
         # Base de dados: mapa + modo -> composição -> win/loss
-        self._map_stats: Dict[str, Dict] = defaultdict(lambda: {"wins": 0, "losses": 0, "matches": 0})
-        self._brawler_synergy: Dict[str, Dict] = defaultdict(lambda: {"wins": 0, "losses": 0})
-        self._counter_matrix: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        self._map_stats: dict[str, dict] = defaultdict(lambda: {"wins": 0, "losses": 0, "matches": 0})
+        self._brawler_synergy: dict[str, dict] = defaultdict(lambda: {"wins": 0, "losses": 0})
+        self._counter_matrix: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
     def record_match(
         self,
         map_name: str,
         game_mode: str,
-        allies: List[str],
-        enemies: List[str],
+        allies: list[str],
+        enemies: list[str],
         result: str,  # "win" ou "loss"
         own_score: int = 0,
         enemy_score: int = 0,
@@ -85,13 +83,13 @@ class WinRatePredictor:
 
     def predict(
         self,
-        allies: List[str],
-        enemies: List[str],
+        allies: list[str],
+        enemies: list[str],
         map_name: str,
         game_mode: str = "3v3",
         own_cubes: int = 0,
         enemy_cubes: int = 0,
-        time_remaining: Optional[int] = None,
+        time_remaining: int | None = None,
         own_hp_avg: float = 1.0,
         enemy_hp_avg: float = 1.0,
     ) -> float:
@@ -131,7 +129,7 @@ class WinRatePredictor:
         # Clamp
         return max(0.05, min(0.95, score))
 
-    def _compute_synergy_bonus(self, allies: List[str]) -> float:
+    def _compute_synergy_bonus(self, allies: list[str]) -> float:
         """Computa bônus de sinergia do time."""
         if len(allies) < 2:
             return 0.0
@@ -150,7 +148,7 @@ class WinRatePredictor:
 
         return total_synergy / pairs if pairs > 0 else 0.0
 
-    def _compute_counter_bonus(self, allies: List[str], enemies: List[str]) -> float:
+    def _compute_counter_bonus(self, allies: list[str], enemies: list[str]) -> float:
         """Computa bônus de counter."""
         if not allies or not enemies:
             return 0.0
@@ -166,7 +164,7 @@ class WinRatePredictor:
 
         return total_counter / pairs if pairs > 0 else 0.0
 
-    def _compute_map_bonus(self, map_name: str, game_mode: str, allies: List[str]) -> float:
+    def _compute_map_bonus(self, map_name: str, game_mode: str, allies: list[str]) -> float:
         """Computa bônus de familiaridade com mapa."""
         key = f"{map_name}:{game_mode}"
         stats = self._map_stats.get(key)
@@ -176,9 +174,9 @@ class WinRatePredictor:
 
     def get_matchup_analysis(
         self,
-        allies: List[str],
-        enemies: List[str],
-    ) -> Dict[str, any]:
+        allies: list[str],
+        enemies: list[str],
+    ) -> dict[str, any]:
         """Retorna análise detalhada do matchup."""
         analysis = {
             "synergy_score": round(self._compute_synergy_bonus(allies), 3),
@@ -196,7 +194,7 @@ class WinRatePredictor:
 
         return analysis
 
-    def get_status(self) -> Dict:
+    def get_status(self) -> dict:
         return {
             "maps_tracked": len(self._map_stats),
             "synergies_tracked": len(self._brawler_synergy),

@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
+
 from pydantic import BaseModel, Field, ValidationError
+
 
 class EmulatorConfig(BaseModel):
     type: str = Field(..., description="Emulator type, e.g., 'bluestacks' or 'ldplayer'")
@@ -22,7 +24,7 @@ def load_config(config_path: str | Path = "config.json") -> BotConfig:
     try:
         return BotConfig(**data)
     except ValidationError as e:
-        raise ValueError(f"Invalid config: {e}")
+        raise ValueError(f"Invalid config: {e}") from e
 
 if __name__ == "__main__":
     import argparse
@@ -35,4 +37,4 @@ if __name__ == "__main__":
         print(cfg.json(indent=2))
     except Exception as exc:
         print(f"Error: {exc}")
-        raise SystemExit(1)
+        raise SystemExit(1) from exc

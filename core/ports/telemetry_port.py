@@ -12,14 +12,14 @@ from __future__ import annotations
 
 import abc
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 @dataclass
 class MetricEvent:
     name: str
     value: float
-    tags: Dict[str, str] = field(default_factory=dict)
+    tags: dict[str, str] = field(default_factory=dict)
     timestamp: float = 0.0
 
 
@@ -32,7 +32,7 @@ class TelemetryPort(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def record_event(self, event_name: str, details: Dict[str, Any]) -> None:
+    def record_event(self, event_name: str, details: dict[str, Any]) -> None:
         """Record a structured event (match start, state change, error, etc.)."""
         ...
 
@@ -42,5 +42,5 @@ class TelemetryPort(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         ...

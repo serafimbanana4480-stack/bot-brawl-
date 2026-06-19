@@ -1,321 +1,271 @@
-# 🌵 Brawl Stars Bot — Soberana Omega
+# ⚔️ Soberana Omega — Brawl Stars Autonomous Bot
 
-AI-powered Brawl Stars automation bot with real-time computer vision (YOLO), adaptive combat decision-making, anti-ban humanization, and a full FastAPI backend with WebSocket support.
+> **Bot autónomo de Brawl Stars com visão computacional, combate adaptativo e humanização anti-ban.**
+
+<p align="center">
+  <img src="https://img.shields.io/badge/status-Active%20Development-brightgreen" alt="Status">
+  <img src="https://img.shields.io/badge/python-3.10%2B-blue?logo=python" alt="Python">
+  <img src="https://img.shields.io/badge/PyTorch-2.x-ee4c2c?logo=pytorch" alt="PyTorch">
+  <img src="https://img.shields.io/badge/YOLO-v8%2Fv11-00FFFF?logo=yolo" alt="YOLO">
+  <img src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi" alt="FastAPI">
+  <img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="License">
+  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4?logo=windows" alt="Platform">
+  <img src="https://img.shields.io/badge/GPU-NVIDIA%20CUDA-76b900?logo=nvidia" alt="GPU">
+</p>
 
 ---
 
-## 📐 Architecture
+## 🎯 O que é?
 
-The project follows a **hexagonal architecture** with clear separation between core business logic, adapters, and subsystems.
+**Soberana Omega** é um agente autónomo que joga Brawl Stars por si. Combina **visão computacional em tempo real** (YOLO + ByteTrack), **tomada de decisão adaptativa** (utility AI + reinforcement learning) e **humanização comportamental** para evitar detecção anti-cheat.
+
+O objetivo: **subir troféus eficientemente, com padrões indistinguíveis de um humano** — incluindo timing, micro-movimentos e comportamento contextual baseado no estado do jogo.
+
+---
+
+## ⚡ Quick Start
+
+```bash
+# 1. Clonar
+git clone https://github.com/serafimbanana4480-stack/bot-brawl-.git
+cd bot-brawl-
+
+# 2. Ambiente virtual
+python -m venv .venv
+.venv\Scripts\activate            # Windows
+# source .venv/bin/activate       # Linux/Mac
+
+# 3. Dependências
+pip install -r requirements.txt
+
+# 4. Modelo YOLO (já vem treinado em models/yolo/brawlstars_gpu_v8s)
+
+# 5. Correr
+python main.py                    # Iniciar o bot
+```
+
+> **Primeira execução?** Abre o emulador, faz login na conta e deixa o bot calibrar a janela (~30s).
+
+---
+
+## ✨ Funcionalidades
+
+### 🧠 Inteligência & Decisão
+- **🎯 Visão Computacional** — YOLOv8/v11 com TensorRT para detecção de brawlers, inimigos, projéteis e bush em tempo real (~30 FPS)
+- **🎮 State Machine** — Rastreia estado do jogo (lobby, match, loja, death screen) com transições suaves
+- **⚖️ Utility AI** — Sistema de pontuação que escolhe a melhor ação baseado em contexto (vida, posição, super disponível)
+- **🧬 Reinforcement Learning** — Curricula treinados em simulação para melhorar jogadas específicas (escapar, snipe, controle de bush)
+- **🗺️ Curriculum Learning** — Progressão de dificuldade: tutorial → easy → ranked → competitive
+
+### 🛡️ Anti-Ban & Segurança
+- **🖐️ Humanização** — Curvas Bezier para movimento de joystick, variação de tempo entre ações, fadiga simulada
+- **🎭 Perfil Comportamental** — Aprende o estilo de jogo preferido (agressivo, defensivo, rotativo) e adapta
+- **⏰ Agendamento Inteligente** — Não joga em horas aleatórias, respeita padrões circadianos
+- **📊 Telemetria Invisível** — Análise estatística para garantir que o jogo parece humano
+
+### 🔌 Integração & API
+- **🌐 FastAPI + WebSocket** — Dashboard em tempo real (kills, deaths, troféus, telemetria)
+- **📡 REST API** — Controla o bot remotamente, obtém estatísticas, envia comandos
+- **🔌 Sistema de Plugins** — Adiciona novos comportamentos sem tocar no core
+- **📦 Ports & Adapters (Hexagonal)** — Troca BlueStacks por LDPlayer, ADB por Win32, sem mudar lógica
+
+### 🎯 Combate
+- **🎯 Aim Assist Adaptativo** — Mira segue movimento do inimigo, compensa latência
+- **💨 Dodge Inteligente** — Esquiva de projéteis baseada em trajetória predita
+- **🛡️ Auto-Use Super** — Ativa super no momento ótimo baseado em análise de risco
+- **🌿 Controle de Bush** — Entra/sai de bushes taticamente
+
+---
+
+## 🏗️ Arquitetura
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  API Layer (FastAPI + WebSocket)                           │
-│  ├── Rate limiting (slowapi)                               │
-│  ├── API key auth + CORS whitelist                         │
-│  └── Prometheus / OpenTelemetry metrics                    │
-├─────────────────────────────────────────────────────────────┤
-│  Core Subsystems (core/subsystems/)                        │
-│  ├── EmulatorSubsystem    → ADB / Win32 capture            │
-│  ├── VisionSubsystem      → YOLO inference + OCR fallback    │
-│  ├── DecisionSubsystem    → RL-based combat decisions        │
-│  ├── SafetySubsystem      → APM limits, break scheduling   │
-│  ├── LearningSubsystem    → PPO + experience buffer          │
-│  └── UISubsystem          → Dashboard + diagnostics        │
-├─────────────────────────────────────────────────────────────┤
-│  Legacy Facade (pylaai_real/)                              │
-│  └── UnifiedStateDetector, LobbyAutomator, PlayEngine      │
-├─────────────────────────────────────────────────────────────┤
-│  Infrastructure                                            │
-│  ├── models/              → YOLO .pt files                 │
-│  ├── dataset/             → Training data + Roboflow merge │
-│  ├── images/templates/    → UI templates for state detect  │
-│  └── config.json          → Centralized configuration      │
-└─────────────────────────────────────────────────────────────┘
+│                    wrapper.py (entry point)                  │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+   ┌────▼─────┐    ┌──────▼──────┐    ┌──────▼──────┐
+   │  Safety  │    │  Emulator   │    │   Vision    │
+   │  Module  │    │   Adapter   │    │  (YOLO+TRT)│
+   └────┬─────┘    └──────┬──────┘    └──────┬──────┘
+        │                  │                  │
+        └──────────────────┼──────────────────┘
+                           │
+              ┌────────────▼────────────┐
+              │   core/orchestrator     │
+              │      (Hexagonal)        │
+              └────────────┬────────────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+   ┌────▼─────┐    ┌──────▼──────┐    ┌──────▼──────┐
+   │ Decision │    │   Neural    │    │    Input    │
+   │ (Utility │◀──▶│  (RL/TR)    │    │ (ADB/Win32)│
+   │   AI)    │    └─────────────┘    └─────────────┘
+   └──────────┘
 ```
 
-### Key directories
-
-| Directory | Purpose |
-|-----------|---------|
-| `api/` | FastAPI routes (emulator detection, brawler management) |
-| `core/` | Hexagonal core: subsystems, state detection, error recovery, config manager |
-| `pylaai_real/` | Legacy facade preserving backward compatibility |
-| `vision/` | YOLO wrappers, template matching, OCR fallback |
-| `decision/` | RL agents, reward shaping, tactical bridge |
-| `training/` | YOLO training pipelines, PPO trainer, curriculum learning |
-| `dataset/` | Data collection, cleaning, synthetic generation |
-| `tests/` | Pytest suite (80+ test modules) |
-| `docs/` | Architecture decisions, API docs, troubleshooting guides |
+**Princípios chave:**
+- **Ports & Adapters** — fácil trocar implementações (emulador, modelo, transport)
+- **Event Bus** — comunicação assíncrona entre subsistemas
+- **Pipeline Stage** — processamento faseado (percepção → decisão → ação)
+- **Stateful agents** — cada subsistema mantém estado e reage a eventos
 
 ---
 
-## 🚀 Quick Start
+## 📂 Estrutura do Projeto
 
-### Prerequisites
-
-- **Python** 3.10+
-- **Emulator**: BlueStacks or LDPlayer at **1920×1080**
-- **ADB** enabled in the emulator (Android debugging)
-- **Brawl Stars** open in the main lobby
-
-### Installation
-
-```bash
-# 1. Clone / enter the project
-cd "bot brawl"
-
-# 2. Create virtual environment (recommended)
-python -m venv .venv
-.venv\Scripts\activate  # Windows
-# source .venv/bin/activate  # Linux/macOS
-
-# 3. Install runtime dependencies
-pip install -r requirements.txt
-pip install -e .
-
-# 4. (Optional) Install dev dependencies
-pip install -r requirements-dev.txt
-pre-commit install
 ```
-
-### Running the bot
-
-#### Mode 1 — API Server (recommended)
-
-```bash
-# Start the FastAPI server
-python -m uvicorn api_server:app --host 127.0.0.1 --port 8003 --reload
-# or
-make run
-```
-
-Then control the bot via HTTP:
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `POST /api/brawl-stars/setup` | Setup | Connect to emulator & load models |
-| `POST /api/brawl-stars/brawler/add` | Setup | Queue a brawler to play |
-| `POST /api/brawl-stars/start` | Control | Start automation |
-| `POST /api/brawl-stars/stop` | Control | Stop automation |
-| `GET /api/brawl-stars/status` | Monitor | Current bot state |
-| `GET /health` | Monitor | Health check + diagnostics |
-
-#### Mode 2 — Data Collection (RL training data)
-
-Set `rl.data_collection_mode: true` in `config.json`, then run:
-
-```bash
-python wrapper.py --mode collect
-```
-
-This captures screenshots, game-state grids, and reward signals without sending actions.
-
-#### Mode 3 — Direct wrapper (legacy)
-
-```bash
-python wrapper.py --mode play --brawler colt
+bot-brawl/
+├── src/                    # Código fonte principal
+│   ├── core/               # Orquestração, ports, adapters
+│   ├── vision/             # YOLO, ByteTrack, OCR, GameState
+│   ├── decision/           # State machine, utility AI, RL
+│   ├── neural/             # Transfer learning, curriculum
+│   ├── api/                # FastAPI + WebSocket
+│   ├── analysis/           # Performance, replay analyzers
+│   ├── data/               # Coletores de dataset
+│   ├── plugins/            # Sistema de plugins
+│   └── utils/              # Utilitários
+├── models/yolo/            # Modelos YOLO treinados
+│   └── brawlstars_gpu_v8s/ # Modelo principal (GPU)
+├── dataset/                # Datasets de treinamento
+├── tests/                  # Testes unitários e integração
+├── docs/                   # Documentação técnica
+├── config.json             # Configuração principal
+├── main.py                 # Entry point
+└── requirements.txt        # Dependências Python
 ```
 
 ---
 
-## 🧠 Training Models
+## ⚙️ Comandos
 
-### YOLO (vision)
-
-```bash
-# Core schema (4 classes) — quick iteration
-python train.py --schema core --epochs 50 --batch 8 --device auto
-
-# Extended schema (8 classes) — production
-python train.py --schema extended --epochs 100 --batch 16 --device cuda
-
-# Full schema (35 classes) — maximum accuracy
-python train.py --schema full --epochs 150 --batch 8 --model-size m
-```
-
-Trained models are saved to `models/` and registered automatically in `model_registry.json`.
-
-### PPO (reinforcement learning)
-
-```bash
-# Train the combat decision model
-python -m training.ppo_trainer --timesteps 1000000 --batch-size 64
-```
-
-Check `training/curriculum_trainer.py` for curriculum-learning schedules.
+| Comando | Descrição |
+|---|---|
+| `python main.py` | Iniciar o bot em modo jogo |
+| `python main.py --diagnostic` | Modo diagnóstico (logs verbosos, sem jogar) |
+| `python main.py --learning` | Modo aprendizado (coleta dados para RL) |
+| `python main.py --headless` | Correr sem interface (servidor) |
+| `python api_server.py` | Iniciar API + dashboard |
+| `python train_yolo.py` | Treinar/atualizar modelo YOLO |
+| `python run_tests.py` | Correr suite de testes |
+| `python replay_analyzer.py <file>` | Analisar gravação de jogo |
 
 ---
 
-## ⚙️ Configuration
+## 🔧 Configuração
 
-All runtime settings live in **`config.json`**:
+`config.json` controla todos os aspectos:
 
 ```json
 {
-  "game": {
-    "mode": "gem_grab",
-    "brawler": "colt",
-    "resolution": "1920x1080"
-  },
   "emulator": {
-    "type": "bluestacks",
-    "adb_port": 5554,
-    "window_title": "BlueStacks App Player"
-  },
-  "safety": {
-    "max_session_hours": 3.0,
-    "max_apm": 60,
-    "auto_stop_on_detection": true
-  },
-  "anti_ban": {
-    "enabled": true,
-    "max_win_rate": 0.75,
-    "max_matches_per_hour": 8
+    "type": "bluestacks",        // bluestacks | ldplayer | memu
+    "adb_port": 5555,
+    "resolution": [1920, 1080]
   },
   "vision": {
-    "main_model": "brawlstars_yolov8.pt",
-    "confidence_threshold": 0.37,
-    "nms_iou_threshold": 0.45
+    "model_path": "models/yolo/brawlstars_gpu_v8s/best.pt",
+    "confidence": 0.55,
+    "use_tensorrt": true
   },
-  "api": {
-    "host": "127.0.0.1",
-    "port": 8003,
-    "api_key": null,
-    "cors_origins": ["http://localhost:3000"]
+  "combat": {
+    "aggressiveness": 0.7,        // 0-1
+    "use_super": "optimal",       // never | optimal | always
+    "dodge_probability": 0.85
   },
-  "rl": {
-    "enabled": false,
-    "data_collection_mode": true,
-    "experience_buffer_size": 10000
+  "safety": {
+    "max_trophies": 30000,        // parar acima disto
+    "session_minutes": 90,        // duração da sessão
+    "humanization_level": "high", // low | medium | high
+    "fingerprint_spoofing": true
   }
 }
 ```
 
-Copy `config.example.json` to `config.json` and edit to taste.
-
 ---
 
-## 🐳 Docker
+## 🧪 Testes
 
 ```bash
-# Build image
-make build
-# or
-docker build -t brawl-bot:latest .
-
-# Run container
-docker run -p 8000:8000 --rm brawl-bot:latest
-
-# Compose (if using docker-compose.yml)
-docker-compose up --build
+pytest tests/                       # Suite completa
+pytest tests/unit/                  # Apenas unit tests
+pytest tests/integration/           # Integration tests
+pytest --cov=src --cov-report=html  # Com coverage
 ```
 
-The Dockerfile is multi-stage:
-1. **Builder** — pre-compiles Python wheels with system CV libs
-2. **Runtime** — slim image with ADB + wheels, runs as non-root user
+Abre `htmlcov/index.html` para ver relatório detalhado.
 
 ---
 
-## 🧪 Tests
+## 📚 Documentação
 
-```bash
-# Run full suite with coverage
-make test
-# or
-pytest --cov=. --cov-report=term-missing --cov-report=html -v
-
-# Run specific test file
-pytest tests/test_core_functionality.py -v
-
-# Lint & format
-make lint
-make format
-
-# Type check
-make typecheck
-
-# Security audit
-make security
-```
+| Documento | Descrição |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Arquitetura detalhada (Ports & Adapters) |
+| [docs/INSTALLATION_GUIDE.md](docs/INSTALLATION_GUIDE.md) | Instalação completa, drivers, emulador |
+| [docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md) | API REST + WebSocket |
+| [docs/TESTING_GUIDE.md](docs/TESTING_GUIDE.md) | Como testar o bot |
+| [docs/HUMANIZATION.md](docs/HUMANIZATION.md) | Como funciona o anti-ban |
+| [CHANGELOG.md](CHANGELOG.md) | Histórico de versões |
 
 ---
 
-## 📦 Project Structure
+## ⚠️ Disclaimer
 
-```
-.
-├── api/                    # FastAPI routes
-├── api_server.py           # Main FastAPI app (WebSocket, metrics, auth)
-├── backend/                # Legacy backend entrypoint
-├── brawl_bot/              # Legacy bot package
-├── core/                   # Hexagonal core
-│   ├── subsystems/         # Emulator, Vision, Decision, Safety, Learning, UI
-│   ├── combat/             # Combat engine & ability manager
-│   ├── movement/           # Pathfinding & positioning
-│   ├── abilities/          # Brawler ability definitions
-│   ├── events/             # Event bus
-│   └── ports/              # Interface contracts
-├── decision/               # RL agents & reward shaping
-├── dataset/                # Data collection, cleaning, synthetic data
-├── docs/                   # Architecture & troubleshooting docs
-├── images/
-│   └── templates/          # UI templates (play, attack, super, gadget, joystick…)
-├── models/                 # YOLO .pt checkpoints + registry
-├── neural/                 # Neural network utilities
-├── plugins/                # Plugin system (orchestrator, learning mode)
-├── pylaai_real/            # Legacy facade (backward-compatible)
-├── scripts/                # Utility scripts
-├── tests/                  # Pytest suite
-├── training/               # YOLO & PPO training pipelines
-├── utils/                  # Shared helpers
-├── vision/                 # CV engine, OCR, template matching
-├── wrapper.py              # Main entrypoint (PylaAIEnhanced facade)
-├── config.json             # Runtime configuration
-├── pyproject.toml          # Package metadata & dependencies
-├── requirements.txt        # Pinned runtime deps
-├── requirements-dev.txt    # Dev & test deps
-├── Dockerfile              # Multi-stage container build
-├── docker-compose.yml      # Compose stack
-└── Makefile                # Common tasks
-```
+> **Este projeto é apenas para fins educacionais e de pesquisa.**
+> O uso de bots em jogos online pode violar os Termos de Serviço e resultar em banimento.
+> O autor não se responsabiliza pelo uso indevido desta ferramenta.
+> Use por sua conta e risco.
 
 ---
 
-## 🔒 Security & Humanization
+## 🤝 Contribuir
 
-- **Curves de Bézier** — smooth mouse movements via `humanization.py`
-- **Safety System** — APM caps, session limits, automatic breaks (`safety_system.py`)
-- **Anti-Ban** — win-rate clamping, fingerprint rotation, action noise (`core/anti_ban.py`)
-- **Rate Limiting** — `slowapi` on all API endpoints
-- **CORS Whitelist** — only `localhost:3000/5173` by default
-- **API Key** — optional `api.api_key` in `config.json`
+Contribuições são bem-vindas! Por favor:
 
----
+1. Fork o repositório
+2. Cria uma branch (`git checkout -b feature/MinhaFeature`)
+3. Commit as tuas mudanças (`git commit -m 'feat: adicionar MinhaFeature'`)
+4. Push para a branch (`git push origin feature/MinhaFeature`)
+5. Abre um Pull Request
 
-## 🐞 Troubleshooting
-
-| Symptom | Fix |
-|---------|-----|
-| Emulator not detected | Ensure ADB is in PATH and USB debugging is enabled |
-| GPU / CUDA errors | Set `CUDA_VISIBLE_DEVICES=""` to force CPU inference |
-| Template matching fails | Check `images/templates/` files are valid PNGs (not empty) |
-| High memory usage | Reduce `vision.confidence_threshold` or use `yolov8n.pt` |
-| API 429 errors | Increase `api.rate_limit.read_per_second` in `config.json` |
-
-See `docs/TROUBLESHOOTING.md` and `docs/INSTALLATION_GUIDE.md` for detailed guides.
+Lê [CONTRIBUTING.md](CONTRIBUTING.md) para mais detalhes.
 
 ---
 
-## 🤝 Contributing
+## 📄 Licença
 
-1. Fork the repository
-2. Create a feature branch
-3. Write tests & update docs
-4. Open a Pull Request
-
-See `CONTRIBUTING.md` for detailed guidelines.
+Este projeto está licenciado sob a **MIT License** — vê [LICENSE](LICENSE) para detalhes.
 
 ---
 
-**Developed as part of the Soberana Omega ecosystem.**
+## 🌟 Badges & Métricas
+
+<p align="center">
+  <img src="https://img.shields.io/github/stars/serafimbanana4480-stack/bot-brawl-?style=social" alt="Stars">
+  <img src="https://img.shields.io/github/forks/serafimbanana4480-stack/bot-brawl-?style=social" alt="Forks">
+  <img src="https://img.shields.io/github/issues/serafimbanana4480-stack/bot-brawl-" alt="Issues">
+  <img src="https://img.shields.io/github/last-commit/serafimbanana4480-stack/bot-brawl-" alt="Last Commit">
+</p>
+
+---
+
+## 🔗 Links Úteis
+
+- 🎮 **Brawl Stars** — https://brawlstars.com
+- 🤖 **YOLO** — https://github.com/ultralytics/ultralytics
+- 🧠 **PyTorch** — https://pytorch.org
+- 🚀 **FastAPI** — https://fastapi.tiangolo.com
+- 📘 **Documentação completa** — [docs/](docs/)
+
+---
+
+<p align="center">
+  Feito com 🦾 por <a href="https://github.com/serafimbanana4480-stack">Soberana</a>
+  &nbsp;·&nbsp;
+  <a href="#top">Voltar ao topo</a>
+</p>

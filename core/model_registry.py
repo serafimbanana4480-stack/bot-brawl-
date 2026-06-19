@@ -17,14 +17,14 @@ Uso:
     model = registry.load_active("yolo")  # YOLO instance carregado
 """
 
-import json
 import hashlib
+import json
 import logging
 import time
-from pathlib import Path
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, asdict
 from collections import defaultdict
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +37,9 @@ class ModelVersion:
     path: Path
     checksum: str          # SHA256 do arquivo
     created_at: float
-    metrics: Dict[str, float] = None
-    metadata: Dict[str, Any] = None
-    parent_version: Optional[str] = None  # Para warm-start
+    metrics: dict[str, float] = None
+    metadata: dict[str, Any] = None
+    parent_version: str | None = None  # Para warm-start
     is_warm_start: bool = False
 
     def __post_init__(self):
@@ -63,8 +63,8 @@ class ModelRegistry:
         self.checkpoints_dir = self.base_dir / self.CHECKPOINTS_DIR
         self.checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
-        self._models: Dict[str, Dict[str, ModelVersion]] = defaultdict(dict)
-        self._active: Dict[str, str] = {}  # name -> version
+        self._models: dict[str, dict[str, ModelVersion]] = defaultdict(dict)
+        self._active: dict[str, str] = {}  # name -> version
 
         self._load_registry()
         logger.info("[MODEL_REGISTRY] Inicializado com %d famílias", len(self._models))
@@ -78,7 +78,7 @@ class ModelRegistry:
         if not self.registry_path.exists():
             return
         try:
-            with open(self.registry_path, "r", encoding="utf-8") as f:
+            with open(self.registry_path, encoding="utf-8") as f:
                 data = json.load(f)
             for name, versions in data.get("models", {}).items():
                 for ver_str, ver_data in versions.items():
@@ -94,7 +94,7 @@ class ModelRegistry:
                         is_warm_start=ver_data.get("is_warm_start", False),
                     )
             self._active = data.get("active", {})
-        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.warning("[MODEL_REGISTRY] Erro ao carregar: %s", e)
 
     def _save_registry(self):
@@ -119,7 +119,7 @@ class ModelRegistry:
                     }
             with open(self.registry_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
-        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.error("[MODEL_REGISTRY] Erro ao salvar: %s", e)
 
     # ------------------------------------------------------------------
@@ -130,10 +130,10 @@ class ModelRegistry:
         self,
         name: str,
         path: Path,
-        version: Optional[str] = None,
-        metrics: Optional[Dict[str, float]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        parent_version: Optional[str] = None,
+        version: str | None = None,
+        metrics: dict[str, float] | None = None,
+        metadata: dict[str, Any] | None = None,
+        parent_version: str | None = None,
     ) -> ModelVersion:
         """
         Registra um novo modelo.
@@ -214,7 +214,7 @@ class ModelRegistry:
             else:
                 logger.warning("[MODEL_REGISTRY] Tipo de modelo desconhecido: %s", name)
                 return None
-        except (ImportError, ModuleNotFoundError, FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, OSError, IOError) as e:
+        except (ImportError, ModuleNotFoundError, FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, OSError) as e:
             logger.error("[MODEL_REGISTRY] Erro ao carregar %s@%s: %s", name, version, e)
             return None
 
@@ -222,7 +222,7 @@ class ModelRegistry:
     # Warm-start
     # ------------------------------------------------------------------
 
-    def get_warm_start_path(self, name: str) -> Optional[Path]:
+    def get_warm_start_path(self, name: str) -> Path | None:
         """
         Retorna path do melhor checkpoint para warm-start.
         Útil para continuar treinamento de onde parou.
@@ -242,7 +242,7 @@ class ModelRegistry:
 
         return best_ver.path if best_ver else None
 
-    def save_training_checkpoint(self, name: str, epoch: int, model_state: Any, metrics: Dict):
+    def save_training_checkpoint(self, name: str, epoch: int, model_state: Any, metrics: dict):
         """Salva checkpoint durante treinamento."""
         import torch
         ckpt_path = self.checkpoints_dir / f"{name}_epoch{epoch}.pt"
@@ -259,7 +259,7 @@ class ModelRegistry:
     # Auto-update
     # ------------------------------------------------------------------
 
-    def scan_for_new_models(self, models_dir: Path = Path("models")) -> List[ModelVersion]:
+    def scan_for_new_models(self, models_dir: Path = Path("models")) -> list[ModelVersion]:
         """
         Escaneia diretório por novos modelos .pt não registrados.
         Retorna lista de modelos recém-registrados.
@@ -317,26 +317,26 @@ class ModelRegistry:
     # Queries
     # ------------------------------------------------------------------
 
-    def list_models(self) -> List[str]:
+    def list_models(self) -> list[str]:
         """Lista todas as famílias de modelos."""
         return sorted(self._models.keys())
 
-    def list_versions(self, name: str) -> List[str]:
+    def list_versions(self, name: str) -> list[str]:
         """Lista versões de um modelo."""
         return sorted(self._models.get(name, {}).keys())
 
-    def get_version_info(self, name: str, version: str) -> Optional[Dict]:
+    def get_version_info(self, name: str, version: str) -> dict | None:
         """Retorna info de uma versão específica."""
         ver = self._models.get(name, {}).get(version)
         if ver:
             return asdict(ver)
         return None
 
-    def get_active_version(self, name: str) -> Optional[str]:
+    def get_active_version(self, name: str) -> str | None:
         """Retorna versão ativa de um modelo."""
         return self._active.get(name)
 
-    def compare_versions(self, name: str, v1: str, v2: str) -> Dict[str, Any]:
+    def compare_versions(self, name: str, v1: str, v2: str) -> dict[str, Any]:
         """Compara duas versões de um modelo."""
         ver1 = self._models.get(name, {}).get(v1)
         ver2 = self._models.get(name, {}).get(v2)

@@ -24,9 +24,8 @@ The intent system:
 """
 
 import logging
-import time
 import threading
-from typing import Dict, List, Optional, Tuple
+import time
 from dataclasses import dataclass
 from enum import Enum
 
@@ -52,7 +51,7 @@ class IntentState:
     confidence: float = 0.0     # How confident we are in this intent
     set_at: float = 0.0        # When this intent was set
     reason: str = ""
-    previous_intent: Optional[Intent] = None
+    previous_intent: Intent | None = None
     persistence_bonus: float = 0.0  # Bonus for staying with current intent
 
 
@@ -99,7 +98,7 @@ class IntentSystem:
             set_at=time.time(),
             reason="initial_default",
         )
-        self._intent_history: List[Dict] = []
+        self._intent_history: list[dict] = []
         self._lock = threading.RLock()
 
         logger.info("[INTENT] Initialized for mode=%s, default intent=%s",
@@ -118,7 +117,7 @@ class IntentSystem:
         logger.info("[INTENT] Mode changed to %s, intent set to %s",
                      self.game_mode, default.value)
 
-    def evaluate(self, context: Dict) -> Intent:
+    def evaluate(self, context: dict) -> Intent:
         """
         Evaluate and return the current intent.
 
@@ -209,7 +208,7 @@ class IntentSystem:
         with self._lock:
             return self._state.intent
 
-    def get_intent_info(self) -> Dict:
+    def get_intent_info(self) -> dict:
         """Get detailed intent state."""
         with self._lock:
             now = time.time()
@@ -222,7 +221,7 @@ class IntentSystem:
                     if self._state.previous_intent else None,
             }
 
-    def get_intent_history(self, limit: int = 10) -> List[Dict]:
+    def get_intent_history(self, limit: int = 10) -> list[dict]:
         """Get recent intent history."""
         with self._lock:
             return self._intent_history[-limit:]
@@ -243,7 +242,7 @@ class IntentSystem:
 
     # --- Intent scoring ---
 
-    def _score_all_intents(self, ctx: Dict) -> Dict[Intent, float]:
+    def _score_all_intents(self, ctx: dict) -> dict[Intent, float]:
         """Score all possible intents given the current context."""
         scores = {}
 

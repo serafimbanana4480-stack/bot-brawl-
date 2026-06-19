@@ -12,7 +12,7 @@ import os
 import sys
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any
 
 import structlog
 
@@ -32,7 +32,7 @@ class JSONFormatter(logging.Formatter):
     """Standard library JSON formatter for non-structlog fallback."""
 
     def format(self, record: logging.LogRecord) -> str:
-        log_dict: Dict[str, Any] = {
+        log_dict: dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
@@ -68,7 +68,7 @@ def _get_correlation_id() -> str:
     return _CORRELATION_ID
 
 
-def set_correlation_id(cid: Optional[str] = None) -> str:
+def set_correlation_id(cid: str | None = None) -> str:
     """Set (or generate) the global correlation ID for the current session."""
     global _CORRELATION_ID
     _CORRELATION_ID = cid or str(uuid.uuid4())[:8]
@@ -90,9 +90,9 @@ def _ensure_dir(path: str) -> None:
 
 
 def setup_logging(
-    level: Optional[str] = None,
-    fmt: Optional[str] = None,
-    log_file: Optional[str] = None,
+    level: str | None = None,
+    fmt: str | None = None,
+    log_file: str | None = None,
 ) -> None:
     """Configure structured logging (structlog + stdlib)."""
     lvl = (level or DEFAULT_LOG_LEVEL).upper()

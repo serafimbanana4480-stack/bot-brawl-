@@ -37,11 +37,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional, Set, Tuple, Union
 
 from core.class_registry import UnifiedAction as BaseUnifiedAction
-from core.class_registry import RL_ACTION_MAP, UTILITY_ACTION_MAP
-
 
 # Re-export UnifiedAction for convenience
 UnifiedAction = BaseUnifiedAction
@@ -56,8 +53,8 @@ class ActionMetadata:
     requires_ammo: bool
     can_use_super: bool
     cooldown_ms: int
-    rl_equivalent: Optional[str] = None
-    utility_equivalent: Optional[str] = None
+    rl_equivalent: str | None = None
+    utility_equivalent: str | None = None
     is_movement: bool = False
     is_offensive: bool = False
     is_defensive: bool = False
@@ -75,7 +72,7 @@ class ActionMapper:
     """
 
     # Action metadata for all unified actions
-    ACTION_METADATA: Dict[UnifiedAction, ActionMetadata] = {
+    ACTION_METADATA: dict[UnifiedAction, ActionMetadata] = {
         UnifiedAction.IDLE: ActionMetadata(
             name="idle",
             description="Do nothing, wait",
@@ -230,8 +227,8 @@ class ActionMapper:
     def __init__(self):
         """Initialize action mapper."""
         # Build reverse lookup maps
-        self._rl_to_unified: Dict[str, UnifiedAction] = {}
-        self._utility_to_unified: Dict[str, UnifiedAction] = {}
+        self._rl_to_unified: dict[str, UnifiedAction] = {}
+        self._utility_to_unified: dict[str, UnifiedAction] = {}
 
         for action, meta in self.ACTION_METADATA.items():
             if meta.rl_equivalent:
@@ -259,7 +256,7 @@ class ActionMapper:
             )
         return self._rl_to_unified[rl_action]
 
-    def utility_to_unified(self, utility_action: Union[str, Enum]) -> UnifiedAction:
+    def utility_to_unified(self, utility_action: str | Enum) -> UnifiedAction:
         """
         Convert UtilityAI action to unified action.
 
@@ -285,7 +282,7 @@ class ActionMapper:
             )
         return self._utility_to_unified[name]
 
-    def unified_to_rl(self, unified: UnifiedAction) -> Optional[str]:
+    def unified_to_rl(self, unified: UnifiedAction) -> str | None:
         """
         Convert unified action to RL action (if possible).
 
@@ -298,7 +295,7 @@ class ActionMapper:
         meta = self.ACTION_METADATA.get(unified)
         return meta.rl_equivalent if meta else None
 
-    def unified_to_utility(self, unified: UnifiedAction) -> Optional[str]:
+    def unified_to_utility(self, unified: UnifiedAction) -> str | None:
         """
         Convert unified action to UtilityAI action (if possible).
 
@@ -317,25 +314,25 @@ class ActionMapper:
             raise ValueError(f"Unknown action: {action}")
         return self.ACTION_METADATA[action]
 
-    def get_all_actions(self) -> List[UnifiedAction]:
+    def get_all_actions(self) -> list[UnifiedAction]:
         """Get list of all unified actions."""
         return list(UnifiedAction)
 
-    def get_movement_actions(self) -> Set[UnifiedAction]:
+    def get_movement_actions(self) -> set[UnifiedAction]:
         """Get actions that involve movement."""
         return {
             a for a, m in self.ACTION_METADATA.items()
             if m.is_movement
         }
 
-    def get_offensive_actions(self) -> Set[UnifiedAction]:
+    def get_offensive_actions(self) -> set[UnifiedAction]:
         """Get offensive/combat actions."""
         return {
             a for a, m in self.ACTION_METADATA.items()
             if m.is_offensive
         }
 
-    def get_defensive_actions(self) -> Set[UnifiedAction]:
+    def get_defensive_actions(self) -> set[UnifiedAction]:
         """Get defensive/survival actions."""
         return {
             a for a, m in self.ACTION_METADATA.items()
@@ -348,7 +345,7 @@ class ActionMapper:
         has_target: bool,
         has_ammo: bool,
         can_super: bool,
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """
         Check if action is valid given current state.
 
@@ -374,7 +371,7 @@ class ActionMapper:
 
         For example, if ATTACK is chosen but no ammo, fallback to RETREAT.
         """
-        fallbacks: Dict[UnifiedAction, UnifiedAction] = {
+        fallbacks: dict[UnifiedAction, UnifiedAction] = {
             UnifiedAction.ATTACK: UnifiedAction.RETREAT,
             UnifiedAction.MOVE_TO_ENEMY: UnifiedAction.IDLE,
             UnifiedAction.USE_SUPER: UnifiedAction.ATTACK,
@@ -391,7 +388,7 @@ class ActionMapper:
 # ============================================================================
 
 # Global mapper instance for convenience
-_default_mapper: Optional[ActionMapper] = None
+_default_mapper: ActionMapper | None = None
 
 
 def _get_mapper() -> ActionMapper:
@@ -407,17 +404,17 @@ def rl_to_unified(rl_action: str) -> UnifiedAction:
     return _get_mapper().rl_to_unified(rl_action)
 
 
-def utility_to_unified(utility_action: Union[str, Enum]) -> UnifiedAction:
+def utility_to_unified(utility_action: str | Enum) -> UnifiedAction:
     """Convert UtilityAI action to unified (convenience function)."""
     return _get_mapper().utility_to_unified(utility_action)
 
 
-def unified_to_rl(unified: UnifiedAction) -> Optional[str]:
+def unified_to_rl(unified: UnifiedAction) -> str | None:
     """Convert unified to RL action (convenience function)."""
     return _get_mapper().unified_to_rl(unified)
 
 
-def unified_to_utility(unified: UnifiedAction) -> Optional[str]:
+def unified_to_utility(unified: UnifiedAction) -> str | None:
     """Convert unified to UtilityAI action (convenience function)."""
     return _get_mapper().unified_to_utility(unified)
 
@@ -427,17 +424,17 @@ def get_action_metadata(action: UnifiedAction) -> ActionMetadata:
     return _get_mapper().get_metadata(action)
 
 
-def get_movement_actions() -> Set[UnifiedAction]:
+def get_movement_actions() -> set[UnifiedAction]:
     """Get movement actions (convenience function)."""
     return _get_mapper().get_movement_actions()
 
 
-def get_offensive_actions() -> Set[UnifiedAction]:
+def get_offensive_actions() -> set[UnifiedAction]:
     """Get offensive actions (convenience function)."""
     return _get_mapper().get_offensive_actions()
 
 
-def get_defensive_actions() -> Set[UnifiedAction]:
+def get_defensive_actions() -> set[UnifiedAction]:
     """Get defensive actions (convenience function)."""
     return _get_mapper().get_defensive_actions()
 
@@ -447,10 +444,10 @@ def get_defensive_actions() -> Set[UnifiedAction]:
 # ============================================================================
 
 def validate_action_sequence(
-    actions: List[UnifiedAction],
+    actions: list[UnifiedAction],
     min_duration_ms: int = 100,
     max_repeats: int = 3,
-) -> Tuple[bool, List[str]]:
+) -> tuple[bool, list[str]]:
     """
     Validate a sequence of actions for bot safety.
 
@@ -476,7 +473,7 @@ def validate_action_sequence(
     return len(issues) == 0, issues
 
 
-def compute_action_diversity(actions: List[UnifiedAction]) -> float:
+def compute_action_diversity(actions: list[UnifiedAction]) -> float:
     """
     Compute diversity score for action sequence.
 

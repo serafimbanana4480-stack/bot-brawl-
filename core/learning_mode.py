@@ -11,10 +11,9 @@ Integração:
     StateManager chama este controller nos handlers de lobby e in_game_learning.
 """
 
-import time
 import logging
-from pathlib import Path
-from typing import Optional, Tuple, Dict, Any
+import time
+from typing import Any
 
 import numpy as np
 
@@ -78,7 +77,7 @@ class LearningModeController:
             logger.warning("[LEARNING_MODE] LearningMetricsCollector não disponível")
 
         self._current_match_index = 0
-        self._match_start_time: Optional[float] = None
+        self._match_start_time: float | None = None
         self._in_training_cave = False
         self._match_active = False
 
@@ -208,7 +207,7 @@ class LearningModeController:
 
         return result
 
-    def is_match_ended(self, screenshot: np.ndarray) -> Tuple[bool, str]:
+    def is_match_ended(self, screenshot: np.ndarray) -> tuple[bool, str]:
         """
         Verifica se a partida na Training Cave terminou.
 
@@ -276,7 +275,7 @@ class LearningModeController:
         """Verifica se ainda deve continuar o modo de aprendizagem."""
         return self._current_match_index < self.max_matches
 
-    def start_learning_mode(self, max_matches: Optional[int] = None) -> bool:
+    def start_learning_mode(self, max_matches: int | None = None) -> bool:
         """Ativa o modo de aprendizagem dinamicamente (pode ser chamado pela dashboard)."""
         if max_matches is not None:
             self.max_matches = max_matches
@@ -292,9 +291,9 @@ class LearningModeController:
         logger.info("[LEARNING_MODE] Modo de aprendizagem desativado")
         return True
 
-    def get_live_metrics(self) -> Dict[str, Any]:
+    def get_live_metrics(self) -> dict[str, Any]:
         """Retorna métricas live para a dashboard."""
-        metrics_data: Dict[str, Any] = {
+        metrics_data: dict[str, Any] = {
             "active": self._match_active or self._in_training_cave,
             "current_match": self._current_match_index,
             "max_matches": self.max_matches,
@@ -354,7 +353,7 @@ class LearningModeController:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _take_screenshot(self) -> Optional[np.ndarray]:
+    def _take_screenshot(self) -> np.ndarray | None:
         if self.screenshot is not None and hasattr(self.screenshot, 'take'):
             try:
                 return self.screenshot.take()
@@ -362,7 +361,7 @@ class LearningModeController:
                 logger.debug("[LEARNING_MODE] Screenshot falhou: %s", e)
         return None
 
-    def _get_window_size(self) -> Tuple[int, int]:
+    def _get_window_size(self) -> tuple[int, int]:
         """Retorna resolução da janela (default 1920x1080)."""
         if self.lobby and hasattr(self.lobby, 'lobby_config'):
             cfg = self.lobby.lobby_config

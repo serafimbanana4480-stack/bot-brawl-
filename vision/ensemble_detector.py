@@ -18,12 +18,12 @@ Voting:
 - Classes comuns: player, enemy, power_cube, bush, wall, etc.
 """
 
-import time
 import logging
 import threading
-from typing import List, Dict, Optional, Tuple, Any
+import time
 from dataclasses import dataclass
-from pathlib import Path
+from typing import Any
+
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -35,9 +35,9 @@ class Detection:
     class_id: int
     class_name: str
     confidence: float
-    bbox: Tuple[float, float, float, float]  # x1, y1, x2, y2 (normalized)
+    bbox: tuple[float, float, float, float]  # x1, y1, x2, y2 (normalized)
     model_votes: int = 0  # Quantos modelos concordaram
-    vote_sources: List[str] = None
+    vote_sources: list[str] = None
 
     def __post_init__(self):
         if self.vote_sources is None:
@@ -59,7 +59,7 @@ class ModelEnsembleDetector:
 
     def __init__(
         self,
-        model_configs: List[Tuple[str, str, float]],
+        model_configs: list[tuple[str, str, float]],
         iou_threshold: float = 0.5,
         min_votes: int = 2,
         device: str = "cpu",
@@ -77,16 +77,16 @@ class ModelEnsembleDetector:
 
         # Lazy loading — carrega modelos sob demanda
         self._model_configs = model_configs
-        self._models: Dict[str, Any] = {}
-        self._model_confs: Dict[str, float] = {}
+        self._models: dict[str, Any] = {}
+        self._model_confs: dict[str, float] = {}
 
-        for name, path, conf in model_configs:
+        for name, _path, conf in model_configs:
             self._model_confs[name] = conf
             # Não carrega ainda — faz no primeiro detect()
             self._models[name] = None
 
         self._lock = threading.RLock()
-        self._inference_times: Dict[str, List[float]] = {name: [] for name, _, _ in model_configs}
+        self._inference_times: dict[str, list[float]] = {name: [] for name, _, _ in model_configs}
 
         logger.info("[ENSEMBLE] Configurado com %d modelos (min_votes=%d)", len(model_configs), min_votes)
 
@@ -123,7 +123,7 @@ class ModelEnsembleDetector:
     # Inferência individual
     # ------------------------------------------------------------------
 
-    def _run_single_model(self, name: str, image: np.ndarray) -> List[Detection]:
+    def _run_single_model(self, name: str, image: np.ndarray) -> list[Detection]:
         """Roda inferência em um modelo e normaliza resultados."""
         self._load_model(name)
 
@@ -175,11 +175,11 @@ class ModelEnsembleDetector:
     # Voting
     # ------------------------------------------------------------------
 
-    def detect(self, image: np.ndarray) -> List[Detection]:
+    def detect(self, image: np.ndarray) -> list[Detection]:
         """
         Roda ensemble e retorna detecções votadas.
         """
-        all_results: Dict[str, List[Detection]] = {}
+        all_results: dict[str, list[Detection]] = {}
         for name, _, _ in self._model_configs:
             all_results[name] = self._run_single_model(name, image)
 
@@ -187,9 +187,9 @@ class ModelEnsembleDetector:
 
     def _vote_detections(
         self,
-        all_results: Dict[str, List[Detection]],
-        image_shape: Tuple[int, int],
-    ) -> List[Detection]:
+        all_results: dict[str, list[Detection]],
+        image_shape: tuple[int, int],
+    ) -> list[Detection]:
         """
         Vota em detecções com IoU-matching.
 
@@ -201,7 +201,7 @@ class ModelEnsembleDetector:
         5. BBox final é média ponderada pela confiança
         6. Confiança final é média das confianças dos votantes
         """
-        all_detections: List[Detection] = []
+        all_detections: list[Detection] = []
         for dets in all_results.values():
             all_detections.extend(dets)
 
@@ -209,16 +209,16 @@ class ModelEnsembleDetector:
             return []
 
         # Agrupar por classe
-        by_class: Dict[str, List[Detection]] = {}
+        by_class: dict[str, list[Detection]] = {}
         for d in all_detections:
             by_class.setdefault(d.class_name, []).append(d)
 
         voted_detections = []
-        w, h = image_shape[1], image_shape[0]
+        _w, _h = image_shape[1], image_shape[0]
 
         for class_name, detections in by_class.items():
             # Clustering por IoU
-            clusters: List[List[Detection]] = []
+            clusters: list[list[Detection]] = []
             for det in detections:
                 placed = False
                 for cluster in clusters:
@@ -257,7 +257,7 @@ class ModelEnsembleDetector:
 
         return voted_detections
 
-    def _iou(self, box_a: Tuple[float, ...], box_b: Tuple[float, ...]) -> float:
+    def _iou(self, box_a: tuple[float, ...], box_b: tuple[float, ...]) -> float:
         """Calcula IoU entre duas bboxes normalizadas."""
         x1 = max(box_a[0], box_b[0])
         y1 = max(box_a[1], box_b[1])
@@ -280,7 +280,7 @@ class ModelEnsembleDetector:
     # Modo single (fallback)
     # ------------------------------------------------------------------
 
-    def detect_single(self, image: np.ndarray, model_name: Optional[str] = None) -> List[Detection]:
+    def detect_single(self, image: np.ndarray, model_name: str | None = None) -> list[Detection]:
         """Roda apenas um modelo (útil em modo degradado)."""
         if model_name is None:
             model_name = self._model_configs[0][0]  # primeiro = mais rápido
@@ -290,7 +290,7 @@ class ModelEnsembleDetector:
     # Métricas
     # ------------------------------------------------------------------
 
-    def get_inference_stats(self) -> Dict[str, Any]:
+    def get_inference_stats(self) -> dict[str, Any]:
         """Retorna estatísticas de latência por modelo."""
         with self._lock:
             stats = {}
@@ -311,7 +311,7 @@ class ModelEnsembleDetector:
                 stats["_ensemble_total_avg_ms"] = round(total_avg * 1000, 1)
             return stats
 
-    def get_model_status(self) -> Dict[str, str]:
+    def get_model_status(self) -> dict[str, str]:
         """Status de carregamento dos modelos."""
         with self._lock:
             return {

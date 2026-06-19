@@ -7,7 +7,8 @@ Adapter: RLBridge / PlayLogic -> DecisionPort
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+import math
+from typing import Any
 
 from core.ports.decision_port import Decision, DecisionContext, DecisionPort
 
@@ -91,7 +92,7 @@ class DecisionAdapter(DecisionPort):
         except (ImportError, ModuleNotFoundError) as e:
             logger.debug(f"[DECISION_ADAPTER] Learn error: {e}")
 
-    def start_episode(self, brawler: str, map_name: Optional[str] = None) -> None:
+    def start_episode(self, brawler: str, map_name: str | None = None) -> None:
         if self._rl is not None:
             try:
                 self._rl.start_episode()
@@ -106,7 +107,7 @@ class DecisionAdapter(DecisionPort):
             except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.debug(f"[DECISION_ADAPTER] End episode error: {e}")
 
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         return {
             "initialized": self._initialized,
             "rl_available": self._rl is not None,

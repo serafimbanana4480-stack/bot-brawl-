@@ -15,15 +15,16 @@ All instruments are lazily created and no-op when opentelemetry is unavailable.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 try:
     from opentelemetry import metrics
+    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 
     HAS_OTEL_METRICS = True
 except ImportError:
@@ -32,12 +33,12 @@ except ImportError:
 
 
 class NoOpCounter:
-    def add(self, amount: float, attributes: Optional[Dict[str, Any]] = None):
+    def add(self, amount: float, attributes: dict[str, Any] | None = None):
         pass
 
 
 class NoOpHistogram:
-    def record(self, amount: float, attributes: Optional[Dict[str, Any]] = None):
+    def record(self, amount: float, attributes: dict[str, Any] | None = None):
         pass
 
 
@@ -50,7 +51,7 @@ class OTelMetrics:
     High-level metrics facade that wraps OpenTelemetry instruments.
     """
 
-    _instance: Optional["OTelMetrics"] = None
+    _instance: OTelMetrics | None = None
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -61,7 +62,7 @@ class OTelMetrics:
     def __init__(
         self,
         enabled: bool = True,
-        endpoint: Optional[str] = None,
+        endpoint: str | None = None,
         export_interval_ms: float = 60000.0,
     ):
         if self._initialized:
@@ -69,15 +70,15 @@ class OTelMetrics:
         self._initialized = True
 
         self.enabled = enabled and HAS_OTEL_METRICS
-        self._instruments: Dict[str, Any] = {}
-        self._callbacks: Dict[str, Callable[[], float]] = {}
+        self._instruments: dict[str, Any] = {}
+        self._callbacks: dict[str, Callable[[], float]] = {}
 
         if self.enabled:
             self._init_provider(endpoint, export_interval_ms)
         else:
             logger.info("[OTEL_METRICS] Metrics disabled or SDK unavailable")
 
-    def _init_provider(self, endpoint: Optional[str], interval_ms: float) -> None:
+    def _init_provider(self, endpoint: str | None, interval_ms: float) -> None:
         try:
             exporter = OTLPMetricExporter(endpoint=endpoint or "http://localhost:4317")
             reader = PeriodicExportingMetricReader(exporter, export_interval_millis=int(interval_ms))
@@ -124,15 +125,15 @@ class OTelMetrics:
     # Business metric helpers
     # ------------------------------------------------------------------
 
-    def record_match_start(self, map_name: Optional[str] = None, brawler: Optional[str] = None) -> None:
-        attrs: Dict[str, Any] = {}
+    def record_match_start(self, map_name: str | None = None, brawler: str | None = None) -> None:
+        attrs: dict[str, Any] = {}
         if map_name:
             attrs["map"] = map_name
         if brawler:
             attrs["brawler"] = brawler
         self._counter("bot.matches.started", "Number of matches started").add(1, attrs)
 
-    def record_match_end(self, result: str, map_name: Optional[str] = None) -> None:
+    def record_match_end(self, result: str, map_name: str | None = None) -> None:
         attrs = {"result": result}
         if map_name:
             attrs["map"] = map_name

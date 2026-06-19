@@ -6,10 +6,9 @@ Provides StateDetectionMixin with screenshot caching, state detection,
 and intelligent recovery.
 """
 
-import time
-import random
 import logging
-from typing import Dict, Callable, Optional
+import random
+import time
 
 try:
     import numpy as np

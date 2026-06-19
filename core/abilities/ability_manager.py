@@ -5,15 +5,9 @@ Ability (super/gadget) logic extracted from play.py.
 Provides AbilityManagerMixin with super and gadget management.
 """
 
-import time
-import math
-import numpy as np
 import logging
-import random
-from typing import Optional, List, Dict, Tuple
 
 # Utilitarios de humanizacao
-from pylaai_real.humanization_utils import human_delay, jitter_value, HumanPauseSimulator
 
 logger = logging.getLogger(__name__)
 

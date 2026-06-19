@@ -16,11 +16,10 @@ Features:
 - Escape route evaluation from cover positions
 """
 
-import math
 import logging
-import time
+import math
 import threading
-from typing import Dict, List, Optional, Tuple, Set
+import time
 from dataclasses import dataclass
 from enum import Enum
 
@@ -40,8 +39,8 @@ class CoverPosition:
     y: float
     cover_type: CoverType = CoverType.NONE
     cover_score: float = 0.0        # Overall quality (0-1)
-    los_blocked_to: List[int] = None  # Enemy track_ids blocked by this cover
-    los_exposed_to: List[int] = None  # Enemy track_ids that can still see us
+    los_blocked_to: list[int] = None  # Enemy track_ids blocked by this cover
+    los_exposed_to: list[int] = None  # Enemy track_ids that can still see us
     escape_routes: int = 0          # Number of viable escape directions
     distance: float = 0.0          # Distance from player
     has_nearby_cube: bool = False
@@ -87,9 +86,9 @@ class CoverSystem:
         self._pressure_map = pressure_map
 
         # Cover memory: positions that were good cover recently
-        self._cover_memory: Dict[Tuple[int, int], Tuple[float, CoverType]] = {}
+        self._cover_memory: dict[tuple[int, int], tuple[float, CoverType]] = {}
         self._last_search_time: float = 0.0
-        self._cached_results: List[CoverPosition] = []
+        self._cached_results: list[CoverPosition] = []
         self._lock = threading.RLock()
 
         logger.info("[COVER_SYSTEM] Initialized")
@@ -102,9 +101,9 @@ class CoverSystem:
         """Set reference to PressureMap."""
         self._pressure_map = map
 
-    def find_best_cover(self, player_pos: Tuple[float, float],
-                        enemies: List[Dict],
-                        max_distance: float = None) -> Optional[CoverPosition]:
+    def find_best_cover(self, player_pos: tuple[float, float],
+                        enemies: list[dict],
+                        max_distance: float = None) -> CoverPosition | None:
         """
         Find the best cover position near the player.
 
@@ -159,8 +158,8 @@ class CoverSystem:
 
             return best
 
-    def has_cover_at(self, position: Tuple[float, float],
-                     enemies: List[Dict]) -> Tuple[bool, CoverType]:
+    def has_cover_at(self, position: tuple[float, float],
+                     enemies: list[dict]) -> tuple[bool, CoverType]:
         """
         Check if a specific position has cover from enemies.
 
@@ -187,8 +186,8 @@ class CoverSystem:
         else:
             return (False, CoverType.NONE)
 
-    def get_escape_direction(self, cover_pos: Tuple[float, float],
-                             enemies: List[Dict]) -> Optional[Tuple[float, float]]:
+    def get_escape_direction(self, cover_pos: tuple[float, float],
+                             enemies: list[dict]) -> tuple[float, float] | None:
         """
         Get the best escape direction from a cover position.
 
@@ -245,7 +244,7 @@ class CoverSystem:
 
         return best_dir
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get cover system statistics."""
         with self._lock:
             return {
@@ -258,8 +257,8 @@ class CoverSystem:
 
     # --- Internal ---
 
-    def _generate_candidates(self, player_pos: Tuple[float, float],
-                              max_dist: float) -> List[Tuple[float, float]]:
+    def _generate_candidates(self, player_pos: tuple[float, float],
+                              max_dist: float) -> list[tuple[float, float]]:
         """Generate candidate cover positions in search radius."""
         if not self._occupancy_grid:
             return []
@@ -294,7 +293,7 @@ class CoverSystem:
 
         # Add positions from cover memory
         now = time.time()
-        for (gx, gy), (timestamp, cover_type) in list(self._cover_memory.items()):
+        for (gx, gy), (timestamp, _cover_type) in list(self._cover_memory.items()):
             if now - timestamp < self.COVER_MEMORY_DURATION:
                 px_mem = (gx + 0.5) * 20
                 py_mem = (gy + 0.5) * 20
@@ -316,8 +315,8 @@ class CoverSystem:
         return unique
 
     def _evaluate_position(self, cx: float, cy: float,
-                            player_pos: Tuple[float, float],
-                            enemies: List[Dict]) -> Optional[CoverPosition]:
+                            player_pos: tuple[float, float],
+                            enemies: list[dict]) -> CoverPosition | None:
         """Evaluate a single position as cover."""
         if not self._occupancy_grid:
             return None
@@ -411,8 +410,8 @@ class CoverSystem:
             has_nearby_bush=has_adjacent_bush,
         )
 
-    def _select_best_cached(self, player_pos: Tuple[float, float],
-                              enemies: List[Dict]) -> Optional[CoverPosition]:
+    def _select_best_cached(self, player_pos: tuple[float, float],
+                              enemies: list[dict]) -> CoverPosition | None:
         """Re-score cached positions with current enemy positions."""
         if not self._cached_results:
             return None

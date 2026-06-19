@@ -22,9 +22,9 @@ Usage:
 from __future__ import annotations
 
 import logging
-import os
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, Dict, Generator, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ class NoOpSpan:
     def record_exception(self, exception: Exception):
         pass
 
-    def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None):
+    def add_event(self, name: str, attributes: dict[str, Any] | None = None):
         pass
 
 
@@ -79,8 +79,8 @@ class NoOpTracer:
 # ------------------------------------------------------------------
 # Global tracer state (lazy)
 # ------------------------------------------------------------------
-_tracer_instance: Optional[Any] = None
-_provider: Optional[Any] = None
+_tracer_instance: Any | None = None
+_provider: Any | None = None
 
 
 def _get_tracer() -> Any:
@@ -96,7 +96,7 @@ def _get_tracer() -> Any:
 
 def initialize_tracing(
     service_name: str = "soberana-omega-bot",
-    endpoint: Optional[str] = None,
+    endpoint: str | None = None,
     exporter_type: str = "otlp",
     enabled: bool = True,
 ) -> bool:
@@ -164,8 +164,8 @@ def shutdown_tracing() -> None:
 @contextmanager
 def span(
     name: str,
-    attributes: Optional[Dict[str, Any]] = None,
-    parent: Optional[Any] = None,
+    attributes: dict[str, Any] | None = None,
+    parent: Any | None = None,
 ) -> Generator[Any, None, None]:
     """
     Context manager for creating a span.
@@ -176,7 +176,7 @@ def span(
         parent: Optional parent span context
     """
     tracer = _get_tracer()
-    kwargs: Dict[str, Any] = {}
+    kwargs: dict[str, Any] = {}
     if parent is not None:
         kwargs["context"] = parent
 
@@ -187,7 +187,7 @@ def span(
         yield sp
 
 
-def record_error(span_obj: Any, exception: Exception, message: Optional[str] = None) -> None:
+def record_error(span_obj: Any, exception: Exception, message: str | None = None) -> None:
     """Record an exception on a span."""
     if span_obj is None or isinstance(span_obj, NoOpSpan):
         return
@@ -199,7 +199,7 @@ def record_error(span_obj: Any, exception: Exception, message: Optional[str] = N
         pass
 
 
-def get_trace_id() -> Optional[str]:
+def get_trace_id() -> str | None:
     """Return current trace ID for correlation with logs."""
     if not HAS_OTEL:
         return None

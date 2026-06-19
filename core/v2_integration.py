@@ -19,12 +19,11 @@ Integrações:
 6. BrawlerAdaptiveController → adapta quando brawler muda
 """
 
-import time
 import logging
 import threading
-from typing import Optional, Dict, Any
-from pathlib import Path
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +68,8 @@ class V2Integrator:
 
     def __init__(
         self,
-        wrapper: Optional[Any] = None,
-        config: Optional[V2IntegrationConfig] = None,
+        wrapper: Any | None = None,
+        config: V2IntegrationConfig | None = None,
     ):
         if getattr(self, "_initialized", False):
             return
@@ -80,19 +79,19 @@ class V2Integrator:
         self.config = config or V2IntegrationConfig()
         self._cycle_count = 0
         self._last_checkpoint_time = 0.0
-        self._last_brawler: Optional[str] = None
+        self._last_brawler: str | None = None
 
         # Módulos lazy-initialized
-        self._degradation_mgr: Optional[Any] = None
-        self._event_store: Optional[Any] = None
-        self._rate_limiter: Optional[Any] = None
-        self._checkpointer: Optional[Any] = None
-        self._tracer: Optional[Any] = None
-        self._brawler_ctrl: Optional[Any] = None
-        self._replay_analyzer: Optional[Any] = None
-        self._moo: Optional[Any] = None
-        self._frame_skipper: Optional[Any] = None
-        self._alert_system: Optional[Any] = None
+        self._degradation_mgr: Any | None = None
+        self._event_store: Any | None = None
+        self._rate_limiter: Any | None = None
+        self._checkpointer: Any | None = None
+        self._tracer: Any | None = None
+        self._brawler_ctrl: Any | None = None
+        self._replay_analyzer: Any | None = None
+        self._moo: Any | None = None
+        self._frame_skipper: Any | None = None
+        self._alert_system: Any | None = None
 
         self._init_modules()
         logger.info("[V2_INTEGRATOR] Inicializado (enabled=%s)", self.config.enabled)
@@ -110,7 +109,7 @@ class V2Integrator:
 
         if cfg.enable_event_store:
             try:
-                from core.event_store import EventStore, DomainEventType
+                from core.event_store import DomainEventType, EventStore
                 self._event_store = EventStore()
                 self._event_store.append(
                     DomainEventType.SESSION_STARTED,
@@ -193,7 +192,7 @@ class V2Integrator:
             return True
 
         self._cycle_count += 1
-        start_time = time.time()
+        time.time()
 
         # Tracing
         if self._tracer:
@@ -287,7 +286,7 @@ class V2Integrator:
         if self._brawler_ctrl:
             self._brawler_ctrl.set_brawler(brawler)
 
-    def on_match_end(self, result: str, brawler: str, map_name: str, metrics: Optional[Dict] = None):
+    def on_match_end(self, result: str, brawler: str, map_name: str, metrics: dict | None = None):
         """Chamado quando uma partida termina."""
         if self._event_store:
             from core.event_store import DomainEventType
@@ -302,7 +301,7 @@ class V2Integrator:
         if self._brawler_ctrl:
             self._brawler_ctrl.update_from_match_result(brawler, result, metrics)
 
-    def on_player_died(self, context: Dict[str, Any]):
+    def on_player_died(self, context: dict[str, Any]):
         """Chamado quando o jogador morre."""
         if self._event_store:
             from core.event_store import DomainEventType
@@ -313,7 +312,7 @@ class V2Integrator:
                 context,
             )
 
-    def on_action_taken(self, action: str, context: Dict[str, Any]):
+    def on_action_taken(self, action: str, context: dict[str, Any]):
         """Chamado quando uma ação é executada."""
         if self._event_store:
             from core.event_store import DomainEventType
@@ -341,7 +340,7 @@ class V2Integrator:
     # Dashboard API
     # ------------------------------------------------------------------
 
-    def get_dashboard_data(self) -> Dict[str, Any]:
+    def get_dashboard_data(self) -> dict[str, Any]:
         """Retorna dados para o dashboard."""
         data = {
             "v2_enabled": self.config.enabled,
@@ -369,7 +368,7 @@ class V2Integrator:
             return getattr(self.wrapper.state_manager, "current_state", "unknown")
         return "unknown"
 
-    def _get_current_brawler(self) -> Optional[str]:
+    def _get_current_brawler(self) -> str | None:
         """Retorna brawler atual do wrapper."""
         if self.wrapper and hasattr(self.wrapper, "lobby") and self.wrapper.lobby:
             return getattr(self.wrapper.lobby, "current_brawler", None)
@@ -390,7 +389,7 @@ class V2Integrator:
             if self.wrapper and hasattr(self.wrapper, "play_logic") and self.wrapper.play_logic:
                 snap = getattr(self.wrapper.play_logic, "last_combat_snapshot", {})
                 if snap:
-                    from core.game_state_checkpoint import SpatialSnapshot, RLStateSnapshot
+                    from core.game_state_checkpoint import RLStateSnapshot, SpatialSnapshot
                     spatial = SpatialSnapshot(
                         player_position=snap.get("player_pos"),
                         player_hp=snap.get("player_hp", 1.0),
@@ -415,7 +414,7 @@ class V2Integrator:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_config(cls, wrapper: Any, config_dict: Optional[Dict] = None) -> "V2Integrator":
+    def from_config(cls, wrapper: Any, config_dict: dict | None = None) -> "V2Integrator":
         """Cria integrador a partir de config.json."""
         cfg = V2IntegrationConfig()
         if config_dict:

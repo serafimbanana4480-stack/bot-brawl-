@@ -23,10 +23,9 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from pylaai_real.lobby_automator import BrawlerConfig, BrawlerQueue
-
+from core.plugin_system import PluginManager
 from core.subsystems import (
     DecisionSubsystem,
     EmulatorSubsystem,
@@ -35,18 +34,17 @@ from core.subsystems import (
     UISubsystem,
     VisionSubsystem,
 )
+from humanization import HumanizationConfig  # noqa: F401
+from pylaai_real.lobby_automator import BrawlerConfig, BrawlerQueue
 
 # Preserve lazy imports for backward compatibility
 from safety_system import SafetyConfig  # noqa: F401
-from humanization import HumanizationConfig  # noqa: F401
-
-from core.plugin_system import PluginManager
 
 # Initialize plugin manager and discover optional components
 _plugin_manager = PluginManager()
 try:
-    import plugins.orchestrator_plugin   # noqa: F401
     import plugins.learning_mode_plugin  # noqa: F401
+    import plugins.orchestrator_plugin  # noqa: F401
     _plugin_manager.discover()
     _plugin_manager.load_all()
 except Exception as e:
@@ -59,6 +57,37 @@ create_orchestrator = _plugin_manager.get("orchestrator") if HAS_ORCHESTRATOR el
 LearningModeController = _plugin_manager.get("learning_mode") if HAS_LEARNING_MODE else None
 
 logger = logging.getLogger(__name__)
+
+# --- SOVERANA FIX 2026-06-19: optional omega_qa auto-improver ---
+_omega_qa_available = False
+_omega_qa_integration = None
+try:
+    from omega_qa.integration import QAIntegration
+    _omega_qa_available = True
+except Exception as e:
+    logger.debug(f"[WRAPPER] omega_qa unavailable: {e}")
+# --- end fix ---
+
+# --- SOVERANA FIX 2026-06-19: optional adversarial humanizer ---
+_adversarial_humanizer = None
+try:
+    from core.adversarial_humanization import (
+        AdversarialHumanizationConfig,
+        AdversarialHumanizer,
+    )
+    _adversarial_humanizer_class = AdversarialHumanizer
+except Exception as e:
+    logger.debug(f"[WRAPPER] AdversarialHumanizer unavailable: {e}")
+    _adversarial_humanizer_class = None
+# --- end fix ---
+_omega_qa_available = False
+_omega_qa_integration = None
+try:
+    from omega_qa.integration import QAIntegration
+    _omega_qa_available = True
+except Exception as e:
+    logger.debug(f"[WRAPPER] omega_qa unavailable: {e}")
+# --- end fix ---
 
 _DEFAULT_INSTALL_PATH = Path(os.getenv("PYLAAI_INSTALL_PATH", str(Path(__file__).parent / "pylaai_workspace")))
 _BOT_ROOT = Path(__file__).parent
@@ -87,9 +116,9 @@ class PylaAIEnhanced:
     def __init__(
         self,
         install_path: Path = _DEFAULT_INSTALL_PATH,
-        safety_config: Optional[Any] = None,
-        humanization_config: Optional[Any] = None,
-        diagnostic_mode: Optional[bool] = None,
+        safety_config: Any | None = None,
+        humanization_config: Any | None = None,
+        diagnostic_mode: bool | None = None,
         enable_recording: bool = False,
         enable_error_recovery: bool = True,
         learning_mode: bool = False,
@@ -158,9 +187,9 @@ class PylaAIEnhanced:
         self.ui_subsystem = UISubsystem(self, self.central_config, self.diagnostic_mode)
 
         # Phase v2.1: Strategic Integrator
-        self.v2_integrator: Optional[Any] = None
+        self.v2_integrator: Any | None = None
         try:
-            from core.v2_integration import V2Integrator, V2IntegrationConfig
+            from core.v2_integration import V2IntegrationConfig, V2Integrator
 
             v2_config = V2IntegrationConfig()
             v2_config.account_id = self.central_config.get("account_id", "default_account")
@@ -171,7 +200,7 @@ class PylaAIEnhanced:
             logger.warning(f"[WRAPPER] V2 Integrator indisponível: {e}")
 
         # Phase 10: State Persistence
-        self.state_persistence: Optional[Any] = None
+        self.state_persistence: Any | None = None
         try:
             from state_persistence import StatePersistence
 
@@ -181,8 +210,8 @@ class PylaAIEnhanced:
             logger.warning(f"[WRAPPER] State Persistence indisponível: {e}")
 
         # Orchestrator (opt-in)
-        self.orchestrator: Optional[Any] = None
-        self.orchestrator_thread: Optional[threading.Thread] = None
+        self.orchestrator: Any | None = None
+        self.orchestrator_thread: threading.Thread | None = None
         self.use_orchestrator = bool(self.central_config.get("use_orchestrator", False))
         if self.use_orchestrator and HAS_ORCHESTRATOR:
             try:
@@ -206,11 +235,26 @@ class PylaAIEnhanced:
         self._running_lock = threading.Lock()
         self._running = False
         self.stop_event = threading.Event()
-        self.monitor_thread: Optional[threading.Thread] = None
-        self.state_thread: Optional[threading.Thread] = None
-        self.session_start: Optional[float] = None
+        self.monitor_thread: threading.Thread | None = None
+        self.state_thread: threading.Thread | None = None
+        self.session_start: float | None = None
         self.matches_played = 0
         self._paused = False
+
+        # --- SOVERANA FIX 2026-06-19: attach omega_qa auto-improver ---
+        self.qa_integration: Any | None = None
+        self.qa_enabled: bool = bool(self.central_config.get("omega_qa_enabled", True))
+        if self.qa_enabled and _omega_qa_available:
+            try:
+                self.qa_integration = QAIntegration(
+                    wrapper_instance=self,
+                    config={"cycle_interval_seconds": 30.0, "min_global_score": 7.0},
+                )
+                logger.info("[WRAPPER] omega_qa auto-improver attached (8 agents)")
+            except Exception as e:
+                logger.warning(f"[WRAPPER] omega_qa attach failed: {e}")
+                self.qa_integration = None
+        # --- end fix ---
 
     @property
     def running(self) -> bool:
@@ -278,6 +322,14 @@ class PylaAIEnhanced:
         self.safety.start_session()
         self.session_start = time.time()
 
+        # --- SOVERANA FIX 2026-06-19: start omega_qa monitoring ---
+        if self.qa_integration:
+            try:
+                self.qa_integration.start_monitoring()
+            except Exception as e:
+                logger.warning(f"[WRAPPER] omega_qa start failed: {e}")
+        # --- end fix ---
+
         if self.state_manager and self.brawler_queue:
             current = self.brawler_queue.get_current()
             if current:
@@ -344,6 +396,14 @@ class PylaAIEnhanced:
                 hook()
             except Exception as e:
                 logger.warning(f"[WRAPPER] Shutdown hook failed: {e}")
+
+        # --- SOVERANA FIX 2026-06-19: stop omega_qa monitoring ---
+        if getattr(self, "qa_integration", None):
+            try:
+                self.qa_integration.stop_monitoring()
+            except Exception as e:
+                logger.warning(f"[WRAPPER] omega_qa stop failed: {e}")
+        # --- end fix ---
 
         self.ui_subsystem.cleanup()
         self.learning_subsystem.cleanup()
@@ -414,7 +474,7 @@ class PylaAIEnhanced:
     def record_heartbeat(self):
         self.safety_subsystem.record_heartbeat()
 
-    def check_health(self) -> Dict:
+    def check_health(self) -> dict:
         return self.safety_subsystem.check_health()
 
     def register_shutdown_hook(self, hook: callable):
@@ -452,7 +512,7 @@ class PylaAIEnhanced:
             self.central_config[key] = value
             config_path = _BOT_ROOT / "config.json"
             if config_path.exists():
-                with open(config_path, "r", encoding="utf-8") as f:
+                with open(config_path, encoding="utf-8") as f:
                     full_config = json.load(f)
                 full_config[key] = value
                 with open(config_path, "w", encoding="utf-8") as f:
@@ -483,12 +543,12 @@ class PylaAIEnhanced:
             logger.error(f"[WRAPPER] Falha ao set brawler {name}: {e}")
             return False
 
-    def get_available_brawler_names(self) -> List[str]:
+    def get_available_brawler_names(self) -> list[str]:
         if not self.brawler_queue:
             return []
         return [b.name for b in self.brawler_queue.brawlers if getattr(b, "enabled", True)]
 
-    def update_queue(self, queue_data: List[Dict]) -> bool:
+    def update_queue(self, queue_data: list[dict]) -> bool:
         if not self.brawler_queue:
             return False
         try:
@@ -627,33 +687,33 @@ class PylaAIEnhanced:
             logger.error(f"[WRAPPER] Falha na acao {action_name}: {e}")
             return False
 
-    def toggle_esp(self, enabled: Optional[bool] = None) -> bool:
+    def toggle_esp(self, enabled: bool | None = None) -> bool:
         if not self.esp_overlay:
             return False
         return self.esp_overlay.toggle(enabled)
 
-    def start_mode(self, mode: str, config: Optional[Dict] = None) -> bool:
+    def start_mode(self, mode: str, config: dict | None = None) -> bool:
         if not self.mode_controller:
             return False
         return self.mode_controller.start_mode(mode, config)
 
-    def stop_mode(self, mode: Optional[str] = None) -> bool:
+    def stop_mode(self, mode: str | None = None) -> bool:
         if not self.mode_controller:
             return False
         return self.mode_controller.stop_mode(mode)
 
-    def get_mode_status(self) -> Dict:
+    def get_mode_status(self) -> dict:
         if not self.mode_controller:
             return {"available": False}
         return self.mode_controller.get_status()
 
-    def get_detection_snapshot(self) -> Dict:
+    def get_detection_snapshot(self) -> dict:
         return self.ui_subsystem.get_detection_snapshot()
 
-    def get_rl_metrics(self) -> Dict:
+    def get_rl_metrics(self) -> dict:
         return self.ui_subsystem.get_rl_metrics()
 
-    def get_system_status(self) -> Dict:
+    def get_system_status(self) -> dict:
         return self.ui_subsystem.get_system_status()
 
     def start_recording(self) -> bool:
@@ -687,7 +747,7 @@ class PylaAIEnhanced:
 
     def add_brawler_to_queue(
         self, name: str, current_trophies: int = 0, target_trophies: int = 350,
-        target_wins: int = 10, priority: int = 1, game_mode: Optional[str] = None,
+        target_wins: int = 10, priority: int = 1, game_mode: str | None = None,
     ):
         cfg = BrawlerConfig(
             name=name, current_trophies=current_trophies,
@@ -697,10 +757,10 @@ class PylaAIEnhanced:
         self.brawler_queue.add_brawler(cfg)
         logger.info(f"Brawler adicionado: {name}")
 
-    def get_queue(self) -> List[Dict]:
+    def get_queue(self) -> list[dict]:
         return self.brawler_queue.get_queue()
 
-    def get_status(self) -> Dict:
+    def get_status(self) -> dict:
         if hasattr(self, "ui_subsystem") and self.ui_subsystem is not None:
             return self.ui_subsystem.get_status(self)
         # Legacy fallback for tests that construct PylaAIEnhanced via __new__

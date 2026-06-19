@@ -8,7 +8,8 @@ RL metrics, debug visualizer integration, and system status aggregation.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+import time
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from wrapper import PylaAIEnhanced
@@ -21,18 +22,18 @@ class UISubsystem:
 
     def __init__(
         self,
-        wrapper: "PylaAIEnhanced",
+        wrapper: PylaAIEnhanced,
         central_config: dict,
         diagnostic_mode: bool,
     ):
         self.wrapper = wrapper
         self.central_config = central_config
         self.diagnostic_mode = diagnostic_mode
-        self.dashboard: Optional[Any] = None
-        self.diagnostic_overlay: Optional[Any] = None
-        self.esp_overlay: Optional[Any] = None
-        self.mode_controller: Optional[Any] = None
-        self.rl_metrics_collector: Optional[Any] = None
+        self.dashboard: Any | None = None
+        self.diagnostic_overlay: Any | None = None
+        self.esp_overlay: Any | None = None
+        self.mode_controller: Any | None = None
+        self.rl_metrics_collector: Any | None = None
         self.overlay_enabled = bool(
             diagnostic_mode or __import__("os").getenv("PYLAAI_OVERLAY", "1") == "1"
         )
@@ -193,7 +194,7 @@ class UISubsystem:
     # Status / queries
     # ------------------------------------------------------------------
 
-    def get_system_status(self) -> Dict:
+    def get_system_status(self) -> dict:
         """Return detailed system status for dashboard."""
         status = {
             "paused": getattr(self.wrapper, "_paused", False),
@@ -271,7 +272,7 @@ class UISubsystem:
         }
         return status
 
-    def get_detection_snapshot(self) -> Dict:
+    def get_detection_snapshot(self) -> dict:
         """Return raw vision detections."""
         detections = []
         vision_stats = {}
@@ -285,7 +286,7 @@ class UISubsystem:
             logger.debug(f"[WRAPPER] Detection snapshot error: {e}")
         return {"detections": detections, "vision_stats": vision_stats}
 
-    def get_rl_metrics(self) -> Dict:
+    def get_rl_metrics(self) -> dict:
         """Return RL metrics for dashboard."""
         if self.rl_metrics_collector:
             return self.rl_metrics_collector.get_metrics()
@@ -416,97 +417,133 @@ class UISubsystem:
     # get_status (extracted from wrapper.py)
     # ------------------------------------------------------------------
 
-    def get_status(self, wrapper: Any) -> Dict:
+    def get_status(self, wrapper: Any) -> dict:
         logger.debug("[WRAPPER] get_status() chamado")
         session_duration = 0.0
-        if wrapper.session_start:
+        if getattr(wrapper, "session_start", None):
             session_duration = time.time() - wrapper.session_start
 
+        # --- SOVERANA FIX 2026-06-19: defensive accessors (status must be safe pre-setup) ---
+        _emulator_controller = getattr(wrapper, "emulator_controller", None)
+        _state_manager = getattr(wrapper, "state_manager", None)
+        _play_logic = getattr(wrapper, "play_logic", None)
+        _lobby = getattr(wrapper, "lobby", None)
+        _safety = getattr(wrapper, "safety", None)
+        _brawler_queue = getattr(wrapper, "brawler_queue", None)
+        _orchestrator = getattr(wrapper, "orchestrator", None)
+        _error_recovery = getattr(wrapper, "error_recovery", None)
+        _state_recovery = getattr(wrapper, "state_recovery", None)
+        _auto_calibrator = getattr(wrapper, "auto_calibrator", None)
+        _progress = getattr(wrapper, "progress", None)
+        _match_controller = getattr(wrapper, "match_controller", None)
+        _humanization = getattr(wrapper, "humanization", None)
+        _anti_ban = getattr(wrapper, "anti_ban", None)
+        _diagnostic_overlay = getattr(wrapper, "diagnostic_overlay", None)
+        _detect_main = getattr(wrapper, "detect_main", None)
+
+        try:
+            _current_brawler = _brawler_queue.get_current().name if _brawler_queue and _brawler_queue.get_current() else None
+        except Exception:
+            _current_brawler = None
+        try:
+            _queue = _brawler_queue.get_queue() if _brawler_queue else []
+        except Exception:
+            _queue = []
+
         window_snapshot = None
-        if wrapper.emulator_controller and hasattr(wrapper.emulator_controller, "get_status_snapshot"):
+        if _emulator_controller and hasattr(_emulator_controller, "get_status_snapshot"):
             try:
-                window_snapshot = wrapper.emulator_controller.get_status_snapshot()
+                window_snapshot = _emulator_controller.get_status_snapshot()
             except Exception:
                 pass
 
         combat_snapshot = None
-        if wrapper.play_logic and hasattr(wrapper.play_logic, "get_last_combat_snapshot"):
+        if _play_logic and hasattr(_play_logic, "get_last_combat_snapshot"):
             try:
-                combat_snapshot = wrapper.play_logic.get_last_combat_snapshot()
+                combat_snapshot = _play_logic.get_last_combat_snapshot()
             except Exception:
                 pass
 
         lobby_diagnostic = None
-        if wrapper.lobby and hasattr(wrapper.lobby, "get_diagnostic_report"):
+        if _lobby and hasattr(_lobby, "get_diagnostic_report"):
             try:
-                lobby_diagnostic = wrapper.lobby.get_diagnostic_report()
+                lobby_diagnostic = _lobby.get_diagnostic_report()
             except Exception:
                 pass
 
         screen_state = None
         if (
-            wrapper.state_manager
-            and wrapper.state_manager.screen_automation
-            and hasattr(wrapper.state_manager.screen_automation, "get_current_state_name")
+            _state_manager
+            and getattr(_state_manager, "screen_automation", None)
+            and hasattr(_state_manager.screen_automation, "get_current_state_name")
         ):
             try:
-                screen_state = wrapper.state_manager.screen_automation.get_current_state_name()
+                screen_state = _state_manager.screen_automation.get_current_state_name()
             except Exception:
                 pass
 
         tracker_stats = None
-        if wrapper.play_logic and hasattr(wrapper.play_logic, "enemy_tracker") and wrapper.play_logic.enemy_tracker:
+        if _play_logic and getattr(_play_logic, "enemy_tracker", None):
             try:
-                tracker_stats = wrapper.play_logic.enemy_tracker.get_stats()
+                tracker_stats = _play_logic.enemy_tracker.get_stats()
             except Exception:
                 pass
 
         current_map = None
-        if wrapper.play_logic and hasattr(wrapper.play_logic, "movement") and wrapper.play_logic.movement:
+        if _play_logic and getattr(_play_logic, "movement", None):
             try:
-                current_map = wrapper.play_logic.movement.current_map
+                current_map = _play_logic.movement.current_map
             except Exception:
                 pass
 
+        orch_status = None
+        if _orchestrator and hasattr(_orchestrator, "get_status"):
+            try:
+                orch_status = _orchestrator.get_status()
+            except Exception:
+                orch_status = None
+
         return {
-            "running": wrapper.running,
-            "current_state": wrapper.state_manager.current_state if wrapper.state_manager else "unknown",
-            "last_known_state": getattr(wrapper.state_manager, "last_known_state", "unknown") if wrapper.state_manager else "unknown",
-            "unknown_streak": getattr(wrapper.state_manager, "unknown_streak", 0) if wrapper.state_manager else 0,
-            "last_unknown_hint": getattr(wrapper.state_manager, "last_unknown_hint", None) if wrapper.state_manager else None,
-            "queue": wrapper.get_queue(),
-            "safety": wrapper.safety.get_status() if wrapper.safety else None,
+            "running": getattr(wrapper, "running", False),
+            "current_state": getattr(_state_manager, "current_state", "unknown") if _state_manager else "unknown",
+            "last_known_state": getattr(_state_manager, "last_known_state", "unknown") if _state_manager else "unknown",
+            "unknown_streak": getattr(_state_manager, "unknown_streak", 0) if _state_manager else 0,
+            "last_unknown_hint": getattr(_state_manager, "last_unknown_hint", None) if _state_manager else None,
+            "queue": _queue,
+            "safety": _safety.get_status() if _safety else None,
             "session_duration_minutes": session_duration / 60,
-            "matches_played": wrapper.matches_played,
-            "current_brawler": wrapper.brawler_queue.get_current().name if wrapper.brawler_queue.get_current() else None,
+            "matches_played": getattr(wrapper, "matches_played", 0),
+            "current_brawler": _current_brawler,
             "current_map": current_map,
-            "emulator_controller_active": wrapper.emulator_controller is not None,
+            "emulator_controller_active": _emulator_controller is not None,
             "window_active": window_snapshot.get("window_active") if isinstance(window_snapshot, dict) else None,
             "window_title": window_snapshot.get("window_title") if isinstance(window_snapshot, dict) else None,
-            "models_loaded": wrapper.detect_main is not None,
-            "diagnostic_overlay_active": bool(getattr(wrapper, "diagnostic_overlay", None)),
+            "models_loaded": _detect_main is not None,
+            "diagnostic_overlay_active": bool(_diagnostic_overlay),
             "diagnostics": {
-                "diagnostic_mode": wrapper.diagnostic_mode,
+                "diagnostic_mode": getattr(wrapper, "diagnostic_mode", False),
                 "lobby": lobby_diagnostic,
                 "screen_state": screen_state,
-                "progress": wrapper.progress.get_stats() if wrapper.progress else None,
-                "match": wrapper.match_controller.get_session_stats() if wrapper.match_controller else None,
+                "progress": _progress.get_stats() if _progress else None,
+                "match": _match_controller.get_session_stats() if _match_controller else None,
                 "combat": combat_snapshot,
             },
             "tracker_stats": tracker_stats,
             "orchestrator": {
                 "enabled": getattr(wrapper, "use_orchestrator", False),
-                "state": wrapper.orchestrator.get_status() if getattr(wrapper, "orchestrator", None) else None,
+                "state": orch_status,
             },
-            "error_recovery": wrapper.error_recovery.get_stats() if wrapper.error_recovery else {"enabled": False},
-            "state_recovery": wrapper.state_recovery.get_recovery_status() if wrapper.state_recovery else {"is_recovering": False},
+            "error_recovery": _error_recovery.get_stats() if _error_recovery else {"enabled": False},
+            "state_recovery": _state_recovery.get_recovery_status() if _state_recovery else {"is_recovering": False},
             "auto_calibrator": {
-                "enabled": wrapper.auto_calibrator is not None,
-                "cached_coords": len(wrapper.auto_calibrator.coords_cache) if wrapper.auto_calibrator else 0,
+                "enabled": _auto_calibrator is not None,
+                "cached_coords": len(_auto_calibrator.coords_cache) if _auto_calibrator else 0,
             },
-            "ocr_detector": wrapper.ocr_detector.get_detection_stats() if wrapper.ocr_detector else {"reader_available": False},
+            "humanization": {"enabled": getattr(_humanization, "enabled", False)} if _humanization else None,
+            "anti_ban": {"enabled": getattr(_anti_ban, "enabled", False)} if _anti_ban else None,
+            "ocr_detector": getattr(wrapper, "ocr_detector", None).get_detection_stats() if getattr(wrapper, "ocr_detector", None) else {"reader_available": False},
             "debug_visualizer": {
-                "enabled": wrapper.debug_visualizer is not None,
-                "running": wrapper.debug_visualizer.is_running if wrapper.debug_visualizer else False,
+                "enabled": getattr(wrapper, "debug_visualizer", None) is not None,
+                "running": getattr(getattr(wrapper, "debug_visualizer", None), "is_running", False),
             },
         }

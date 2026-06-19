@@ -18,10 +18,9 @@ Solution:
 - Focus bonus: staying on one target increases effectiveness
 """
 
-import math
 import logging
+import math
 import time
-from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
@@ -58,8 +57,8 @@ class TargetInfo:
 @dataclass
 class CommitmentState:
     """Current target commitment state."""
-    target_id: Optional[int] = None
-    target_info: Optional[TargetInfo] = None
+    target_id: int | None = None
+    target_info: TargetInfo | None = None
     committed_at: float = 0.0
     reason: CommitmentReason = CommitmentReason.NEW_BEST
     focus_time: float = 0.0        # Total time focused on this target
@@ -99,10 +98,10 @@ class StickyTarget:
         self.focus_bonus = focus_bonus
 
         self._state = CommitmentState()
-        self._previous_targets: Dict[int, TargetInfo] = {}  # Track history
+        self._previous_targets: dict[int, TargetInfo] = {}  # Track history
 
         # Direction smoothing
-        self._current_direction: Optional[Tuple[float, float]] = None
+        self._current_direction: tuple[float, float] | None = None
         self._direction_smoothing = 0.3  # Lower = smoother (0-1)
 
         # Stats
@@ -112,8 +111,8 @@ class StickyTarget:
         logger.info("[STICKY_TARGET] Initialized (commit=%dms, hysteresis=%.2f)",
                      min_commitment_ms, hysteresis_margin)
 
-    def select_target(self, candidates: List[TargetInfo],
-                      scorer_fn=None) -> Tuple[Optional[TargetInfo], CommitmentReason]:
+    def select_target(self, candidates: list[TargetInfo],
+                      scorer_fn=None) -> tuple[TargetInfo | None, CommitmentReason]:
         """
         Select the best target with commitment logic.
 
@@ -234,7 +233,7 @@ class StickyTarget:
                     self._state.hits_on_target / self._state.shots_at_target
                 )
 
-    def force_switch(self, new_target: Optional[TargetInfo] = None):
+    def force_switch(self, new_target: TargetInfo | None = None):
         """Force a target switch (e.g., when using super on a specific enemy)."""
         if new_target:
             self._commit(new_target, CommitmentReason.OVERRIDE, time.time())
@@ -242,7 +241,7 @@ class StickyTarget:
             self._release_commitment(CommitmentReason.OVERRIDE)
 
     def get_smoothed_direction(self, target: TargetInfo,
-                                player_pos: Tuple[float, float]) -> Tuple[float, float]:
+                                player_pos: tuple[float, float]) -> tuple[float, float]:
         """
         Get smoothed movement direction toward target.
 
@@ -276,7 +275,7 @@ class StickyTarget:
         self._current_direction = smoothed
         return smoothed
 
-    def get_commitment_info(self) -> Dict:
+    def get_commitment_info(self) -> dict:
         """Get current commitment state info."""
         if self._state.target_id is None:
             return {"committed": False}
@@ -293,7 +292,7 @@ class StickyTarget:
             "reason": self._state.reason.value,
         }
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get sticky target statistics."""
         return {
             "total_commits": self._total_commits,

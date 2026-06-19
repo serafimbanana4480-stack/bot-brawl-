@@ -49,7 +49,7 @@
     "jitter_range": 2
   },
   "vision": {
-    "main_model": "brawlstars_yolov8.pt",
+    "main_model": "brawlstars_yolov8_8class.pt",
     "brawler_id_model": "brawler_id.pt",
     "confidence_threshold": 0.37,
     "nms_iou_threshold": 0.45,

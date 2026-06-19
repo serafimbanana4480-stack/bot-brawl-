@@ -2,7 +2,9 @@
 lobby_automator.py
 
 Automatiza ações no lobby, incluindo seleção de brawlers.
-Com suporte a fila de brawlers (melhoria sobre o original).
+
+DEPRECATED: Use core.lobby_fsm.LobbyFSM instead.
+This module is kept for backward compatibility only.
 
 VERSAO 2.0 - Navegacao inteligente com:
 - PopupManager: fecha popups automaticamente
@@ -11,6 +13,7 @@ VERSAO 2.0 - Navegacao inteligente com:
 - BrawlerSelectorFast: selecao rapida com cache
 """
 
+import warnings
 import time
 import random
 from collections import deque
@@ -18,6 +21,12 @@ from typing import Optional, List, Dict, TYPE_CHECKING
 from dataclasses import dataclass
 from pathlib import Path
 import logging
+
+warnings.warn(
+    "Deprecated: use core.lobby_fsm.LobbyFSM instead",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 if TYPE_CHECKING:
     import numpy as np

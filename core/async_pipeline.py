@@ -26,12 +26,15 @@ This means:
 """
 
 import logging
+import math
 import threading
 import time
 import traceback
-from typing import Any, Callable, Dict, Optional, Tuple
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
+from typing import Any
+
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -51,20 +54,20 @@ class PipelineFrame:
     timestamp: float = 0.0
 
     # Inference outputs
-    raw_detections: Optional[list] = None
+    raw_detections: list | None = None
     inference_time_ms: float = 0.0
 
     # Tracking outputs
-    tracked_objects: Optional[list] = None
+    tracked_objects: list | None = None
     tracking_time_ms: float = 0.0
 
     # Decision outputs
-    action: Optional[Any] = None
-    action_params: Optional[Dict] = None
+    action: Any | None = None
+    action_params: dict | None = None
     decision_time_ms: float = 0.0
 
     # World state snapshot
-    world_state: Optional[Dict] = None
+    world_state: dict | None = None
 
     # Pipeline metrics
     total_latency_ms: float = 0.0
@@ -139,9 +142,9 @@ class AsyncPipeline:
 
     def __init__(
         self,
-        inference_fn: Optional[Callable] = None,
-        tracking_fn: Optional[Callable] = None,
-        decision_fn: Optional[Callable] = None,
+        inference_fn: Callable | None = None,
+        tracking_fn: Callable | None = None,
+        decision_fn: Callable | None = None,
         max_inference_fps: float = 15.0,
         max_tracking_fps: float = 30.0,
     ):
@@ -154,7 +157,7 @@ class AsyncPipeline:
 
         self._buffer = DoubleBuffer()
         self._running = False
-        self._threads: Dict[str, threading.Thread] = {}
+        self._threads: dict[str, threading.Thread] = {}
 
         # Performance tracking
         self._stats = {
@@ -180,7 +183,7 @@ class AsyncPipeline:
         self._latency_samples: list = []
 
         # Latest screenshot for inference thread
-        self._latest_frame: Optional[np.ndarray] = None
+        self._latest_frame: np.ndarray | None = None
         self._frame_lock = threading.Lock()
         self._new_frame_event = threading.Event()
 
@@ -240,7 +243,7 @@ class AsyncPipeline:
             self._latest_frame = frame
         self._new_frame_event.set()
 
-    def get_latest_action(self) -> Optional[Tuple[Any, Optional[Dict]]]:
+    def get_latest_action(self) -> tuple[Any, dict | None] | None:
         """
         Get the latest action from the decision stage.
 
@@ -281,7 +284,7 @@ class AsyncPipeline:
             logger.error("[ASYNC_PIPELINE] Decision error: %s", e)
             return None
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get pipeline performance statistics."""
         self._update_all_fps()
         return self._stats.copy()
@@ -396,7 +399,7 @@ class AsyncPipeline:
                 self._stats["tracking_errors"] += 1
                 time.sleep(0.1)
 
-    def _build_world_state(self, tracked_objects: list) -> Dict:
+    def _build_world_state(self, tracked_objects: list) -> dict:
         """
         Build a world state dict from tracked objects for the decision stage.
 
@@ -421,7 +424,7 @@ class AsyncPipeline:
 
         for obj in tracked_objects:
             class_name = obj.get("class_name", "").lower()
-            x, y = obj.get("x", 0), obj.get("y", 0)
+            _x, _y = obj.get("x", 0), obj.get("y", 0)
 
             if class_name in ("enemy", "opponent"):
                 state["enemies"].append(obj)
@@ -467,5 +470,4 @@ class AsyncPipeline:
             self._update_fps(stage)
 
 
-# Need math import for _build_world_state
-import math
+# math imported at top of file

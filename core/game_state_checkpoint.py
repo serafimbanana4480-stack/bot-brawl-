@@ -14,14 +14,14 @@ Diferença do state_persistence.py original:
 - Integração com EventStore para eventos pós-recovery
 """
 
-import pickle
 import logging
-import time
+import pickle
 import threading
-from pathlib import Path
-from typing import Dict, Optional, Any, List, Tuple
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -29,22 +29,22 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SpatialSnapshot:
     """Snapshot espacial de entidades no mapa."""
-    player_position: Optional[Tuple[float, float]] = None
+    player_position: tuple[float, float] | None = None
     player_hp: float = 1.0
     player_super: float = 0.0
-    enemy_positions: List[Dict[str, Any]] = field(default_factory=list)
-    power_cube_positions: List[Tuple[float, float]] = field(default_factory=list)
-    bush_positions: List[Tuple[float, float]] = field(default_factory=list)
-    danger_zones: List[Tuple[float, float, float]] = field(default_factory=list)  # x, y, radius
+    enemy_positions: list[dict[str, Any]] = field(default_factory=list)
+    power_cube_positions: list[tuple[float, float]] = field(default_factory=list)
+    bush_positions: list[tuple[float, float]] = field(default_factory=list)
+    danger_zones: list[tuple[float, float, float]] = field(default_factory=list)  # x, y, radius
 
 
 @dataclass
 class RLStateSnapshot:
     """Snapshot do estado de RL."""
-    q_table_hash: Optional[str] = None  # Hash para verificar se mudou
+    q_table_hash: str | None = None  # Hash para verificar se mudou
     epsilon: float = 0.1
-    last_state: Optional[Any] = None
-    last_action: Optional[int] = None
+    last_state: Any | None = None
+    last_action: int | None = None
     accumulated_reward: float = 0.0
 
 
@@ -57,8 +57,8 @@ class GameStateSnapshot:
 
     # Game context
     current_state: str  # lobby, in_game, etc.
-    brawler: Optional[str] = None
-    map_name: Optional[str] = None
+    brawler: str | None = None
+    map_name: str | None = None
     match_time_remaining: float = 0.0
     team_score: int = 0
     enemy_score: int = 0
@@ -72,16 +72,16 @@ class GameStateSnapshot:
     # Meta
     meta_strategy: str = "balanced"
     intent: str = ""
-    sticky_target_id: Optional[str] = None
+    sticky_target_id: str | None = None
 
     # World model (serializado de forma leve)
-    world_model_summary: Dict[str, Any] = field(default_factory=dict)
+    world_model_summary: dict[str, Any] = field(default_factory=dict)
 
     # Frame counter para sincronização
     frame_counter: int = 0
 
     # Histórico recente de ações (últimos 30s)
-    recent_actions: List[Dict[str, Any]] = field(default_factory=list)
+    recent_actions: list[dict[str, Any]] = field(default_factory=list)
 
 
 class GameStateCheckpointer:
@@ -116,15 +116,15 @@ class GameStateCheckpointer:
     def maybe_checkpoint(
         self,
         current_state: str,
-        brawler: Optional[str] = None,
-        map_name: Optional[str] = None,
-        spatial: Optional[SpatialSnapshot] = None,
-        rl_state: Optional[RLStateSnapshot] = None,
+        brawler: str | None = None,
+        map_name: str | None = None,
+        spatial: SpatialSnapshot | None = None,
+        rl_state: RLStateSnapshot | None = None,
         meta_strategy: str = "balanced",
         intent: str = "",
-        world_model_summary: Optional[Dict] = None,
+        world_model_summary: dict | None = None,
         frame_counter: int = 0,
-        recent_actions: Optional[List[Dict]] = None,
+        recent_actions: list[dict] | None = None,
         force: bool = False,
     ) -> bool:
         """
@@ -206,7 +206,7 @@ class GameStateCheckpointer:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, default=str)
 
-    def load_latest_checkpoint(self) -> Optional[GameStateSnapshot]:
+    def load_latest_checkpoint(self) -> GameStateSnapshot | None:
         """
         Carrega o checkpoint mais recente.
         Retorna None se não houver checkpoints.
@@ -228,25 +228,25 @@ class GameStateCheckpointer:
                 )
                 return snapshot
 
-            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.error("[CHECKPOINTER] Erro ao carregar %s: %s", latest.name, e)
                 # Tentar o penúltimo
                 if len(checkpoints) > 1:
                     try:
                         with open(checkpoints[-2], "rb") as f:
                             return pickle.load(f)
-                    except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError):
+                    except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
                         pass
                 return None
 
-    def load_checkpoints_for_session(self, session_id: str) -> List[GameStateSnapshot]:
+    def load_checkpoints_for_session(self, session_id: str) -> list[GameStateSnapshot]:
         """Carrega todos os checkpoints de uma sessão."""
         snapshots = []
         for path in sorted(self.checkpoint_dir.glob(f"{session_id}_*.pkl")):
             try:
                 with open(path, "rb") as f:
                     snapshots.append(pickle.load(f))
-            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.warning("[CHECKPOINTER] Erro ao carregar %s: %s", path.name, e)
         return snapshots
 
@@ -267,7 +267,7 @@ class GameStateCheckpointer:
                 f.unlink(missing_ok=True)
             logger.info("[CHECKPOINTER] Todos os checkpoints removidos")
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Estatísticas do checkpointer."""
         checkpoints = list(self.checkpoint_dir.glob("*.pkl"))
         total_size = sum(f.stat().st_size for f in checkpoints)

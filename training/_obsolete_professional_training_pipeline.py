@@ -1,18 +1,7 @@
 """
-professional_training_pipeline.py
+OBSOLETE — Use unified_training_system.py instead.
 
-Pipeline profissional de treino YOLO para Brawl Stars.
-Unifica classes, captura dados reais, auto-labela, e treina modelo.
-
-Classes padronizadas (compatíveis com o modelo actual brawlstars_yolov8.pt):
-    0: Player   - Jogador controlado (indicado por seta/joystick)
-    1: Bush     - Arbustos (cover vegetal)
-    2: Enemy    - Inimigos (brawlers adversários)
-    3: Cubebox  - Caixas de gemas/power cubes
-
-Usage:
-    python training/professional_training_pipeline.py --capture --label --train --epochs 50
-    python training/professional_training_pipeline.py --train-only --epochs 100
+This file is kept only as a reference and will be removed in the next cleanup pass.
 """
 
 import argparse

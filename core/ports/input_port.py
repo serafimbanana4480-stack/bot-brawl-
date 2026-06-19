@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import abc
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 
 @dataclass
@@ -31,8 +31,8 @@ class InputAction:
     x2: float = 0.0  # for swipe
     y2: float = 0.0  # for swipe
     duration_ms: int = 100
-    keycode: Optional[int] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    keycode: int | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class InputPort(abc.ABC):
@@ -59,7 +59,7 @@ class InputPort(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         """Return input health: connected, lag, errors, etc."""
         ...
 

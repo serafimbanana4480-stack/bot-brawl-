@@ -19,35 +19,35 @@ from __future__ import annotations
 
 import abc
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 
 @dataclass
 class DecisionContext:
     """Context passed to the decision system for one frame."""
     player_hp: float = 1.0
-    player_pos: Tuple[float, float] = (0.5, 0.5)
-    enemies: List[Dict[str, Any]] = field(default_factory=list)
-    allies: List[Dict[str, Any]] = field(default_factory=list)
-    detected_objects: List[Any] = field(default_factory=list)
-    hud_state: Optional[Any] = None
+    player_pos: tuple[float, float] = (0.5, 0.5)
+    enemies: list[dict[str, Any]] = field(default_factory=list)
+    allies: list[dict[str, Any]] = field(default_factory=list)
+    detected_objects: list[Any] = field(default_factory=list)
+    hud_state: Any | None = None
     game_phase: str = "unknown"
     match_time_remaining: float = 120.0
     can_attack: bool = True
     can_super: bool = False
     brawler_name: str = "default"
-    map_name: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    map_name: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class Decision:
     """Output from the decision system."""
     action_type: str = "idle"  # attack, move, retreat, super, collect, idle, ...
-    target_pos: Optional[Tuple[float, float]] = None
+    target_pos: tuple[float, float] | None = None
     confidence: float = 0.0
     reasoning: str = ""  # Human-readable explanation
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class DecisionPort(abc.ABC):
@@ -75,7 +75,7 @@ class DecisionPort(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def start_episode(self, brawler: str, map_name: Optional[str] = None) -> None:
+    def start_episode(self, brawler: str, map_name: str | None = None) -> None:
         """Called at match start."""
         ...
 
@@ -85,7 +85,7 @@ class DecisionPort(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         """Return decision system health."""
         ...
 

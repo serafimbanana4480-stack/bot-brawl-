@@ -1,5 +1,7 @@
 {
-  "generated_at": "2026-05-30T03:42:39.332808+00:00",
+  "generated_at": "2026-06-19T12:45:00+01:00",
+  "updated_at": "2026-06-19T12:45:00+01:00",
+  "primary": "brawlstars_yolov8_8class.pt",
   "models": {
     "bc_unified_best.pt": {
       "name": "bc_unified_best.pt",
@@ -19,8 +21,8 @@
         "Cubebox",
         "Powerup"
       ],
-      "status": "valid",
-      "reason": "Brawl Stars-specific class labels verified"
+      "status": "legacy",
+      "reason": "4-class model — mantido para fallback"
     },
     "brawlstars_yolov8_8class.pt": {
       "name": "brawlstars_yolov8_8class.pt",
@@ -36,8 +38,8 @@
         "Bullet",
         "Super"
       ],
-      "status": "valid",
-      "reason": "Brawl Stars-specific class labels verified"
+      "status": "primary",
+      "reason": "8-class model — alinhado com config.json"
     },
     "brawlstars_yolov8_backup.pt": {
       "name": "brawlstars_yolov8_backup.pt",
@@ -49,16 +51,47 @@
         "Cubebox",
         "Powerup"
       ],
-      "status": "valid",
-      "reason": "Brawl Stars-specific class labels verified"
+      "status": "legacy",
+      "reason": "Backup do modelo 4-class original"
     },
     "brawlstars_yolov8_gpu.pt": {
       "name": "brawlstars_yolov8_gpu.pt",
       "path": "C:\\Users\\rodri\\Desktop\\bot brawl\\models\\brawlstars_yolov8_gpu.pt",
       "sha256": "9b45f2abd8d325f5560e590a805c053ef1c046d2e7bea7ae3b4877717a60c400",
-      "classes": [],
-      "status": "invalid",
-      "reason": "Cannot load model / no metadata"
+      "classes": [
+        "player",
+        "enemy",
+        "cubebox",
+        "powerup"
+      ],
+      "status": "experimental",
+      "reason": "89MB yolov8s treinado em merged_v2 (4-class) — mAP50=0.882"
+    },
+    "yolo_brawlstars_gpu_v8s_best.pt": {
+      "name": "yolo_brawlstars_gpu_v8s_best.pt",
+      "path": "C:\\Users\\rodri\\Desktop\\bot brawl\\models\\yolo\\brawlstars_gpu_v8s\\weights\\best.pt",
+      "sha256": null,
+      "classes": [
+        "player",
+        "enemy",
+        "cubebox",
+        "powerup"
+      ],
+      "status": "experimental",
+      "reason": "89MB yolov8s treinado em merged_v2 (4-class) — checkpoint de treino"
+    },
+    "yolo_brawlstars_v1_renum-2_best.pt": {
+      "name": "yolo_brawlstars_v1_renum-2_best.pt",
+      "path": "C:\\Users\\rodri\\Desktop\\bot brawl\\models\\yolo\\brawlstars_v1_renum-2\\weights\\best.pt",
+      "sha256": null,
+      "classes": [
+        "player",
+        "enemy",
+        "cubebox",
+        "powerup"
+      ],
+      "status": "experimental",
+      "reason": "24MB yolov8n treinado em roboflow_raw_v2 (4-class)"
     },
     "cql_unified_best.pt": {
       "name": "cql_unified_best.pt",
@@ -163,7 +196,7 @@
         "toothbrush"
       ],
       "status": "fake",
-      "reason": "COCO-80 class labels detected \u2014 not trained for Brawl Stars"
+      "reason": "COCO-80 class labels detected — not trained for Brawl Stars"
     },
     "yolo_unified_best.pt": {
       "name": "yolo_unified_best.pt",
@@ -252,8 +285,12 @@
         "toothbrush"
       ],
       "status": "fake",
-      "reason": "COCO-80 class labels detected \u2014 not trained for Brawl Stars"
+      "reason": "COCO-80 class labels detected — not trained for Brawl Stars"
     }
   },
-  "quarantined": []
+  "quarantined": [
+    "yolo_unified_best.pt",
+    "yolov8n.pt",
+    "yolov5s.pt"
+  ]
 }

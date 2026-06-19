@@ -16,14 +16,11 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-
-import numpy as np
+from typing import Any
 
 from core.ports.vision_port import (
     DetectedObject,
     GameStateSnapshot,
-    HUDState,
     VisionPort,
 )
 
@@ -41,22 +38,22 @@ class VisionAdapter(VisionPort):
         screenshot_taker: Any = None,
         detector: Any = None,
         state_detector: Any = None,
-        images_path: Optional[Path] = None,
-        resolution: Tuple[int, int] = (1920, 1080),
-        snapshot_source: Optional[Any] = None,
+        images_path: Path | None = None,
+        resolution: tuple[int, int] = (1920, 1080),
+        snapshot_source: Any | None = None,
     ):
         self._screenshot = screenshot_taker
         self._detector = detector
         self._state_detector = state_detector
         self._images_path = images_path
         self._resolution = resolution
-        self._last_snapshot: Optional[GameStateSnapshot] = None
+        self._last_snapshot: GameStateSnapshot | None = None
         self._errors_in_a_row = 0
         self._max_errors = 5
         self._lock = threading.RLock()
         self._snapshot_source = snapshot_source
 
-    def set_snapshot_source(self, source: Optional[Any]) -> None:
+    def set_snapshot_source(self, source: Any | None) -> None:
         """Wire a non-blocking snapshot source (e.g. VisionSubsystem thread)."""
         self._snapshot_source = source
 
@@ -99,7 +96,7 @@ class VisionAdapter(VisionPort):
             logger.info("[VISION_ADAPTER] Initialized")
             return True
 
-    def capture_and_perceive(self) -> Optional[GameStateSnapshot]:
+    def capture_and_perceive(self) -> GameStateSnapshot | None:
         # Fast non-blocking path when wired to a threaded vision subsystem
         if self._snapshot_source is not None:
             snapshot = self._snapshot_source()
@@ -153,7 +150,7 @@ class VisionAdapter(VisionPort):
             self._last_snapshot = snapshot
             return snapshot
 
-    def get_detected_objects(self, class_filter: Optional[List[str]] = None) -> List[DetectedObject]:
+    def get_detected_objects(self, class_filter: list[str] | None = None) -> list[DetectedObject]:
         with self._lock:
             if self._last_snapshot is None:
                 return []
@@ -162,7 +159,7 @@ class VisionAdapter(VisionPort):
             objects = [o for o in objects if o.class_name in class_filter]
         return objects
 
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         with self._lock:
             return {
                 "screenshot_ok": self._screenshot is not None or self._snapshot_source is not None,
@@ -181,9 +178,9 @@ class VisionAdapter(VisionPort):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _convert_detections(detections: Any, img_w: int, img_h: int) -> List[DetectedObject]:
+    def _convert_detections(detections: Any, img_w: int, img_h: int) -> list[DetectedObject]:
         """Convert YOLO detections to DetectedObject list."""
-        objects: List[DetectedObject] = []
+        objects: list[DetectedObject] = []
         if detections is None:
             return objects
 

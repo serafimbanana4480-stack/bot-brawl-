@@ -32,14 +32,12 @@ Profiles can:
 
 import json
 import logging
-import math
 import random
-import time
 import threading
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+import time
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -88,11 +86,11 @@ class ProfileParams:
     pause_duration_max: float = 1.5
 
     # UtilityAI weight overrides
-    utility_weights: Dict = field(default_factory=dict)
+    utility_weights: dict = field(default_factory=dict)
 
 
 # Predefined profiles
-PROFILES: Dict[ProfileType, ProfileParams] = {
+PROFILES: dict[ProfileType, ProfileParams] = {
     ProfileType.AGGRESSIVE: ProfileParams(
         reaction_time_min=0.08, reaction_time_max=0.25, reaction_time_mean=0.15,
         apm_target=45.0, apm_variance=8.0,
@@ -181,14 +179,14 @@ class BehavioralProfile:
         self._current_type: ProfileType = ProfileType.BALANCED
         self._params: ProfileParams = PROFILES[ProfileType.BALANCED]
         self._blend_ratio: float = 0.0  # 0 = pure profile, 1 = fully blended
-        self._blend_target: Optional[ProfileType] = None
+        self._blend_target: ProfileType | None = None
         self._match_start_time: float = 0.0
-        self._shift_schedule: List[Tuple[float, ProfileType, float]] = []  # (time_s, type, blend)
+        self._shift_schedule: list[tuple[float, ProfileType, float]] = []  # (time_s, type, blend)
         self._lock = threading.RLock()
 
         logger.info("[BEHAVIORAL_PROFILE] Initialized with role=%s", brawler_role)
 
-    def select_for_match(self, brawler_role: Optional[str] = None):
+    def select_for_match(self, brawler_role: str | None = None):
         """
         Select a profile for a new match.
 
@@ -245,7 +243,7 @@ class BehavioralProfile:
         p = self.get_params()
         return max(10.0, random.gauss(p.apm_target, p.apm_variance))
 
-    def should_pause(self) -> Tuple[bool, float]:
+    def should_pause(self) -> tuple[bool, float]:
         """
         Check if the bot should take a thinking pause.
 
@@ -273,7 +271,7 @@ class BehavioralProfile:
         p = self.get_params()
         return min(1.0, max(0.0, p.fight_willingness + random.uniform(-0.1, 0.1)))
 
-    def get_utility_weights(self) -> Dict:
+    def get_utility_weights(self) -> dict:
         """Get UtilityAI weight overrides from profile."""
         p = self.get_params()
         return p.utility_weights.copy()
@@ -301,7 +299,7 @@ class BehavioralProfile:
                 self._blend_ratio = 0.0
                 self._blend_target = None
 
-    def get_profile_info(self) -> Dict:
+    def get_profile_info(self) -> dict:
         """Get profile information for logging/display."""
         with self._lock:
             p = self.get_params()
@@ -318,7 +316,7 @@ class BehavioralProfile:
                 "blend_ratio": round(self._blend_ratio, 2),
             }
 
-    def save(self, filepath: Optional[str] = None) -> bool:
+    def save(self, filepath: str | None = None) -> bool:
         """Save behavioral profile data to file."""
         if filepath is None:
             filepath = Path("data/behavioral_profiles.json")
@@ -357,11 +355,11 @@ class BehavioralProfile:
                 json.dump(data, f, indent=2)
             logger.info("[BEHAVIORAL_PROFILE] Saved to %s", filepath)
             return True
-        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.error("[BEHAVIORAL_PROFILE] Failed to save: %s", e)
             return False
 
-    def load(self, filepath: Optional[str] = None) -> bool:
+    def load(self, filepath: str | None = None) -> bool:
         """Load behavioral profile data from file."""
         if filepath is None:
             filepath = Path("data/behavioral_profiles.json")
@@ -371,7 +369,7 @@ class BehavioralProfile:
             return False
 
         try:
-            with open(filepath, 'r') as f:
+            with open(filepath) as f:
                 data = json.load(f)
 
             self._current_type = ProfileType(data["current_type"])
@@ -385,7 +383,7 @@ class BehavioralProfile:
 
             logger.info("[BEHAVIORAL_PROFILE] Loaded from %s", filepath)
             return True
-        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.error("[BEHAVIORAL_PROFILE] Failed to load: %s", e)
             return False
 

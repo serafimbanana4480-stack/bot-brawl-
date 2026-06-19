@@ -5,10 +5,11 @@ State transition handlers extracted from state_manager.py.
 Provides StateTransitionsMixin with all state-specific handlers.
 """
 
-import time
-import random
 import logging
-from typing import Dict, Callable, Optional
+import random
+import time
+
+from core.handlers.end_game_handler import handle_end_game
 
 try:
     import numpy as np
@@ -31,7 +32,8 @@ except ImportError:
 
 # Phase 10: LobbyFSM for hierarchical lobby state management
 try:
-    from core.lobby_fsm import HierarchicalFSM as LobbyFSM, TopLevelState, LobbyState
+    from core.lobby_fsm import HierarchicalFSM as LobbyFSM
+    from core.lobby_fsm import LobbyState, TopLevelState
     HAS_LOBBY_FSM = True
 except ImportError:
     HAS_LOBBY_FSM = False
@@ -56,12 +58,12 @@ except ImportError:
 
 try:
     from .lobby_automation_expanded import (
-        PlayAgainHandler,
         DailyRewardsCollector,
-        StarrRoadAutomation,
-        ShopAutomation,
-        QuestAutomation,
         MaintenanceHandler,
+        PlayAgainHandler,
+        QuestAutomation,
+        ShopAutomation,
+        StarrRoadAutomation,
     )
     LOBBY_EXPANDED_AVAILABLE = True
 except ImportError:
@@ -217,7 +219,7 @@ class StateTransitionsMixin:
             if self.emulator_controller:
                 try:
                     fallback_coords = None
-                    
+
                     # Estratégia 1: Usar coordenadas detetadas pelo UnifiedStateDetector
                     if self.unified_detector:
                         img = self._get_cached_screenshot()
@@ -226,7 +228,7 @@ class StateTransitionsMixin:
                             if det.state == 'lobby' and det.button_coords and det.confidence > 0.2:
                                 fallback_coords = det.button_coords
                                 logger.info(f"[STATE] Fallback usando coordenadas do detector: {fallback_coords}")
-                    
+
                     # Estratégia 2: Usar SmartPlayButtonDetector diretamente
                     if fallback_coords is None:
                         from pylaai_real.lobby_navigator import SmartPlayButtonDetector
@@ -239,20 +241,20 @@ class StateTransitionsMixin:
                             if play_result.found and play_result.coords:
                                 fallback_coords = play_result.coords
                                 logger.info(f"[STATE] Fallback usando SmartPlayButtonDetector: {fallback_coords}")
-                    
+
                     # Estratégia 3: Coordenadas hardcoded (último recurso)
                     if fallback_coords is None:
                         w, h = self._get_window_size()
                         fallback_coords = (round(w * 0.9119), round(h * 0.9122))
                         logger.info(f"[STATE] Fallback usando coordenadas hardcoded: {fallback_coords}")
-                    
+
                     self.emulator_controller.tap_scaled(*fallback_coords)
                     logger.info(f"[STATE] Fallback clicando em: {fallback_coords}")
                     time.sleep(1.5)
                 except Exception as e:
                     logger.warning(f"[STATE] Fallback inteligente falhou: {e}")
             return
-        
+
         # Reset MatchController se necessário para permitir novas partidas
         if self.match_controller:
             try:
@@ -300,7 +302,7 @@ class StateTransitionsMixin:
         if self.movement and hasattr(self.movement, "current_map"):
             self._current_map = self.movement.current_map
         time.sleep(2)
-        
+
         logger.info("[STATE] Handler lobby concluído")
         self._diag("lobby_handler_done")
 
@@ -370,7 +372,7 @@ class StateTransitionsMixin:
                 pyautogui.keyDown('esc')
                 pyautogui.keyUp('esc')
         self._diag("returned_from_brawler_selection")
-        
+
         time.sleep(1.5) # Esperar animação de volta ao lobby
 
         if not self._wait_for_state('lobby', timeout=4.0):
@@ -436,7 +438,7 @@ class StateTransitionsMixin:
                     logger.warning(f"[STATE] Fallback direto após seleção falhou: {e}")
             return
         time.sleep(2)
-        
+
         logger.info("[STATE] Handler brawler selection concluído")
         self._diag("brawler_selection_handler_done")
 
@@ -444,11 +446,11 @@ class StateTransitionsMixin:
         """Estado de loading - aguarda a transição para o jogo ou lobby."""
         logger.info("[STATE] Loading detectado - aguardando transição")
         self._diag("loading_handler_start")
-        
+
         # Initialize loading timer if not set
         if not hasattr(self, '_loading_start_time') or self._loading_start_time is None:
             self._loading_start_time = time.time()
-        
+
         # Check timeout: if loading for more than 5s, force to in_game
         # (Brawl Stars loading typically takes 3-8s; 5s is aggressive but safe)
         elapsed = time.time() - self._loading_start_time
@@ -464,12 +466,12 @@ class StateTransitionsMixin:
             self._forced_in_game_time = time.time()
             logger.info("[STATE] Forçado in_game desde loading - bloqueando retorno a loading por 30s")
             return
-        
+
         # Reset timer if state changed naturally (not via timeout)
         # This prevents stale timer if we come back to loading later
         if self.current_state != 'loading':
             self._loading_start_time = None
-        
+
         if self.screen_automation and hasattr(self.screen_automation, "get_current_state_name"):
             try:
                 state_name = self.screen_automation.get_current_state_name()
@@ -557,7 +559,7 @@ class StateTransitionsMixin:
             self._matchmaking_enter_time = None
             logger.info("[STATE] Forçado in_game desde matchmaking - bloqueando retorno por 25s")
             return
-        
+
         # Reset timer if state changed naturally (not via timeout)
         if self.current_state != 'matchmaking':
             self._matchmaking_enter_time = None
@@ -632,7 +634,7 @@ class StateTransitionsMixin:
                 self._in_game_initialized = True
             except Exception as e:
                 logger.warning(f"[STATE] Falha ao resetar estado de combate: {e}")
-        
+
         # Reset combat action time to prevent immediate fallback on entry
         self._last_combat_action_time = time.time()
 
@@ -724,12 +726,12 @@ class StateTransitionsMixin:
             current_time = time.time()
             if not hasattr(self, '_last_combat_action_time'):
                 self._last_combat_action_time = current_time
-            
+
             # Verificar se houve ação real de combate
             action_taken = False
             if result and isinstance(result, dict):
                 action_taken = result.get('attacked', False) or result.get('moved', False) or result.get('super_used', False)
-            
+
             if action_taken:
                 self._last_combat_action_time = current_time
                 logger.info(f"[STATE] Ação de combate registrada: {result}")
@@ -744,7 +746,7 @@ class StateTransitionsMixin:
                     if self.movement and hasattr(self.movement, 'joystick_center_x'):
                         joy_x = self.movement.joystick_center_x
                         joy_y = self.movement.joystick_center_y
-                    
+
                     # FORÇAR movimento aleatório
                     if self.emulator_controller:
                         import random
@@ -757,7 +759,7 @@ class StateTransitionsMixin:
                             logger.info(f"[STATE] Movimento forçado: ({joy_x},{joy_y}) -> ({target_x},{target_y})")
                         except Exception as e:
                             logger.warning(f"[STATE] Falha no swipe forçado: {e}")
-                    
+
                     # FORÇAR ataque se houver emulador e não atacou recentemente
                     if self.emulator_controller and self.play and hasattr(self.play, 'last_shot_time'):
                         time_since_shot = current_time - self.play.last_shot_time
@@ -773,7 +775,7 @@ class StateTransitionsMixin:
                                 self.play.last_shot_time = current_time
                             except Exception as e:
                                 logger.warning(f"[STATE] Falha no ataque forçado: {e}")
-                    
+
                     self._last_combat_action_time = current_time
 
             # === RL ONLINE: aprender deste frame ===
@@ -794,7 +796,7 @@ class StateTransitionsMixin:
                     else:
                         state, action, reward, next_state = transition
                         self.rl_engine.learn_from_frame(state, action, reward, next_state)
-                    logger.debug(f"[STATE] RL frame learned")
+                    logger.debug("[STATE] RL frame learned")
                 except Exception as e:
                     logger.debug(f"[STATE] Falha ao aprender frame RL: {e}")
 
@@ -827,7 +829,7 @@ class StateTransitionsMixin:
                     logger.debug(f"[STATE] Falha ao atualizar reward_bridge: {e}")
         else:
             logger.warning("[STATE] Screenshot é None!")
-        
+
         # Continuous Improvement: periodic check and save
         if self.improvement_system:
             try:
@@ -837,333 +839,12 @@ class StateTransitionsMixin:
                     logger.info(f"[IMPROVEMENT] Ajustes recomendados: {adjustments}")
             except Exception as e:
                 logger.debug(f"[IMPROVEMENT] Erro no periodic check: {e}")
-        
+
         time.sleep(0.1)
 
     def _handle_end_game(self):
-        """No fim de uma partida - processar resultado e sair com recovery autónomo."""
-        logger.debug("[STATE] Handler end_game iniciado")
-
-        # Reset matchmaking timer para permitir novo ciclo
-        if hasattr(self, '_matchmaking_enter_time'):
-            self._matchmaking_enter_time = None
-
-        # Se estamos no end há muito tempo, forçar retorno ao lobby
-        if self.state_start_time and (time.time() - self.state_start_time) > 12:
-            logger.warning("[STATE] End screen timeout - forçando retorno ao lobby")
-            self.current_state = 'lobby'
-            self.state_start_time = time.time()
-            if hasattr(self, '_matchmaking_enter_time'):
-                self._matchmaking_enter_time = None
-            return
-        if log_manager:
-            log_manager.log(
-                message="Handler end_game iniciado",
-                level="DEBUG",
-                category="state",
-                data={"action": "end_game_start"}
-            )
-        
-        # Procurar resultado da partida
-        found_result = False
-        attempts = 0
-        max_attempts = 3  # Timeout mais agressivo: apenas 3 tentativas
-        screen_state_hint = None
-        end_screen_start_time = time.time()
-        max_end_screen_time = 15.0  # Timeout de 15 segundos no end screen
-
-        if self.screen_automation and hasattr(self.screen_automation, "get_current_state_name"):
-            try:
-                screen_state_hint = self.screen_automation.get_current_state_name()
-                logger.debug(f"[STATE] Screen automation hint em end_game: {screen_state_hint}")
-            except Exception:
-                screen_state_hint = None
-
-        # Usar screen automation hint como primary para determinar quando sair do end screen
-        while attempts < max_attempts:
-            # Verificar timeout total no end screen
-            if time.time() - end_screen_start_time > max_end_screen_time:
-                logger.warning(f"[STATE] Timeout no end screen ({max_end_screen_time}s). Forçando reset para lobby.")
-                if log_manager:
-                    log_manager.log(
-                        message=f"Timeout no end screen ({max_end_screen_time}s). Forçando reset para lobby.",
-                        level="WARNING",
-                        category="state",
-                        data={"action": "end_screen_timeout", "timeout_seconds": max_end_screen_time}
-                    )
-                self.current_state = 'lobby'
-                self.state_start_time = time.time()
-                if self.match_controller:
-                    self.match_controller.reset_match()
-                break
-
-            logger.info(f"[STATE] Tentativa {attempts + 1}/{max_attempts} para sair do end screen")
-
-            # === NOVO: PlayAgainHandler inteligente (primeira tentativa) ===
-            if self.lobby and hasattr(self.lobby, 'handle_end_screen_expanded') and attempts == 0:
-                try:
-                    screenshot = self.screenshot.take()
-                    if screenshot is not None:
-                        result = self.lobby.handle_end_screen_expanded(screenshot, window_size=self._get_window_size())
-                        if result and getattr(result, 'success', False):
-                            method = getattr(result, 'method_used', 'unknown')
-                            logger.info(f"[STATE] PlayAgainHandler sucesso via: {method}")
-                            self._diag(f"play_again_handler_success={method}")
-                            if getattr(result, 'clicked_play_again', False):
-                                logger.info("[STATE] Play Again clicado - reentrada rapida no mesmo modo")
-                                time.sleep(2.0)
-                                # Verificar se ja saiu do end screen
-                                verify = self.screenshot.take()
-                                if verify is not None:
-                                    vstate = self.state_finder.get_state(verify)
-                                    if vstate != 'end':
-                                        logger.info("[STATE] Confirmado: saiu do end screen via Play Again")
-                                        break
-                except Exception as e:
-                    logger.debug(f"[STATE] PlayAgainHandler falhou: {e}")
-
-            # Verificar screen automation hint primeiro
-            current_hint = None
-            if self.screen_automation and hasattr(self.screen_automation, "get_current_state_name"):
-                try:
-                    current_hint = self.screen_automation.get_current_state_name()
-                    logger.info(f"[STATE] Screen automation current hint: {current_hint}")
-                except Exception as e:
-                    logger.debug(f"[STATE] Falha ao ler hint de end screen: {e}")
-            
-            # Melhorar sincronização: Priorizar screen automation se for confiável
-            # Se hint for 'idle', 'lobby', 'play', etc. (não end/loading), assumir que saiu
-            if current_hint and current_hint not in ['end', 'loading', 'proceed']:
-                logger.info(f"[STATE] Screen automation indica saída do end screen: {current_hint}")
-                if log_manager:
-                    log_manager.log(
-                        message=f"Screen automation indica saída do end screen: {current_hint}",
-                        level="INFO",
-                        category="state",
-                        data={"action": "screen_automation_exit", "hint": current_hint}
-                    )
-                time.sleep(0.5)  # Delay menor para resposta mais rápida
-                # Verificar novamente com screenshot para confirmar
-                try:
-                    verify_screenshot = self.screenshot.take()
-                    if verify_screenshot is not None:
-                        verify_state = self.state_finder.get_state(verify_screenshot, screen_state_hint=current_hint)
-                        logger.info(f"[STATE] Estado verificado após delay: {verify_state}")
-                        if verify_state != 'end':
-                            logger.info("[STATE] Confirmado saída do end screen via template matching")
-                            if log_manager:
-                                log_manager.log(
-                                    message="Confirmado saída do end screen via template matching",
-                                    level="INFO",
-                                    category="state",
-                                    data={"action": "end_screen_exit_confirmed", "verify_state": verify_state}
-                                )
-                            break
-                        else:
-                            logger.warning("[STATE] Screen automation disse que saiu, mas template ainda detecta end. Continuando tentativas.")
-                            if log_manager:
-                                log_manager.log(
-                                    message="Screen automation disse que saiu, mas template ainda detecta end",
-                                    level="WARNING",
-                                    category="state",
-                                    data={"action": "template_mismatch", "screen_hint": current_hint, "template_state": verify_state}
-                                )
-                except Exception as e:
-                    logger.warning(f"[STATE] Falha ao verificar estado: {e}")
-            
-            # Se hint for 'proceed', tentar clicar uma vez e verificar
-            if current_hint == 'proceed':
-                logger.info("[STATE] Screen automation detecta 'proceed', tentando clicar")
-                if log_manager:
-                    log_manager.log(
-                        message="Screen automation detecta 'proceed', tentando clicar",
-                        level="INFO",
-                        category="state",
-                        data={"action": "proceed_detected", "click_position": [960, 950]}
-                    )
-                if self.emulator_controller:
-                    self.emulator_controller.tap_scaled(960, 950)
-                    time.sleep(0.5)
-            
-            if not found_result:
-                try:
-                    screenshot = self.screenshot.take()
-                    if screenshot is not None:
-                        found_result = self.progress.find_game_result(screenshot)
-                        if np is not None and isinstance(found_result, np.ndarray):
-                            # Se retornou array, verificar se não está vazio
-                            found_result = bool(found_result.size > 0)
-                        if found_result:
-                            logger.info("[STATE] Resultado da partida encontrado")
-                            if log_manager:
-                                log_manager.log(
-                                    message="Resultado da partida encontrado",
-                                    level="INFO",
-                                    category="state",
-                                    data={"action": "result_found"}
-                                )
-                except Exception as e:
-                    logger.warning(f"[STATE] Falha ao capturar screenshot para resultado: {e}")
-
-            # Estratégia agressiva de saída: múltiplas tentativas
-            if self.emulator_controller:
-                logger.debug("[STATE] Tentando sair do end screen via ADB")
-                # Tentativa 1: Clicar no centro inferior (botão continuar)
-                self.emulator_controller.tap_scaled(960, 950)
-                time.sleep(0.2)  # Delay menor
-                # Tentativa 2: ESC/BACK key (mais eficiente que cliques múltiplos)
-                self.emulator_controller.keyevent(4)
-                time.sleep(0.3)
-                # Tentativa 3: Clicar no canto superior direito (X ou fechar)
-                self.emulator_controller.tap_scaled(1800, 100)
-                time.sleep(0.2)
-            else:
-                logger.debug("[STATE] Tentando sair via pyautogui")
-                if pyautogui:
-                    pyautogui.keyDown('esc')
-                    pyautogui.keyUp('esc')
-                time.sleep(0.3)
-            
-            time.sleep(1.0)  # Esperar transição
-            attempts += 1
-
-        # Após tentativas, forçar reset para lobby
-        logger.warning(f"[STATE] {attempts} tentativas para sair do end screen, forçando reset para lobby")
-        if log_manager:
-            log_manager.log(
-                message=f"{attempts} tentativas para sair do end screen, forçando reset para lobby",
-                level="WARNING",
-                category="state",
-                data={"action": "end_screen_force_reset", "attempts": attempts}
-            )
-
-        # Se OCR falhar, usar o último resultado apenas quando o hint ainda confirma fim de partida.
-        fallback_result = None
-        if not found_result and self.progress and hasattr(self.progress, "get_last_result"):
-            hinted_end = False
-            if self.state_finder and hasattr(self.state_finder, "_state_from_hint"):
-                try:
-                    hint_res = self.state_finder._state_from_hint(screen_state_hint)
-                    hinted_state = hint_res[0] if isinstance(hint_res, tuple) else hint_res
-                    hinted_end = hinted_state == 'end'
-                except Exception:
-                    hinted_end = False
-
-            if hinted_end:
-                fallback_result = self.progress.get_last_result()
-                if fallback_result in {"win", "loss", "draw"}:
-                    logger.warning("[STATE] OCR falhou, mas o hint de fim de partida permitiu reaproveitar o último resultado detectado")
-                    found_result = True
-
-        # Finalize match result BEFORE resetting match state
-        match_result = None
-        if found_result and self.match_controller and hasattr(self.progress, "get_last_result"):
-            result = fallback_result or self.progress.get_last_result()
-            if result in {"win", "loss", "draw"}:
-                match_result = self.match_controller.end_match(result)
-                self._diag(f"match_controller_end_match={result}")
-
-                # Integrate with reward bridge for end-of-match reward calculation
-                if self.reward_bridge is not None:
-                    try:
-                        win = result == "win"
-                        draw = result == "draw"
-                        survival_time = time.time() - self.state_start_time
-                        self.reward_bridge.update_from_gameplay(
-                            match_active=False,
-                            win=win,
-                            draw=draw,
-                            survival_time=survival_time,
-                        )
-                        summary = self.reward_bridge.get_session_summary()
-                        logger.info(f"[STATE] Reward summary: {summary}")
-                        self._diag(f"reward_summary={summary}")
-                    except Exception as e:
-                        logger.warning(f"[STATE] Falha ao calcular reward final: {e}")
-
-                # === RL ONLINE: finalizar episodio e atualizar ELO ===
-                if self.rl_engine is not None:
-                    try:
-                        self.rl_engine.end_episode(
-                            result=result,
-                            rank=1 if result == "win" else (2 if result == "draw" else 10),
-                        )
-                        logger.info(f"[STATE] RL episodio finalizado: {result}")
-                    except Exception as e:
-                        logger.warning(f"[STATE] Falha ao finalizar episodio RL: {e}")
-
-                # Flush data collector session
-                if self.data_collector is not None:
-                    try:
-                        self.data_collector.end_episode(result=result)
-                        logger.info("[STATE] Sessão de data collector finalizada")
-                    except Exception as e:
-                        logger.debug(f"[STATE] Falha ao finalizar data_collector: {e}")
-
-                # Observability: record match result
-                if self.observability is not None:
-                    try:
-                        map_name = None
-                        if self.movement and hasattr(self.movement, "current_map"):
-                            map_name = self.movement.current_map
-                        brawler_name = None
-                        if self.lobby and hasattr(self.lobby, "queue") and self.lobby.queue.get_current():
-                            brawler_name = self.lobby.queue.get_current().name
-                        self.observability.record_match_result(
-                            result=result,
-                            brawler=brawler_name,
-                            map_name=map_name,
-                        )
-                        if self.reward_bridge:
-                            summary = self.reward_bridge.get_session_summary()
-                            if summary:
-                                self.observability.record_reward(summary.get("last_reward", 0.0))
-                        self.observability.save_to_disk()
-                    except Exception as e:
-                        logger.debug(f"[STATE] Falha ao registrar observabilidade: {e}")
-
-                # Premium: Record match in BrawlerStatsTracker & TrophyTracker
-                if hasattr(self, '_dashboard_bridge') and self._dashboard_bridge is not None:
-                    try:
-                        bname = brawler_name or "unknown"
-                        mname = map_name or "unknown"
-                        duration = time.time() - self.state_start_time
-                        self._dashboard_bridge.brawler_tracker.record_match(
-                            bname, mname, result, duration=duration
-                        )
-                        total = self._dashboard_bridge.brawler_tracker.get_total_trophies()
-                        self._dashboard_bridge.trophy_tracker.record(total, bname)
-                        analysis = self._dashboard_bridge.match_analyzer.analyze_match(
-                            bname, mname, result, duration=duration
-                        )
-                        self._dashboard_bridge.update(
-                            match_analysis=analysis,
-                            recent_matches=[analysis],
-                            coach_tips=self._dashboard_bridge.match_analyzer.get_coach_tips(bname),
-                        )
-                    except Exception as e:
-                        logger.debug(f"[STATE] Premium tracking error: {e}")
-
-        # Now reset state to lobby
-        self.current_state = 'lobby'
-        self.state_start_time = time.time()
-        if self.match_controller:
-            logger.debug("[STATE] Resetando estado do MatchController após end screen")
-            self.match_controller.reset_match()
-        
-        logger.info("[STATE] Handler end_game concluído com reset forçado")
-
-        if not found_result:
-            logger.warning("Não foi possível ler resultado da partida")
-            return
-
-        # Se não houver match_controller, manter a atualização direta do progresso.
-        if not self.match_controller:
-            current = self.lobby.queue.get_current() if self.lobby and hasattr(self.lobby, "queue") else None
-            if current:
-                stats = self.progress.get_stats()
-                current.current_trophies = stats['trophies']
-                current.current_wins = stats['wins']
+        """Delega para core/handlers/end_game_handler.py"""
+        handle_end_game(self)
 
     def _handle_unknown(self, image):
         """Estado desconhecido - diagnosticar, aguardar, e forçar reset se persistir."""
@@ -1391,7 +1072,7 @@ class StateTransitionsMixin:
 
     def _safe_back_to_lobby(self, max_attempts: int = 3):
         """Helper: tentar voltar para lobby de forma segura usando ESC/BACK."""
-        for i in range(max_attempts):
+        for _i in range(max_attempts):
             if self.emulator_controller:
                 try:
                     self.emulator_controller.keyevent(4)  # BACK

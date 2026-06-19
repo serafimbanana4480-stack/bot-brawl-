@@ -6,23 +6,17 @@ Provides MovementEngineMixin with player movement, pathfinding,
 and environmental interaction.
 """
 
-import time
-import math
-import numpy as np
 import logging
-import random
-from collections import deque, defaultdict
-from typing import Optional, List, Dict, Tuple
+import math
 
 # Utilitarios de humanizacao
-from pylaai_real.humanization_utils import human_delay, jitter_value, HumanPauseSimulator
 
 logger = logging.getLogger(__name__)
 
 try:
-    from tracker import EnemyTracker
-    TRACKER_AVAILABLE = True
-except ImportError:
+    import importlib.util as _ilu
+    TRACKER_AVAILABLE = _ilu.find_spec("tracker") is not None
+except Exception:
     TRACKER_AVAILABLE = False
 
 try:
@@ -110,14 +104,18 @@ class MovementEngineMixin:
             jx, jy = 192, 810
         dist = 100
         dx, dy = 0, 0
-        if 'W' in key: dy = -dist
-        if 'S' in key: dy = dist
-        if 'A' in key: dx = -dist
-        if 'D' in key: dx = dist
+        if 'W' in key:
+            dy = -dist
+        if 'S' in key:
+            dy = dist
+        if 'A' in key:
+            dx = -dist
+        if 'D' in key:
+            dx = dist
         logger.debug(f"[MOVEMENT] Posição do joystick base: ({jx}, {jy})")
         logger.debug(f"[MOVEMENT] Deslocamento calculado: dx={dx}, dy={dy}")
         logger.debug(f"[MOVEMENT] Coordenada final do swipe: ({jx+dx}, {jy+dy})")
-        logger.debug(f"[MOVEMENT] Duração do swipe: 150ms")
+        logger.debug("[MOVEMENT] Duração do swipe: 150ms")
         logger.debug(f"[COMBAT] Executando swipe de joystick: ({jx}, {jy}) -> ({jx+dx}, {jy+dy}), key={key}")
         try:
             self.emulator_controller.ensure_window_active()

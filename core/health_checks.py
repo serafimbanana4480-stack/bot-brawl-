@@ -12,7 +12,7 @@ import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from core.logging_config import get_logger
 
@@ -33,14 +33,14 @@ class HealthResult:
     name: str
     status: str  # "pass", "fail", "warn"
     response_time_ms: float = 0.0
-    details: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
+    details: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
 
 
 @dataclass
 class HealthReport:
     overall: str  # "healthy", "degraded", "unhealthy"
-    checks: List[HealthResult]
+    checks: list[HealthResult]
     timestamp: str
 
 
@@ -67,7 +67,7 @@ def check_adb() -> HealthResult:
             response_time_ms=elapsed,
             details={"version_output": result.stdout.strip()[:200]},
         )
-    except (FileNotFoundError, PermissionError, ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+    except (FileNotFoundError, PermissionError, ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
         elapsed = (time.perf_counter() - start) * 1000
         return HealthResult(
             name="adb",
@@ -107,7 +107,7 @@ def check_emulator() -> HealthResult:
             response_time_ms=elapsed,
             error="No emulator connected via ADB",
         )
-    except (FileNotFoundError, PermissionError, ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+    except (FileNotFoundError, PermissionError, ConnectionError, TimeoutError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
         elapsed = (time.perf_counter() - start) * 1000
         return HealthResult(
             name="emulator",
@@ -284,8 +284,8 @@ _SHALLOW_CHECKS = [check_api_up, check_memory, check_disk]
 _DEEP_CHECKS = [check_adb, check_emulator, check_yolo_model, check_screenshot, check_memory, check_disk]
 
 
-def _run_checks(checks: List[Any]) -> HealthReport:
-    results: List[HealthResult] = []
+def _run_checks(checks: list[Any]) -> HealthReport:
+    results: list[HealthResult] = []
     for fn in checks:
         try:
             results.append(fn())
@@ -321,7 +321,7 @@ def health_deep() -> HealthReport:
 # ---------------------------------------------------------------------------
 # FastAPI integration helpers
 # ---------------------------------------------------------------------------
-def to_dict(report: HealthReport) -> Dict[str, Any]:
+def to_dict(report: HealthReport) -> dict[str, Any]:
     return {
         "status": report.overall,
         "timestamp": report.timestamp,

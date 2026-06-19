@@ -10,7 +10,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ class RLMetricsSnapshot:
 
     # Actions
     last_action: str = ""
-    action_counts: Dict[str, int] = field(default_factory=dict)
+    action_counts: dict[str, int] = field(default_factory=dict)
     exploration_rate: float = 0.0  # % acoes exploratorias
 
     # Collection
@@ -61,7 +61,7 @@ class LearningRLMetricsCollector:
     def __init__(self):
         self._snapshot = RLMetricsSnapshot()
         self._lock = False
-        self._start_time: Optional[float] = None
+        self._start_time: float | None = None
 
     def start_session(self):
         self._start_time = time.time()
@@ -140,7 +140,7 @@ class LearningRLMetricsCollector:
     # Serialization
     # ------------------------------------------------------------------
 
-    def get_metrics(self) -> Dict:
+    def get_metrics(self) -> dict:
         s = self._snapshot
         return {
             "active": s.active,

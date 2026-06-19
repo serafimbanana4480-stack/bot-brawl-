@@ -9,11 +9,9 @@ DEPRECATED: Use pylaai_real.unified_state_detector.UnifiedStateDetector instead.
 This module is kept for backward compatibility only.
 """
 
-import warnings
-import time
 import logging
-from pathlib import Path
-from typing import Dict, Optional, Tuple
+import time
+import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -42,8 +40,8 @@ class ScreenshotAnalysis:
     color_space: str = "unknown"  # "rgb", "bgr", "unknown"
     avg_brightness: float = 0.0
     std_brightness: float = 0.0
-    dominant_color: Tuple[int, int, int] = (0, 0, 0)
-    region_health: Dict[str, float] = field(default_factory=dict)
+    dominant_color: tuple[int, int, int] = (0, 0, 0)
+    region_health: dict[str, float] = field(default_factory=dict)
     issues: list = field(default_factory=list)
     timestamp: float = 0.0
 
@@ -55,12 +53,12 @@ class ScreenshotAnalyzer:
     """
 
     def __init__(self):
-        self._last_screenshot: Optional[np.ndarray] = None
-        self._last_analysis: Optional[ScreenshotAnalysis] = None
+        self._last_screenshot: np.ndarray | None = None
+        self._last_analysis: ScreenshotAnalysis | None = None
         self._history: list = []
         self._max_history = 50
 
-    def analyze(self, screenshot: Optional[np.ndarray]) -> ScreenshotAnalysis:
+    def analyze(self, screenshot: np.ndarray | None) -> ScreenshotAnalysis:
         """
         Analisa um screenshot e retorna métricas de qualidade.
         """
@@ -169,7 +167,7 @@ class ScreenshotAnalyzer:
         r, g, b = int(pixel[0]), int(pixel[1]), int(pixel[2])
         return r > 200 and g > 150 and b < 80
 
-    def _analyze_regions(self, image: np.ndarray) -> Dict[str, float]:
+    def _analyze_regions(self, image: np.ndarray) -> dict[str, float]:
         h, w = image.shape[:2]
         regions = {}
 
@@ -195,13 +193,13 @@ class ScreenshotAnalyzer:
 
         return regions
 
-    def _compute_dominant_color(self, image: np.ndarray) -> Tuple[int, int, int]:
+    def _compute_dominant_color(self, image: np.ndarray) -> tuple[int, int, int]:
         # Downsample para performance
         small = cv2.resize(image, (50, 50)) if cv2 else image[::20, ::20]
         avg = np.mean(small, axis=(0, 1))
         return (int(avg[0]), int(avg[1]), int(avg[2]))
 
-    def is_lobby_likely(self, screenshot: Optional[np.ndarray] = None) -> Tuple[bool, float]:
+    def is_lobby_likely(self, screenshot: np.ndarray | None = None) -> tuple[bool, float]:
         """
         Retorna (provavelmente_lobby, confiança) baseado na análise visual.
         """

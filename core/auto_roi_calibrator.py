@@ -18,9 +18,9 @@ Integra com ResolutionManager existente.
 
 import json
 import logging
-from typing import Dict, Tuple, Optional, List, Any
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from dataclasses import dataclass, asdict
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +45,8 @@ class CalibratedROI:
     y: int
     w: int
     h: int
-    source_resolution: Tuple[int, int]
-    target_resolution: Tuple[int, int]
+    source_resolution: tuple[int, int]
+    target_resolution: tuple[int, int]
     scale_x: float
     scale_y: float
 
@@ -94,7 +94,7 @@ class AutoROICalibrator:
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._canonical_rois = dict(self.DEFAULT_ROIS)
-        self._calibration_cache: Dict[Tuple[int, int], Dict[str, CalibratedROI]] = {}
+        self._calibration_cache: dict[tuple[int, int], dict[str, CalibratedROI]] = {}
         self._load_cache()
 
     def _load_cache(self):
@@ -102,7 +102,7 @@ class AutoROICalibrator:
         cache_file = self.cache_dir / "calibrations.json"
         if cache_file.exists():
             try:
-                with open(cache_file, "r", encoding="utf-8") as f:
+                with open(cache_file, encoding="utf-8") as f:
                     data = json.load(f)
                 for key, rois in data.items():
                     res = tuple(map(int, key.split("x")))
@@ -110,7 +110,7 @@ class AutoROICalibrator:
                         name: CalibratedROI(**roi) for name, roi in rois.items()
                     }
                 logger.info("[ROI_CALIBRATOR] %d calibrações carregadas", len(self._calibration_cache))
-            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
                 logger.warning("[ROI_CALIBRATOR] Erro ao carregar cache: %s", e)
 
     def _save_cache(self):
@@ -123,10 +123,10 @@ class AutoROICalibrator:
             cache_file = self.cache_dir / "calibrations.json"
             with open(cache_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
-        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.warning("[ROI_CALIBRATOR] Erro ao salvar cache: %s", e)
 
-    def get_roi(self, name: str, target_w: int, target_h: int) -> Optional[Tuple[int, int, int, int]]:
+    def get_roi(self, name: str, target_w: int, target_h: int) -> tuple[int, int, int, int] | None:
         """
         Retorna ROI calibrada para a resolução alvo.
         Retorna (x, y, w, h) ou None se ROI não existir.
@@ -177,7 +177,7 @@ class AutoROICalibrator:
 
         return (calibrated.x, calibrated.y, calibrated.w, calibrated.h)
 
-    def get_all_rois(self, target_w: int, target_h: int) -> Dict[str, Tuple[int, int, int, int]]:
+    def get_all_rois(self, target_w: int, target_h: int) -> dict[str, tuple[int, int, int, int]]:
         """Retorna todas as ROIs calibradas para a resolução."""
         return {
             name: roi for name in self._canonical_rois
@@ -215,7 +215,7 @@ class AutoROICalibrator:
             res_cache.pop(name, None)
         logger.info("[ROI_CALIBRATOR] ROI '%s' adicionada (%dx%d+%d+%d)", name, x, y, w, h)
 
-    def get_calibration_info(self, target_w: int, target_h: int) -> Dict[str, Any]:
+    def get_calibration_info(self, target_w: int, target_h: int) -> dict[str, Any]:
         """Retorna informações de calibração para uma resolução."""
         scale_x = target_w / self.CANONICAL_W
         scale_y = target_h / self.CANONICAL_H

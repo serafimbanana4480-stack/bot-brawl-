@@ -30,7 +30,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -42,12 +42,12 @@ class VLMResult:
     """Structured result from a VLM inference."""
     game_phase: str = "unknown"
     confidence: float = 0.0
-    detected_elements: List[Dict[str, Any]] = field(default_factory=list)
+    detected_elements: list[dict[str, Any]] = field(default_factory=list)
     raw_response: str = ""
     model_used: str = "none"
     latency_ms: float = 0.0
     cached: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -56,14 +56,14 @@ class VLMConfig:
     enabled: bool = False
     provider: str = "openai"  # openai | anthropic | google | local
     model: str = "gpt-4o-mini"
-    api_key: Optional[str] = None
-    api_base: Optional[str] = None
+    api_key: str | None = None
+    api_base: str | None = None
     timeout_seconds: float = 3.0
     max_calls_per_minute: int = 10
     max_calls_per_hour: int = 100
     cache_ttl_seconds: float = 30.0
     fallback_threshold: float = 0.35  # trigger VLM when primary confidence < this
-    max_image_size: Tuple[int, int] = (512, 512)  # resize before encoding
+    max_image_size: tuple[int, int] = (512, 512)  # resize before encoding
 
 
 class VLMFallback:
@@ -81,10 +81,10 @@ class VLMFallback:
         '"x_norm": 0.0-1.0, "y_norm": 0.0-1.0, "description": "..."}]}'
     )
 
-    def __init__(self, config: Optional[VLMConfig] = None):
+    def __init__(self, config: VLMConfig | None = None):
         self.cfg = config or VLMConfig()
-        self._call_history: List[float] = []  # timestamps of API calls
-        self._cache: Dict[str, Tuple[VLMResult, float]] = {}  # hash -> (result, timestamp)
+        self._call_history: list[float] = []  # timestamps of API calls
+        self._cache: dict[str, tuple[VLMResult, float]] = {}  # hash -> (result, timestamp)
         # Providers resolved dynamically so monkey-patching works in tests
 
     # ------------------------------------------------------------------
@@ -146,7 +146,7 @@ class VLMFallback:
 
         return result
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Return usage statistics."""
         now = time.time()
         recent = [t for t in self._call_history if now - t < 3600]
@@ -332,8 +332,8 @@ class VLMFallback:
     def _call_google(self, img: np.ndarray) -> VLMResult:
         try:
             import google.generativeai as genai
-        except ImportError:
-            raise RuntimeError("google.generativeai not installed")
+        except ImportError as e:
+            raise RuntimeError("google.generativeai not installed") from e
 
         api_key = self.cfg.api_key or os.getenv("GOOGLE_API_KEY")
         if not api_key:

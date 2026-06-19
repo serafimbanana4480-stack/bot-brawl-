@@ -17,10 +17,10 @@ mas adiciona análise estatística e recomendações automáticas.
 import json
 import logging
 import time
-from pathlib import Path
-from typing import Dict, List, Optional, Any, Counter
-from dataclasses import dataclass, field
 from collections import defaultdict
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +45,9 @@ class ReplayAnalysis:
     brawler: str
     map_name: str
     duration_seconds: float
-    failure_modes: Dict[str, int] = field(default_factory=dict)
-    critical_moments: List[Dict[str, Any]] = field(default_factory=list)
-    recommendations: List[str] = field(default_factory=list)
+    failure_modes: dict[str, int] = field(default_factory=dict)
+    critical_moments: list[dict[str, Any]] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
     severity_score: float = 0.0  # 0-1
 
 
@@ -64,10 +64,10 @@ class ReplayFailureAnalyzer:
         self.report_dir.mkdir(parents=True, exist_ok=True)
 
         # Acumuladores estatísticos
-        self._failure_counts: Dict[str, int] = defaultdict(int)
-        self._brawler_failure_map: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
-        self._map_failure_map: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
-        self._analyses: List[ReplayAnalysis] = []
+        self._failure_counts: dict[str, int] = defaultdict(int)
+        self._brawler_failure_map: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        self._map_failure_map: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        self._analyses: list[ReplayAnalysis] = []
 
         logger.info("[REPLAY_ANALYZER] Inicializado (replays=%s)", self.replay_dir)
 
@@ -75,7 +75,7 @@ class ReplayFailureAnalyzer:
     # Análise principal
     # ------------------------------------------------------------------
 
-    def analyze_losses(self, limit: int = 50) -> Dict[str, Any]:
+    def analyze_losses(self, limit: int = 50) -> dict[str, Any]:
         """
         Analisa últimos N replays de derrota e identifica padrões.
         """
@@ -112,12 +112,12 @@ class ReplayFailureAnalyzer:
         )
         return report
 
-    def _analyze_single_replay(self, replay_path: Path) -> Optional[ReplayAnalysis]:
+    def _analyze_single_replay(self, replay_path: Path) -> ReplayAnalysis | None:
         """Analisa um replay individual."""
         try:
-            with open(replay_path, "r", encoding="utf-8") as f:
+            with open(replay_path, encoding="utf-8") as f:
                 replay_data = json.load(f)
-        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError) as e:
+        except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError) as e:
             logger.warning("[REPLAY_ANALYZER] Erro ao ler %s: %s", replay_path.name, e)
             return None
 
@@ -153,7 +153,7 @@ class ReplayFailureAnalyzer:
     # Detectores de padrão
     # ------------------------------------------------------------------
 
-    def _detect_too_aggressive(self, events: List[Dict], analysis: ReplayAnalysis):
+    def _detect_too_aggressive(self, events: list[dict], analysis: ReplayAnalysis):
         """Detecta mortes por agressividade excessiva."""
         deaths = [e for e in events if e.get("type") == "death"]
         for death in deaths:
@@ -166,7 +166,7 @@ class ReplayFailureAnalyzer:
                     "description": "Morreu atacando com HP baixo",
                 })
 
-    def _detect_caught_out(self, events: List[Dict], analysis: ReplayAnalysis):
+    def _detect_caught_out(self, events: list[dict], analysis: ReplayAnalysis):
         """Detecta posicionamento ruim (sem cover, flanqueado)."""
         deaths = [e for e in events if e.get("type") == "death"]
         for death in deaths:
@@ -178,7 +178,7 @@ class ReplayFailureAnalyzer:
                     "description": "Morto sem cover com múltiplos inimigos",
                 })
 
-    def _detect_poor_ability(self, events: List[Dict], analysis: ReplayAnalysis):
+    def _detect_poor_ability(self, events: list[dict], analysis: ReplayAnalysis):
         """Detecta uso ruim de habilidades."""
         # Super usada sem hit
         supers = [e for e in events if e.get("type") == "super_used"]
@@ -186,7 +186,7 @@ class ReplayFailureAnalyzer:
             if not s.get("hit_anything", True):
                 analysis.failure_modes[FailureMode.POOR_ABILITY_USAGE] = analysis.failure_modes.get(FailureMode.POOR_ABILITY_USAGE, 0) + 1
 
-    def _detect_trapped(self, events: List[Dict], analysis: ReplayAnalysis):
+    def _detect_trapped(self, events: list[dict], analysis: ReplayAnalysis):
         """Detecta ficar preso em paredes/zonas."""
         deaths = [e for e in events if e.get("type") == "death"]
         for death in deaths:
@@ -198,14 +198,14 @@ class ReplayFailureAnalyzer:
                     "description": "Preso em parede, múltiplas tentativas de escape",
                 })
 
-    def _detect_ignored_threat(self, events: List[Dict], analysis: ReplayAnalysis):
+    def _detect_ignored_threat(self, events: list[dict], analysis: ReplayAnalysis):
         """Detecta ignorar ameaças óbvias."""
         deaths = [e for e in events if e.get("type") == "death"]
         for death in deaths:
             if death.get("enemy_visible_for", 0) > 3.0 and death.get("action_before") == "collect_item":
                 analysis.failure_modes[FailureMode.IGNORED_THREAT] = analysis.failure_modes.get(FailureMode.IGNORED_THREAT, 0) + 1
 
-    def _detect_overextended(self, events: List[Dict], analysis: ReplayAnalysis):
+    def _detect_overextended(self, events: list[dict], analysis: ReplayAnalysis):
         """Detecta overextension (longe do time, profundo no mapa inimigo)."""
         deaths = [e for e in events if e.get("type") == "death"]
         for death in deaths:
@@ -222,7 +222,7 @@ class ReplayFailureAnalyzer:
             return "unknown"
         return max(self._failure_counts, key=self._failure_counts.get)
 
-    def _generate_recommendations(self, primary_failure: str) -> List[str]:
+    def _generate_recommendations(self, primary_failure: str) -> list[str]:
         """Gera recomendações baseadas no failure mode primário."""
         fixes = {
             FailureMode.TOO_AGGRESSIVE: [
@@ -258,7 +258,7 @@ class ReplayFailureAnalyzer:
         }
         return fixes.get(primary_failure, ["Revisar parâmetros gerais de conservadorismo"])
 
-    def _replay_recommendations(self, analysis: ReplayAnalysis) -> List[str]:
+    def _replay_recommendations(self, analysis: ReplayAnalysis) -> list[str]:
         """Recomendações específicas para um replay."""
         recs = []
         for mode, count in analysis.failure_modes.items():
@@ -295,7 +295,7 @@ class ReplayFailureAnalyzer:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _find_loss_replays(self, limit: int) -> List[Path]:
+    def _find_loss_replays(self, limit: int) -> list[Path]:
         """Encontra arquivos de replay de derrotas."""
         if not self.replay_dir.exists():
             return []
@@ -306,17 +306,17 @@ class ReplayFailureAnalyzer:
                 break
             # Ler metadata para verificar se é loss
             try:
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     data = json.load(f)
                 if data.get("metadata", {}).get("result") in ("loss", "defeat"):
                     loss_replays.append(path)
-            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError, IOError):
+            except (FileNotFoundError, PermissionError, ValueError, TypeError, RuntimeError, AttributeError, OSError):
                 # Fallback: nome do arquivo
                 if "loss" in path.name.lower() or "defeat" in path.name.lower():
                     loss_replays.append(path)
         return loss_replays
 
-    def _save_report(self, report: Dict[str, Any]):
+    def _save_report(self, report: dict[str, Any]):
         """Salva relatório consolidado."""
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         path = self.report_dir / f"failure_analysis_{timestamp}.json"
@@ -328,7 +328,7 @@ class ReplayFailureAnalyzer:
     # API pública
     # ------------------------------------------------------------------
 
-    def get_failure_stats(self) -> Dict[str, Any]:
+    def get_failure_stats(self) -> dict[str, Any]:
         """Retorna estatísticas acumuladas de falhas."""
         return {
             "total_failures_by_mode": dict(self._failure_counts),
@@ -337,7 +337,7 @@ class ReplayFailureAnalyzer:
             "total_analyses": len(self._analyses),
         }
 
-    def get_top_recommendations(self, n: int = 3) -> List[str]:
+    def get_top_recommendations(self, n: int = 3) -> list[str]:
         """Retorna top N recomendações baseadas em todos os dados."""
         primary = self._get_primary_failure_mode()
         all_recs = self._generate_recommendations(primary)

@@ -15,11 +15,11 @@ Ideia: cada subsistema dá um "voto" com peso. O sistema aprende os pesos
 Benefício: se um subsistema falha, os outros compensam.
 """
 
-import warnings
 import logging
-import random
-from typing import Dict, List, Optional, Callable, Any
+import warnings
 from collections import defaultdict
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +33,14 @@ warnings.warn(
 class DecisionVoter:
     """Um votante que retorna uma ação e confiança."""
 
-    def __init__(self, name: str, weight: float, decide_fn: Callable[[Dict], tuple]):
+    def __init__(self, name: str, weight: float, decide_fn: Callable[[dict], tuple]):
         self.name = name
         self.weight = weight
         self.decide_fn = decide_fn
         self._correct_predictions = 0
         self._total_predictions = 0
 
-    def predict(self, context: Dict) -> tuple:
+    def predict(self, context: dict) -> tuple:
         """Retorna (action, confidence)."""
         return self.decide_fn(context)
 
@@ -71,17 +71,17 @@ class GradientBoostingDecisionSystem:
     """
 
     def __init__(self, learning_rate: float = 0.1):
-        self.voters: List[DecisionVoter] = []
+        self.voters: list[DecisionVoter] = []
         self.learning_rate = learning_rate
-        self._action_history: List[str] = []
+        self._action_history: list[str] = []
         self._max_history = 200
 
-    def add_voter(self, name: str, initial_weight: float, decide_fn: Callable[[Dict], tuple]):
+    def add_voter(self, name: str, initial_weight: float, decide_fn: Callable[[dict], tuple]):
         """Adiciona um novo votante."""
         self.voters.append(DecisionVoter(name, initial_weight, decide_fn))
         logger.info("[GBD] Votante adicionado: %s (weight=%.2f)", name, initial_weight)
 
-    def decide(self, context: Dict[str, Any]) -> str:
+    def decide(self, context: dict[str, Any]) -> str:
         """
         Decide ação combinando todos os votantes.
 
@@ -94,7 +94,7 @@ class GradientBoostingDecisionSystem:
             return "idle"
 
         # Coletar predições
-        predictions: Dict[str, float] = defaultdict(float)
+        predictions: dict[str, float] = defaultdict(float)
         voter_results = []
 
         for voter in self.voters:
@@ -150,7 +150,7 @@ class GradientBoostingDecisionSystem:
             elif reward < 0:
                 voter.weight = max(0.1, voter.weight * (1 - self.learning_rate))
 
-    def get_voter_stats(self) -> List[Dict[str, Any]]:
+    def get_voter_stats(self) -> list[dict[str, Any]]:
         """Retorna estatísticas de cada votante."""
         return [
             {
@@ -162,7 +162,7 @@ class GradientBoostingDecisionSystem:
             for v in self.voters
         ]
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         return {
             "voter_count": len(self.voters),
             "voters": self.get_voter_stats(),

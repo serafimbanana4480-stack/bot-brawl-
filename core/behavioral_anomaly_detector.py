@@ -26,10 +26,9 @@ Uso:
 
 import logging
 import time
-import math
-import random
-from typing import Dict, List, Optional, Tuple
 from collections import deque
+from typing import Any
+
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -62,14 +61,14 @@ class BehavioralAnomalyDetector:
 
         # Estado
         self._ban_risk_score = 0.0
-        self._anomalies_detected: List[Dict] = []
+        self._anomalies_detected: list[dict] = []
         self._mitigation_triggered = False
 
     # ------------------------------------------------------------------
     # Registro de dados
     # ------------------------------------------------------------------
 
-    def record_action(self, action_type: str, timestamp: Optional[float] = None):
+    def record_action(self, action_type: str, timestamp: float | None = None):
         """Registra uma ação do bot."""
         self._actions.append({
             "type": action_type,
@@ -100,7 +99,7 @@ class BehavioralAnomalyDetector:
     # Detecção de anomalias
     # ------------------------------------------------------------------
 
-    def analyze(self) -> Dict[str, Any]:
+    def analyze(self) -> dict[str, Any]:
         """Roda análise completa e retorna score de risco."""
         scores = {}
 
@@ -239,7 +238,7 @@ class BehavioralAnomalyDetector:
     # Mitigação
     # ------------------------------------------------------------------
 
-    def trigger_mitigation(self) -> List[str]:
+    def trigger_mitigation(self) -> list[str]:
         """Ativa mitigações baseadas nas anomalias detectadas."""
         if self._mitigation_triggered:
             return []
@@ -278,7 +277,7 @@ class BehavioralAnomalyDetector:
         self._mitigation_triggered = False
         self._ban_risk_score = 0.0
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         return {
             "ban_risk_score": round(self._ban_risk_score, 3),
             "actions_recorded": len(self._actions),

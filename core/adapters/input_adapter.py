@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import queue
 import threading
-from typing import Any, Dict, Optional
+from typing import Any
 
 from core.ports.input_port import InputAction, InputPort
 
@@ -23,7 +23,7 @@ class InputAdapter(InputPort):
         self._controller = emulator_controller
         self._input_queue: queue.Queue = queue.Queue(maxsize=20)
         self._input_stop = threading.Event()
-        self._input_thread: Optional[threading.Thread] = None
+        self._input_thread: threading.Thread | None = None
 
     def initialize(self) -> bool:
         if self._controller is None:
@@ -86,7 +86,7 @@ class InputAdapter(InputPort):
         except Exception as e:
             logger.error(f"[INPUT_ADAPTER] Dispatch failed: {e}")
 
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         return {
             "connected": self._controller is not None,
             "controller_type": type(self._controller).__name__ if self._controller else "None",

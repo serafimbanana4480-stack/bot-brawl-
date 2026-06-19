@@ -12,8 +12,8 @@ class OrchestratorPlugin(IPlugin):
 
     def is_available(self) -> bool:
         try:
+            from core.factory import create_orchestrator  # noqa: F401
             from core.orchestrator import BotOrchestrator  # noqa: F401
-            from core.factory import create_orchestrator   # noqa: F401
             return True
         except (ImportError, ModuleNotFoundError):
             return False
@@ -24,5 +24,6 @@ class OrchestratorPlugin(IPlugin):
 
 
 # Auto-register when module is imported
-from core.plugin_system import PluginRegistry
+from core.plugin_system import PluginRegistry  # noqa: E402
+
 PluginRegistry(OrchestratorPlugin)

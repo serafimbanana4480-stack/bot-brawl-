@@ -20,13 +20,13 @@ Requer:
 
 import logging
 import random
-from typing import List, Optional, Tuple
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torch.nn.functional as F  # noqa: N812
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class SimCLRAugmentations:
     def __init__(self, image_size: int = 224):
         self.image_size = image_size
         try:
-            import torchvision.transforms as T
+            import torchvision.transforms as T  # noqa: N812
             self.transform = T.Compose([
                 T.ToPILImage(),
                 T.RandomResizedCrop(image_size, scale=(0.2, 1.0)),
@@ -153,7 +153,7 @@ class SelfSupervisedPretrainer:
                 features = features[-1]
             return features.view(features.size(0), -1).size(1)
 
-    def train_step(self, batch_images: List[np.ndarray]) -> float:
+    def train_step(self, batch_images: list[np.ndarray]) -> float:
         """
         Um passo de treinamento contrastivo.
 
@@ -207,8 +207,8 @@ class SelfSupervisedPretrainer:
         image_dir: Path,
         epochs: int = 100,
         batch_size: int = 32,
-        save_path: Optional[Path] = None,
-    ) -> Dict[str, float]:
+        save_path: Path | None = None,
+    ) -> dict[str, float]:
         """
         Pré-treina com todas as imagens de um diretório.
 
@@ -263,7 +263,7 @@ class SelfSupervisedPretrainer:
             "status": "completed",
         }
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Status do pré-treinamento."""
         return {
             "device": self.device,

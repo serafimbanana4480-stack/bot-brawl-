@@ -8,9 +8,8 @@ state manager, and advanced decision modules (world model, pressure map, etc.).
 from __future__ import annotations
 
 import logging
-import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from wrapper import PylaAIEnhanced
@@ -23,7 +22,7 @@ class DecisionSubsystem:
 
     def __init__(
         self,
-        wrapper: "PylaAIEnhanced",
+        wrapper: PylaAIEnhanced,
         central_config: dict,
         install_path: Path,
         images_path: Path,
@@ -36,29 +35,29 @@ class DecisionSubsystem:
         self.images_path = images_path
         self.models_path = models_path
         self.brawler_queue = brawler_queue
-        self.state_finder: Optional[Any] = None
-        self.state_manager: Optional[Any] = None
-        self.lobby: Optional[Any] = None
-        self.progress: Optional[Any] = None
-        self.play_logic: Optional[Any] = None
-        self.match_controller: Optional[Any] = None
-        self.movement: Optional[Any] = None
-        self.brawler_selector: Optional[Any] = None
-        self.auto_tuner: Optional[Any] = None
-        self.central_coordinator: Optional[Any] = None
-        self.world_model: Optional[Any] = None
-        self.pressure_map: Optional[Any] = None
-        self.behavioral_profile: Optional[Any] = None
-        self.cover_system: Optional[Any] = None
-        self.utility_ai: Optional[Any] = None
-        self.sticky_target: Optional[Any] = None
-        self.intent_system: Optional[Any] = None
-        self.enemy_intention: Optional[Any] = None
-        self.meta_awareness: Optional[Any] = None
-        self.lobby_fsm: Optional[Any] = None
-        self.auto_fix: Optional[Any] = None
-        self.screen_auto: Optional[Any] = None
-        self.online_learner: Optional[Any] = None
+        self.state_finder: Any | None = None
+        self.state_manager: Any | None = None
+        self.lobby: Any | None = None
+        self.progress: Any | None = None
+        self.play_logic: Any | None = None
+        self.match_controller: Any | None = None
+        self.movement: Any | None = None
+        self.brawler_selector: Any | None = None
+        self.auto_tuner: Any | None = None
+        self.central_coordinator: Any | None = None
+        self.world_model: Any | None = None
+        self.pressure_map: Any | None = None
+        self.behavioral_profile: Any | None = None
+        self.cover_system: Any | None = None
+        self.utility_ai: Any | None = None
+        self.sticky_target: Any | None = None
+        self.intent_system: Any | None = None
+        self.enemy_intention: Any | None = None
+        self.meta_awareness: Any | None = None
+        self.lobby_fsm: Any | None = None
+        self.auto_fix: Any | None = None
+        self.screen_auto: Any | None = None
+        self.online_learner: Any | None = None
         self._auto_tuning_enabled = bool(
             central_config.get("auto_tuning_enabled", False)
             or __import__("os").getenv("PYLAAI_AUTO_TUNING", "0") == "1"
@@ -70,12 +69,12 @@ class DecisionSubsystem:
 
     def setup(self) -> bool:
         """Initialize all decision and state management components."""
-        from pylaai_real.state_finder import StateFinder
-        from pylaai_real.progress_observer import ProgressObserver
-        from pylaai_real.lobby_automator import LobbyAutomator
-        from match_controller import MatchController
-        from pylaai_real.movement import Movement
         from decision.brawler_selector import BrawlerSelector
+        from match_controller import MatchController
+        from pylaai_real.lobby_automator import LobbyAutomator
+        from pylaai_real.movement import Movement
+        from pylaai_real.progress_observer import ProgressObserver
+        from pylaai_real.state_finder import StateFinder
 
         self.state_finder = StateFinder(self.images_path)
         self.progress = ProgressObserver()
@@ -109,8 +108,8 @@ class DecisionSubsystem:
 
         # Online learner
         try:
-            from pylaai_real.rl_engine import OnlineLearner
             from dataset.collector import GameplayCollector
+            from pylaai_real.rl_engine import OnlineLearner
 
             reward_bridge = getattr(self.wrapper, "reward_bridge", None)
             data_collector = getattr(self.wrapper, "data_collector", None)
@@ -121,7 +120,7 @@ class DecisionSubsystem:
                 from pathlib import Path
                 config_path = Path("config.json")
                 if config_path.exists():
-                    with open(config_path, "r", encoding="utf-8") as f:
+                    with open(config_path, encoding="utf-8") as f:
                         cfg = json.load(f)
                     if cfg.get("rl", {}).get("data_collection_mode", False):
                         gameplay_collector = data_collector if isinstance(data_collector, GameplayCollector) else GameplayCollector()
@@ -285,13 +284,13 @@ class DecisionSubsystem:
             try:
                 self.behavioral_profile.save()
                 logger.info("[CLEANUP] Behavioral profile saved")
-            except (FileNotFoundError, PermissionError, OSError, IOError, RuntimeError, AttributeError) as e:
+            except (FileNotFoundError, PermissionError, OSError, RuntimeError, AttributeError) as e:
                 logger.warning(f"[CLEANUP] Falha ao salvar behavioral_profile: {e}")
         if self.match_controller:
             try:
                 self.match_controller.history.save()
                 logger.info("[CLEANUP] Match history saved")
-            except (FileNotFoundError, PermissionError, OSError, IOError, RuntimeError, AttributeError) as e:
+            except (FileNotFoundError, PermissionError, OSError, RuntimeError, AttributeError) as e:
                 logger.warning(f"[CLEANUP] Falha ao salvar match_history: {e}")
         if self.brawler_selector:
             try:

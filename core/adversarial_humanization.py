@@ -23,10 +23,8 @@ import logging
 import math
 import random
 import time
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
-
-import numpy as np
+from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +65,8 @@ class AdversarialHumanizationConfig:
 
     # 7. Action clustering
     cluster_burst_prob: float = 0.25  # 25% chance to burst
-    cluster_pause_ms: Tuple[float, float] = (400.0, 1200.0)
-    cluster_actions: Tuple[int, int] = (2, 5)
+    cluster_pause_ms: tuple[float, float] = (400.0, 1200.0)
+    cluster_actions: tuple[int, int] = (2, 5)
 
 
 class BiometricRhythm:
@@ -126,7 +124,7 @@ class FingerprintRotator:
 
     def _should_rotate(self) -> bool:
         """Determine if enough time has passed to rotate the fingerprint.
-        
+
         A tiny elapsed interval (e.g., a few milliseconds) after initialization
         should not trigger rotation, even when ``rotation_interval_minutes`` is
         set to ``0``. This guards against rapid successive calls to
@@ -183,7 +181,7 @@ class ActionClusterer:
         self._cluster_remaining = 0
         self._cluster_pause_end = 0.0
 
-    def should_delay(self) -> Optional[float]:
+    def should_delay(self) -> float | None:
         """
         Return recommended delay in ms, or None for normal flow.
         """
@@ -222,12 +220,12 @@ class AdversarialHumanizer:
         humanizer.sleep_reaction_time()   # replaces naive time.sleep()
     """
 
-    def __init__(self, config: Optional[AdversarialHumanizationConfig] = None):
+    def __init__(self, config: AdversarialHumanizationConfig | None = None):
         self.cfg = config or AdversarialHumanizationConfig()
         self.rhythm = BiometricRhythm(self.cfg)
         self.rotator = FingerprintRotator(self.cfg)
         self.clusterer = ActionClusterer(self.cfg)
-        self._stats: Dict[str, int] = {
+        self._stats: dict[str, int] = {
             "actions_processed": 0,
             "taps_jittered": 0,
             "misses_injected": 0,
@@ -287,7 +285,7 @@ class AdversarialHumanizer:
 
         return action
 
-    def sleep_reaction_time(self, base_ms: Optional[float] = None) -> None:
+    def sleep_reaction_time(self, base_ms: float | None = None) -> None:
         """
         Sleep for a human-like reaction time.
         Replaces naive time.sleep() in decision loops.
@@ -309,7 +307,7 @@ class AdversarialHumanizer:
 
         time.sleep(delay_ms / 1000.0)
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         return {
             **self._stats,
             "timing_multiplier": self.rhythm.get_timing_multiplier(),

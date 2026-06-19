@@ -7,7 +7,6 @@ Adapter: SafetySystem + AntiBanSystem -> SafetyPort
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from core.ports.safety_port import SafetyPort, SafetyStatus
 

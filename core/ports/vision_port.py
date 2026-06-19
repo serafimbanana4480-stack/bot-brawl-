@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import abc
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+
 import numpy as np
 
 
@@ -28,11 +29,11 @@ class DetectedObject:
     """Single detected object in game world."""
     class_name: str
     confidence: float
-    bbox: Tuple[float, float, float, float]  # x1, y1, x2, y2 (normalized 0-1)
-    center: Tuple[float, float]
-    track_id: Optional[int] = None
-    velocity: Optional[Tuple[float, float]] = None
-    hp_ratio: Optional[float] = None
+    bbox: tuple[float, float, float, float]  # x1, y1, x2, y2 (normalized 0-1)
+    center: tuple[float, float]
+    track_id: int | None = None
+    velocity: tuple[float, float] | None = None
+    hp_ratio: float | None = None
 
 
 @dataclass
@@ -51,15 +52,15 @@ class HUDState:
 @dataclass
 class GameStateSnapshot:
     """Complete snapshot of the game state at one timestep."""
-    screenshot: Optional[np.ndarray] = None  # Raw image (optional, for debug)
-    detected_objects: List[DetectedObject] = field(default_factory=list)
+    screenshot: np.ndarray | None = None  # Raw image (optional, for debug)
+    detected_objects: list[DetectedObject] = field(default_factory=list)
     hud: HUDState = field(default_factory=HUDState)
     game_phase: str = "unknown"  # lobby, countdown, combat, defeated, victory, etc.
-    player_pos: Tuple[float, float] = (0.5, 0.5)
+    player_pos: tuple[float, float] = (0.5, 0.5)
     timestamp: float = 0.0
     latency_ms: float = 0.0
-    resolution: Tuple[int, int] = (1920, 1080)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    resolution: tuple[int, int] = (1920, 1080)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class VisionPort(abc.ABC):
@@ -71,7 +72,7 @@ class VisionPort(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def capture_and_perceive(self) -> Optional[GameStateSnapshot]:
+    def capture_and_perceive(self) -> GameStateSnapshot | None:
         """
         Capture a frame and return structured game state.
         Returns None on failure (allows orchestrator to handle gracefully).
@@ -79,12 +80,12 @@ class VisionPort(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def get_detected_objects(self, class_filter: Optional[List[str]] = None) -> List[DetectedObject]:
+    def get_detected_objects(self, class_filter: list[str] | None = None) -> list[DetectedObject]:
         """Return last detected objects, optionally filtered by class."""
         ...
 
     @abc.abstractmethod
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         """Return health status: fps, errors, model loaded, etc."""
         ...
 

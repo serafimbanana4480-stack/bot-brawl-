@@ -14,11 +14,12 @@ Cada ação é avaliada por weighted sum de objetivos,
 permitindo trade-offs transparentes e ajustáveis.
 """
 
-import random
 import logging
-from typing import Dict, List, Optional, Callable, Any
+import random
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ class ActionEvaluation:
     action: str
     action_id: int
     total_score: float
-    objective_scores: Dict[str, float] = field(default_factory=dict)
+    objective_scores: dict[str, float] = field(default_factory=dict)
     is_pareto_optimal: bool = False
 
 
@@ -66,8 +67,8 @@ class MultiObjectiveOptimizer:
     """
 
     def __init__(self):
-        self.objectives: List[Objective] = []
-        self._action_history: List[str] = []
+        self.objectives: list[Objective] = []
+        self._action_history: list[str] = []
         self._max_history = 100
 
         # Objetivos padrão
@@ -114,7 +115,7 @@ class MultiObjectiveOptimizer:
     # Value functions (placeholder — integrar com lógica real)
     # ------------------------------------------------------------------
 
-    def _estimate_win_probability(self, action: str, context: Dict[str, Any]) -> float:
+    def _estimate_win_probability(self, action: str, context: dict[str, Any]) -> float:
         """Estima probabilidade de vitória [0,1]."""
         base = 0.5
         if action == "retreat":
@@ -135,7 +136,7 @@ class MultiObjectiveOptimizer:
                 base += 0.15
         return max(0.0, min(1.0, base))
 
-    def _estimate_detection_risk(self, action: str, context: Dict[str, Any]) -> float:
+    def _estimate_detection_risk(self, action: str, context: dict[str, Any]) -> float:
         """
         Estima risco de detecção [0,1].
         Menor = melhor (o peso na weighted sum é invertido).
@@ -155,7 +156,7 @@ class MultiObjectiveOptimizer:
 
         return 0.1  # Padrão normal
 
-    def _estimate_survival(self, action: str, context: Dict[str, Any]) -> float:
+    def _estimate_survival(self, action: str, context: dict[str, Any]) -> float:
         """Estima chance de sobrevivência [0,1]."""
         hp = context.get("player_hp", 1.0)
         enemies = context.get("enemies_nearby", 0)
@@ -175,7 +176,7 @@ class MultiObjectiveOptimizer:
             return 0.4
         return hp
 
-    def _estimate_resource_gain(self, action: str, context: Dict[str, Any]) -> float:
+    def _estimate_resource_gain(self, action: str, context: dict[str, Any]) -> float:
         """Estima ganho de recursos [0,1]."""
         if action == "collect_cube":
             cubes_nearby = context.get("power_cubes_nearby", 0)
@@ -184,7 +185,7 @@ class MultiObjectiveOptimizer:
             return 0.7 if context.get("gems_nearby", 0) > 0 else 0.0
         return 0.1
 
-    def _estimate_ability_efficiency(self, action: str, context: Dict[str, Any]) -> float:
+    def _estimate_ability_efficiency(self, action: str, context: dict[str, Any]) -> float:
         """Estima eficiência de habilidades [0,1]."""
         if action == "use_super":
             # Usar super sem alvos é ruim
@@ -205,8 +206,8 @@ class MultiObjectiveOptimizer:
 
     def select_action(
         self,
-        valid_actions: List[str],
-        context: Dict[str, Any],
+        valid_actions: list[str],
+        context: dict[str, Any],
         epsilon: float = 0.1,
     ) -> ActionEvaluation:
         """
@@ -264,7 +265,7 @@ class MultiObjectiveOptimizer:
         )
         return best
 
-    def _find_pareto_front(self, evaluations: List[ActionEvaluation]) -> List[ActionEvaluation]:
+    def _find_pareto_front(self, evaluations: list[ActionEvaluation]) -> list[ActionEvaluation]:
         """Encontra soluções Pareto-ótimas (nenhum objetivo pode melhorar sem piorar outro)."""
         pareto = []
         for ev in evaluations:
@@ -311,14 +312,14 @@ class MultiObjectiveOptimizer:
         self.objectives.append(objective)
         self._normalize_weights()
 
-    def get_objective_scores(self, action: str, context: Dict[str, Any]) -> Dict[str, float]:
+    def get_objective_scores(self, action: str, context: dict[str, Any]) -> dict[str, float]:
         """Retorna scores individuais por objetivo para uma ação."""
         return {
             obj.name.value: obj.value_fn(action, context)
             for obj in self.objectives
         }
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Status atual do otimizador."""
         return {
             "objectives": [
