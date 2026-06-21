@@ -265,7 +265,7 @@ Este projeto está licenciado sob a **MIT License** — vê [LICENSE](LICENSE) p
 ---
 
 <p align="center">
-  Feito com 🦾 por <a href="https://github.com/serafimbanana4480-stack">Soberana</a>
+ por <a href="https://github.com/serafimbanana4480-stack">Soberana</a>
   &nbsp;·&nbsp;
   <a href="#top">Voltar ao topo</a>
 </p>
