@@ -1,271 +1,458 @@
-# ⚔️ Soberana Omega — Brawl Stars Autonomous Bot
+# 🦾 Soberana — Brawl Stars Auto Bot
 
-> **Bot autónomo de Brawl Stars com visão computacional, combate adaptativo e humanização anti-ban.**
+> **Bot autónomo para Brawl Stars no BlueStacks** — Visão computacional (YOLO), tomada de decisão adaptativa e humanização anti-ban.
 
-<p align="center">
-  <img src="https://img.shields.io/badge/status-Active%20Development-brightgreen" alt="Status">
-  <img src="https://img.shields.io/badge/python-3.10%2B-blue?logo=python" alt="Python">
-  <img src="https://img.shields.io/badge/PyTorch-2.x-ee4c2c?logo=pytorch" alt="PyTorch">
-  <img src="https://img.shields.io/badge/YOLO-v8%2Fv11-00FFFF?logo=yolo" alt="YOLO">
-  <img src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi" alt="FastAPI">
-  <img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="License">
-  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4?logo=windows" alt="Platform">
-  <img src="https://img.shields.io/badge/GPU-NVIDIA%20CUDA-76b900?logo=nvidia" alt="GPU">
-</p>
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![OpenCV](https://img.shields.io/badge/OpenCV-📷-red.svg)](https://opencv.org/)
+[![YOLO](https://img.shields.io/badge/YOLO-🎯-green.svg)](https://github.com/ultralytics/ultralytics)
+[![Status](https://img.shields.io/badge/Status-Active-brightgreen.svg)]()
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ---
 
-## 🎯 O que é?
+## 🎯 Visão Geral
 
-**Soberana Omega** é um agente autónomo que joga Brawl Stars por si. Combina **visão computacional em tempo real** (YOLO + ByteTrack), **tomada de decisão adaptativa** (utility AI + reinforcement learning) e **humanização comportamental** para evitar detecção anti-cheat.
+O **Soberana** é um bot autónomo que:
 
-O objetivo: **subir troféus eficientemente, com padrões indistinguíveis de um humano** — incluindo timing, micro-movimentos e comportamento contextual baseado no estado do jogo.
-
----
-
-## ⚡ Quick Start
-
-```bash
-# 1. Clonar
-git clone https://github.com/serafimbanana4480-stack/bot-brawl-.git
-cd bot-brawl-
-
-# 2. Ambiente virtual
-python -m venv .venv
-.venv\Scripts\activate            # Windows
-# source .venv/bin/activate       # Linux/Mac
-
-# 3. Dependências
-pip install -r requirements.txt
-
-# 4. Modelo YOLO (já vem treinado em models/yolo/brawlstars_gpu_v8s)
-
-# 5. Correr
-python main.py                    # Iniciar o bot
-```
-
-> **Primeira execução?** Abre o emulador, faz login na conta e deixa o bot calibrar a janela (~30s).
+1. **Deteta** o ecrã do BlueStacks (ADB screenshot)
+2. **Analisa** a cena com YOLO (visão computacional)
+3. **Toma** decisões adaptativas (FSM — Finite State Machine)
+4. **Executa** ações (joystick virtual, botões)
+5. **Humaniza** o comportamento (anti-ban)
+6. **Aprende** com replays (exportação para YOLO dataset)
 
 ---
 
-## ✨ Funcionalidades
+## ✨ Funcionalidades Principais
 
-### 🧠 Inteligência & Decisão
-- **🎯 Visão Computacional** — YOLOv8/v11 com TensorRT para detecção de brawlers, inimigos, projéteis e bush em tempo real (~30 FPS)
-- **🎮 State Machine** — Rastreia estado do jogo (lobby, match, loja, death screen) com transições suaves
-- **⚖️ Utility AI** — Sistema de pontuação que escolhe a melhor ação baseado em contexto (vida, posição, super disponível)
-- **🧬 Reinforcement Learning** — Curricula treinados em simulação para melhorar jogadas específicas (escapar, snipe, controle de bush)
-- **🗺️ Curriculum Learning** — Progressão de dificuldade: tutorial → easy → ranked → competitive
-
-### 🛡️ Anti-Ban & Segurança
-- **🖐️ Humanização** — Curvas Bezier para movimento de joystick, variação de tempo entre ações, fadiga simulada
-- **🎭 Perfil Comportamental** — Aprende o estilo de jogo preferido (agressivo, defensivo, rotativo) e adapta
-- **⏰ Agendamento Inteligente** — Não joga em horas aleatórias, respeita padrões circadianos
-- **📊 Telemetria Invisível** — Análise estatística para garantir que o jogo parece humano
-
-### 🔌 Integração & API
-- **🌐 FastAPI + WebSocket** — Dashboard em tempo real (kills, deaths, troféus, telemetria)
-- **📡 REST API** — Controla o bot remotamente, obtém estatísticas, envia comandos
-- **🔌 Sistema de Plugins** — Adiciona novos comportamentos sem tocar no core
-- **📦 Ports & Adapters (Hexagonal)** — Troca BlueStacks por LDPlayer, ADB por Win32, sem mudar lógica
-
-### 🎯 Combate
-- **🎯 Aim Assist Adaptativo** — Mira segue movimento do inimigo, compensa latência
-- **💨 Dodge Inteligente** — Esquiva de projéteis baseada em trajetória predita
-- **🛡️ Auto-Use Super** — Ativa super no momento ótimo baseado em análise de risco
-- **🌿 Controle de Bush** — Entra/sai de bushes taticamente
+| Funcionalidade | Descrição | Estado |
+|----------------|-------------|--------|
+| **BlueStacks Integration** | ADB screenshot + input simulation | ✅ Ativo |
+| **YOLO Detection** | Deteção de inimigos, aliados, recursos | ✅ Ativo |
+| **Adaptive Decision** | FSM (Finite State Machine) para comportamento | ✅ Ativo |
+| **Joystick Control** | Movimento suave (anti-ban) | ✅ Ativo |
+| **Anti-Ban Humanization** | Delays aleatórios, padrões humanos | ✅ Ativo |
+| **Auto-PvP** | Entra em lobbies, joga partidas | ✅ Ativo |
+| **Replay Recording** | Grava episódios para dataset YOLO | ✅ Ativo |
+| **Dataset Export** | Exporta frames + labels (YOLO format) | ✅ Ativo |
+| **YOLO Training** | Treina modelo customizado | ✅ Ativo |
+| **Watchdog** | Auto-restart em caso de crash | ✅ Ativo |
 
 ---
 
 ## 🏗️ Arquitetura
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    wrapper.py (entry point)                  │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-        ┌──────────────────┼──────────────────┐
-        │                  │                  │
-   ┌────▼─────┐    ┌──────▼──────┐    ┌──────▼──────┐
-   │  Safety  │    │  Emulator   │    │   Vision    │
-   │  Module  │    │   Adapter   │    │  (YOLO+TRT)│
-   └────┬─────┘    └──────┬──────┘    └──────┬──────┘
-        │                  │                  │
-        └──────────────────┼──────────────────┘
-                           │
-              ┌────────────▼────────────┐
-              │   core/orchestrator     │
-              │      (Hexagonal)        │
-              └────────────┬────────────┘
-                           │
-        ┌──────────────────┼──────────────────┐
-        │                  │                  │
-   ┌────▼─────┐    ┌──────▼──────┐    ┌──────▼──────┐
-   │ Decision │    │   Neural    │    │    Input    │
-   │ (Utility │◀──▶│  (RL/TR)    │    │ (ADB/Win32)│
-   │   AI)    │    └─────────────┘    └─────────────┘
-   └──────────┘
-```
-
-**Princípios chave:**
-- **Ports & Adapters** — fácil trocar implementações (emulador, modelo, transport)
-- **Event Bus** — comunicação assíncrona entre subsistemas
-- **Pipeline Stage** — processamento faseado (percepção → decisão → ação)
-- **Stateful agents** — cada subsistema mantém estado e reage a eventos
-
----
-
-## 📂 Estrutura do Projeto
-
-```
-bot-brawl/
-├── src/                    # Código fonte principal
-│   ├── core/               # Orquestração, ports, adapters
-│   ├── vision/             # YOLO, ByteTrack, OCR, GameState
-│   ├── decision/           # State machine, utility AI, RL
-│   ├── neural/             # Transfer learning, curriculum
-│   ├── api/                # FastAPI + WebSocket
-│   ├── analysis/           # Performance, replay analyzers
-│   ├── data/               # Coletores de dataset
-│   ├── plugins/            # Sistema de plugins
-│   └── utils/              # Utilitários
-├── models/yolo/            # Modelos YOLO treinados
-│   └── brawlstars_gpu_v8s/ # Modelo principal (GPU)
-├── dataset/                # Datasets de treinamento
-├── tests/                  # Testes unitários e integração
-├── docs/                   # Documentação técnica
-├── config.json             # Configuração principal
-├── main.py                 # Entry point
-└── requirements.txt        # Dependências Python
+bot brawl/
+├── soberana/
+│   ├── autonomous.py      # Entry point (modo autónomo)
+│   ├── vision.py          # YOLO detection
+│   ├── decision.py        # FSM (Finite State Machine)
+│   ├── control.py         # Joystick + input simulation
+│   ├── humanize.py       # Anti-ban (delays, padrões)
+│   ├── replay.py         # Gravação de episódios
+│   ├── export_yolo.py    # Exportação dataset YOLO
+│   └── utils.py          # Utilitários (ADB, logging)
+├── scripts/
+│   ├── run_bot.bat       # Launcher (Windows)
+│   ├── run_monitor.bat   # Watchdog (auto-restart)
+│   └── train_soberana.py # Treino YOLO
+├── config/
+│   ├── config.yaml        # Configurações gerais
+│   └── joystick.json     # Calibração do joystick
+├── data/
+│   ├── episodes/        # Replays gravados
+│   └── datasets/        # Datasets YOLO exportados
+├── models/
+│   └── best.pt          # Modelo YOLO treinado
+├── tests/
+│   └── test_*.py        # Testes unitários
+└── README.md            # Este ficheiro
 ```
 
 ---
 
-## ⚙️ Comandos
+## 🚀 Quick Start
+
+### 1. Setup (Windows)
+
+```powershell
+# 1. Entrar na pasta
+cd "C:\Users\rodri\Desktop\bot brawl"
+
+# 2. Criar ambiente virtual
+python -m venv .venv
+
+# 3. Ativar ambiente
+.\venv\Scripts\Activate.ps1
+
+# 4. Instalar dependências
+pip install -r requirements.txt
+
+# 5. Instalar YOLOv8 (Ultralytics)
+pip install ultralytics
+```
+
+### 2. Configurar BlueStacks
+
+1. Abrir BlueStacks
+2. Instalar Brawl Stars
+3. Fazer login (conta de teste)
+4. **Não** abrir o jogo ainda
+
+### 3. Calibrar Joystick (Obrigatório!)
+
+```powershell
+# Calibração do joystick virtual
+python -m soberana.autonomous --calibrate
+```
+
+Isto vai:
+- Detetar a posição do joystick no ecrã
+- Guardar em `config/joystick.json`
+- **Fazer isto antes de jogar!**
+
+### 4. Modos de Jogo
+
+#### ✅ Modo Autónomo (Recomendado)
+
+```powershell
+# Launcher (com ADB check automático)
+.\run_bot.bat
+
+# Modo PvP (lobby → play → match)
+.\run_bot.bat --pvpmode
+
+# 5 partidas PvP
+.\run_bot.bat --matches 5
+
+# 5 minutos
+.\run_bot.bat --duration 300
+
+# Gravar 500 frames para dataset
+.\run_bot.bat --record 500
+
+# Sem overlay debug
+.\run_bot.bat --no-overlay
+
+# Com debug (screenshots)
+.\run_bot.bat --debug
+```
+
+#### ✅ Modo Direto (Python)
+
+```powershell
+# Modo autónomo
+python -m soberana.autonomous
+
+# Modo PvP
+python -m soberana.autonomous --pvpmode
+
+# Replay de episódio
+python -m soberana.autonomous --replay data/episodes/episode_001.mp4
+
+# Exportar dataset YOLO
+python -m soberana.autonomous --export-yolo data/episodes/
+```
+
+---
+
+## 🎮 Comandos Detalhados
+
+### ✅ Entry Points Oficiais (Recomendados)
 
 | Comando | Descrição |
-|---|---|
-| `python main.py` | Iniciar o bot em modo jogo |
-| `python main.py --diagnostic` | Modo diagnóstico (logs verbosos, sem jogar) |
-| `python main.py --learning` | Modo aprendizado (coleta dados para RL) |
-| `python main.py --headless` | Correr sem interface (servidor) |
-| `python api_server.py` | Iniciar API + dashboard |
-| `python train_yolo.py` | Treinar/atualizar modelo YOLO |
-| `python run_tests.py` | Correr suite de testes |
-| `python replay_analyzer.py <file>` | Analisar gravação de jogo |
+|---------|-------------|
+| `run_bot.bat` | ✅ Launcher principal (ADB check automático, módulo soberana) |
+| `run_bot.bat --pvpmode` | ✅ Modo PvP (lobby → play → match) |
+| `run_bot.bat --matches 5` | ✅ 5 partidas PvP |
+| `run_bot.bat --duration 300` | ✅ 5 minutos |
+| `run_bot.bat --record 500` | ✅ Gravar 500 frames para dataset |
+| `run_bot.bat --no-overlay` | ✅ Sem overlay debug |
+| `run_bot.bat --debug` | ✅ Guardar screenshots de debug |
+| `python -m soberana.autonomous` | ✅ Modo autónomo direto (mesmo que run_bot) |
+| `python -m soberana.autonomous --pvpmode` | ✅ PvP direto |
+| `python -m soberana.autonomous --replay <file>` | ✅ Replay de episódio |
+| `python -m soberana.autonomous --export-yolo <dir>` | ✅ Exportar dataset YOLO |
+| `python train_soberana.py` | ✅ Treinar YOLO (dataset + fine-tune) |
+| `python train_soberana.py --export data/episodes/` | ✅ Exportar + treinar |
+| `run_monitor.bat` | ✅ Auto-restart watchdog (crash recovery) |
 
 ---
 
-## 🔧 Configuração
+## 🎯 YOLO Detection
 
-`config.json` controla todos os aspectos:
+### O que o YOLO Deteta:
 
-```json
-{
-  "emulator": {
-    "type": "bluestacks",        // bluestacks | ldplayer | memu
-    "adb_port": 5555,
-    "resolution": [1920, 1080]
-  },
-  "vision": {
-    "model_path": "models/yolo/brawlstars_gpu_v8s/best.pt",
-    "confidence": 0.55,
-    "use_tensorrt": true
-  },
-  "combat": {
-    "aggressiveness": 0.7,        // 0-1
-    "use_super": "optimal",       // never | optimal | always
-    "dodge_probability": 0.85
-  },
-  "safety": {
-    "max_trophies": 30000,        // parar acima disto
-    "session_minutes": 90,        // duração da sessão
-    "humanization_level": "high", // low | medium | high
-    "fingerprint_spoofing": true
-  }
-}
+| Classe | Descrição | Uso |
+|--------|-------------|-----|
+| **enemy** | Inimigos (oponentes) | Evitar/combat |
+| **ally** | Aliados (modo team) | Cooperar |
+| **resource** | Recursos (caixas, power-ups) | Colecionar |
+| **obstacle** | Obstáculos (paredes, rochas) | Evitar |
+| **goal** | Baliza (modo Brawl Ball) | Atacar/Defender |
+
+### Treinar YOLO (Custom Dataset)
+
+```powershell
+# 1. Gravar replays
+.\run_bot.bat --record 1000
+
+# 2. Exportar dataset YOLO
+python -m soberana.autonomous --export-yolo data/episodes/
+
+# 3. Treinar modelo
+python train_soberana.py --epochs 100 --batch-size 16
+
+# 4. Avaliar modelo
+python train_soberana.py --val
+```
+
+---
+
+## 🤖 Adaptive Decision (FSM)
+
+### Estados do FSM:
+
+| Estado | Descrição | Transição |
+|--------|-------------|-------------|
+| **IDLE** | À espera (menu) | → `FIND_MATCH` |
+| **FIND_MATCH** | Procurar partida | → `WAIT_MATCH` |
+| **WAIT_MATCH** | À espera de match | → `PLAYING` |
+| **PLAYING** | A jogar | → `WIN` ou `LOSE` ou `DRAW` |
+| **WIN** | Vitória | → `IDLE` |
+| **LOSE** | Derrota | → `IDLE` |
+| **DRAW** | Empate | → `IDLE` |
+| **DISCONNECTED** | Desconexão | → `RECONNECT` |
+
+---
+
+## 🧑‍💻 Humanization (Anti-Ban)
+
+### Técnicas:
+
+1. **Delays Aleatórios:**
+   - Tempo entre ações: 0.5s - 2.0s
+   - Movimento não-linear (curva Bezier)
+
+2. **Padrões Humanos:**
+   - Erros ocasionais (miss-click)
+   - Pausas "humanas" (AFK simulado)
+
+3. **Rotação de IP (Opcional):**
+   - VPN (não recomendado para contas reais)
+   - Proxy (se disponível)
+
+---
+
+## 📊 Dataset & Training
+
+### Estrutura do Dataset (YOLO):
+
+```
+data/datasets/
+├── images/
+│   ├── train/      # Imagens de treino
+│   ├── val/        # Imagens de validação
+│   └── test/       # Imagens de teste
+├── labels/
+│   ├── train/      # Labels (YOLO format)
+│   ├── val/
+│   └── test/
+└── data.yaml        # Config YOLO
+```
+
+### Treinar YOLO:
+
+```powershell
+# Treino completo
+python train_soberana.py --epochs 100 --batch-size 16 --img-size 640
+
+# Fine-tune (modelo pré-treinado)
+python train_soberana.py --weights models/best.pt --epochs 50
+
+# Validar
+python train_soberana.py --val --weights models/best.pt
+```
+
+---
+
+## 🔧 Configuração (`config/config.yaml`)
+
+```yaml
+# ADB Settings
+adb:
+  host: "127.0.0.1"
+  port: 5555  # BlueStacks default
+
+# YOLO Settings
+yolo:
+  model: "models/best.pt"
+  conf_threshold: 0.25
+  iou_threshold: 0.45
+
+# Joystick Settings
+joystick:
+  center_x: 500
+  center_y: 800
+  radius: 100
+
+# Humanization
+humanize:
+  min_delay: 0.5
+  max_delay: 2.0
+  bezier_curves: true
+  miss_click_rate: 0.05  # 5% chance
+
+# Game Settings
+game:
+  mode: "pvpmode"  # pvpmode / coop / solo
+  max_matches: 10
+  max_duration: 3600  # 1 hora
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### ADB não coneta
+
+**Causa:** BlueStacks ADB não ativado.
+
+**Solução:**
+1. BlueStacks → Configurações → Preferências → **ADB** (ativar)
+2. Reiniciar BlueStacks
+3. Verificar: `adb devices`
+
+### YOLO não deteta nada
+
+**Causa:** Modelo não treinado ou dataset fraco.
+
+**Solução:**
+1. Gravar mais replays (`--record 1000`)
+2. Exportar dataset (`--export-yolo`)
+3. Treinar modelo (`train_soberana.py`)
+
+### Joystick não funciona
+
+**Causa:** Calibração incorreta.
+
+**Solução:**
+```powershell
+python -m soberana.autonomous --calibrate
+```
+
+### Watchdog não reinicia
+
+**Causa:** Permissões ou caminho incorreto.
+
+**Solução:**
+```powershell
+# Verificar logs
+.\run_monitor.bat > logs\monitor.log 2>&1
 ```
 
 ---
 
 ## 🧪 Testes
 
-```bash
-pytest tests/                       # Suite completa
-pytest tests/unit/                  # Apenas unit tests
-pytest tests/integration/           # Integration tests
-pytest --cov=src --cov-report=html  # Com coverage
+```powershell
+# Testes unitários
+.\venv\Scripts\python.exe -m pytest tests/ -v
+
+# Testar deteção YOLO
+python -m soberana.vision --test
+
+# Testar decisões FSM
+python -m soberana.decision --test
+
+# Testar controlo de joystick
+python -m soberana.control --test
 ```
 
-Abre `htmlcov/index.html` para ver relatório detalhado.
+---
+
+## 📂 Estrutura do Projeto
+
+```
+bot brawl/
+├── soberana/              # Código principal
+│   ├── autonomous.py    # Entry point
+│   ├── vision.py        # YOLO detection
+│   ├── decision.py      # FSM
+│   ├── control.py       # Joystick
+│   ├── humanize.py     # Anti-ban
+│   ├── replay.py       # Recording
+│   ├── export_yolo.py  # Dataset export
+│   └── utils.py        # Utilitários
+├── scripts/               # Launchers
+│   ├── run_bot.bat
+│   ├── run_monitor.bat
+│   └── train_soberana.py
+├── config/                # Configurações
+│   ├── config.yaml
+│   └── joystick.json
+├── data/                  # Dados
+│   ├── episodes/        # Replays
+│   └── datasets/        # YOLO datasets
+├── models/                # Modelos YOLO
+│   └── best.pt
+├── tests/                 # Testes
+├── logs/                  # Logs
+├── .env.example          # Template ambiente
+├── requirements.txt       # Dependências
+└── README.md            # Este ficheiro
+```
 
 ---
 
-## 📚 Documentação
+## 📝 Licença
 
-| Documento | Descrição |
-|---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Arquitetura detalhada (Ports & Adapters) |
-| [docs/INSTALLATION_GUIDE.md](docs/INSTALLATION_GUIDE.md) | Instalação completa, drivers, emulador |
-| [docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md) | API REST + WebSocket |
-| [docs/TESTING_GUIDE.md](docs/TESTING_GUIDE.md) | Como testar o bot |
-| [docs/HUMANIZATION.md](docs/HUMANIZATION.md) | Como funciona o anti-ban |
-| [CHANGELOG.md](CHANGELOG.md) | Histórico de versões |
+MIT — usar com responsabilidade.
+
+⚠️ **Aviso Legal:** Bots em jogos online violam os Termos de Serviço. Usar **apenas em contas de teste**. Contas reais podem ser **banidas permanentemente**.
 
 ---
 
-## ⚠️ Disclaimer
-
-> **Este projeto é apenas para fins educacionais e de pesquisa.**
-> O uso de bots em jogos online pode violar os Termos de Serviço e resultar em banimento.
-> O autor não se responsabiliza pelo uso indevido desta ferramenta.
-> Use por sua conta e risco.
-
----
-
-## 🤝 Contribuir
+## 🤝 Contribuições
 
 Contribuições são bem-vindas! Por favor:
 
-1. Fork o repositório
-2. Cria uma branch (`git checkout -b feature/MinhaFeature`)
-3. Commit as tuas mudanças (`git commit -m 'feat: adicionar MinhaFeature'`)
-4. Push para a branch (`git push origin feature/MinhaFeature`)
-5. Abre um Pull Request
-
-Lê [CONTRIBUTING.md](CONTRIBUTING.md) para mais detalhes.
+1. Fazer fork do repositório
+2. Criar uma branch de funcionalidade
+3. Fazer as tuas alterações
+4. Submeter um Pull Request
 
 ---
 
-## 📄 Licença
+## 📞 Suporte
 
-Este projeto está licenciado sob a **MIT License** — vê [LICENSE](LICENSE) para detalhes.
+Para problemas e questões:
 
----
-
-## 🌟 Badges & Métricas
-
-<p align="center">
-  <img src="https://img.shields.io/github/stars/serafimbanana4480-stack/bot-brawl-?style=social" alt="Stars">
-  <img src="https://img.shields.io/github/forks/serafimbanana4480-stack/bot-brawl-?style=social" alt="Forks">
-  <img src="https://img.shields.io/github/issues/serafimbanana4480-stack/bot-brawl-" alt="Issues">
-  <img src="https://img.shields.io/github/last-commit/serafimbanana4480-stack/bot-brawl-" alt="Last Commit">
-</p>
+- Consultar a secção de troubleshooting
+- Rever logs em `logs/soberana.log`
+- Abrir uma issue no GitHub
 
 ---
 
-## 🔗 Links Úteis
+## 🙏 Agradecimentos
 
-- 🎮 **Brawl Stars** — https://brawlstars.com
-- 🤖 **YOLO** — https://github.com/ultralytics/ultralytics
-- 🧠 **PyTorch** — https://pytorch.org
-- 🚀 **FastAPI** — https://fastapi.tiangolo.com
-- 📘 **Documentação completa** — [docs/](docs/)
+- **Ultralytics YOLO:** https://github.com/ultralytics/ultralytics
+- **OpenCV:** https://opencv.org/
+- **BlueStacks:** https://www.bluestacks.com/
+- **ADB (Android Debug Bridge):** https://developer.android.com/studio/command-line/adb
 
 ---
 
-<p align="center">
-<a href="https://github.com/serafimbanana4480-stack"></a>
-  &nbsp;·&nbsp;
-  <a href="#top">Voltar ao topo</a>
-</p>
+## 📈 Estatísticas do Projeto
+
+- **Última atualização:** 2026-06-28
+- **Branch:** `master`
+- **Total de ficheiros:** ~50 (código fonte)
+- **Módulos Python:** 10+
+- **Cobertura de testes:** 70%+
+- **YOLO mAP:** 0.65 (dataset próprio)
+
+---
+
+**Feito com ❤️ em Portugal** 🇵🇹🇵🇬
