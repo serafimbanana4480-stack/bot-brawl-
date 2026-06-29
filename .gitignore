@@ -66,3 +66,23 @@ type_check_report.txt
 # Performance reports
 performance_report.txt
 doc_check_report.txt
+
+# Ficheiros temporários e caches
+_*.txt
+_*.log
+_*.bat
+_*.ps1
+_*.sh
+.mypy_cache/
+.nexus/
+.planning/
+.pytest_cache/
+.rff_cache/
+.venv/
+__pycache__/
+data/
+dataset/
+models/
+*.json
+*.pkl
+*.md
