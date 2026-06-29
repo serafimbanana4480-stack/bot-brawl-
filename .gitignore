@@ -86,3 +86,12 @@ models/
 *.json
 *.pkl
 *.md
+
+# Dados pesados (não versionar)
+data/
+dataset/
+models/
+*.json
+*.pkl
+*.log
+
