@@ -95,3 +95,18 @@ models/
 *.pkl
 *.log
 
+
+# Ficheiros de debug/eventos
+core/events/
+*.bin
+*.jsonl
+# Python
+__pycache__/
+*.pyc
+# Dados
+data/
+dataset/
+models/
+*.json
+*.pkl
+
